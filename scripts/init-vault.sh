@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# init-vault.sh — create the CERIC vault folder structure.
+# Run once before `docker compose up`.
+#
+# Usage:
+#   VAULT_HOST_PATH=/data/grb-vault bash scripts/init-vault.sh
+#
+# Or just run it — it defaults to ./vault relative to repo root.
+
+set -euo pipefail
+
+VAULT="${VAULT_HOST_PATH:-$(pwd)/vault}"
+
+echo "→ Initialising vault at: $VAULT"
+
+mkdir -p \
+  "$VAULT/00-Inbox" \
+  "$VAULT/10-Papers" \
+  "$VAULT/20-Concepts" \
+  "$VAULT/30-Questions" \
+  "$VAULT/40-MOC" \
+  "$VAULT/50-Syntheses" \
+  "$VAULT/60-Meta"
+
+# Write a README so Syncthing picks up the folder immediately
+cat > "$VAULT/README.md" << 'EOF'
+# GRB Reading Vault
+
+Managed by the CERIC Reading System.
+Do **not** hand-edit frontmatter in `10-Papers/` — use the CERIC Editor.
+
+| Folder | Purpose |
+|--------|---------|
+| `00-Inbox` | Daily Brief files written by arxiv-daily cron |
+| `10-Papers` | One `.md` per paper (leaves) |
+| `20-Concepts` | Concept hub notes |
+| `30-Questions` | Open frontier questions |
+| `40-MOC` | Maps of content / index notes |
+| `50-Syntheses` | Weekly and topic syntheses |
+| `60-Meta` | Templates, config, system notes |
+EOF
+
+# Drop a concept note template into 60-Meta
+cat > "$VAULT/60-Meta/concept-note-template.md" << 'EOF'
+---
+name: ""
+aliases: []
+tags: [concept]
+related_papers: []
+related_concepts: []
+created: ""
+updated: ""
+---
+
+# {{name}}
+
+## Definition
+<!-- One-paragraph definition in your own words. -->
+
+## Key Papers
+<!-- [[citekey]] links to papers that establish or use this concept. -->
+
+## My Current Understanding
+<!-- What do you actually believe about this? Confidence level? -->
+
+## Open Questions
+<!-- What don't you understand yet? What would falsify this? -->
+
+## Connections
+<!-- Links to related concepts: [[concept-name]] -->
+EOF
+
+# Drop a question note template
+cat > "$VAULT/60-Meta/question-note-template.md" << 'EOF'
+---
+question: ""
+status: open
+priority: high
+related_papers: []
+related_concepts: []
+created: ""
+---
+
+# {{question}}
+
+## Why This Matters
+<!-- Scientific motivation. -->
+
+## What We Know So Far
+<!-- Brief summary of current understanding, with [[citekey]] links. -->
+
+## Candidate Answers
+<!-- Hypotheses you're currently entertaining. -->
+
+## What Would Resolve This
+<!-- Observation, simulation, or derivation that would close the question. -->
+EOF
+
+echo "✓ Vault structure ready."
+echo ""
+echo "Next steps:"
+echo "  1. Copy .env.example → .env and fill in your API keys"
+echo "  2. Set VAULT_HOST_PATH in .env to: $VAULT"
+echo "  3. docker compose up -d"
+echo "  4. Pull the embedding model (first run only):"
+echo "     docker exec grb-ollama ollama pull nomic-embed-text"

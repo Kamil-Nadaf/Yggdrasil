@@ -1,0 +1,232 @@
+/* ── Design tokens ────────────────────────────────────────────────────────── */
+:root {
+  --bg:       #0D1117;
+  --surface:  #161B27;
+  --border:   #2A3447;
+  --text:     #CDD9E5;
+  --muted:    #6B7280;
+  --accent:   #4FC3F7;
+  --ok:       #34D399;
+  --gate:     #F59E0B;
+  --crit:     #F87171;
+
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "Cascadia Code", monospace;
+
+  --radius: 6px;
+  --nav-w: 200px;
+}
+
+/* ── Reset ────────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Layout ───────────────────────────────────────────────────────────────── */
+.app-shell {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app-nav {
+  width: var(--nav-w);
+  flex-shrink: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 16px 0;
+}
+
+.app-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+}
+
+/* ── Nav ──────────────────────────────────────────────────────────────────── */
+.nav-logo {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--accent);
+  padding: 0 16px 16px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+  letter-spacing: 0.04em;
+}
+
+.nav-item {
+  display: block;
+  padding: 8px 16px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 13px;
+  cursor: pointer;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  transition: color 0.15s, background 0.15s;
+}
+
+.nav-item:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+.nav-item.active { color: var(--accent); background: rgba(79,195,247,0.08); }
+
+/* ── Cards ────────────────────────────────────────────────────────────────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+/* ── CERIC slots ──────────────────────────────────────────────────────────── */
+.slot-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.slot-textarea {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  padding: 10px 12px;
+  resize: vertical;
+  min-height: 80px;
+  transition: border-color 0.15s;
+}
+
+.slot-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.slot-textarea.filled { border-color: var(--ok); }
+
+/* ── Gate indicator ──────────────────────────────────────────────────────── */
+.gate-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  margin-bottom: 16px;
+}
+.gate-bar.locked { background: rgba(245,158,11,0.12); color: var(--gate); border: 1px solid rgba(245,158,11,0.3); }
+.gate-bar.open   { background: rgba(52,211,153,0.1);  color: var(--ok);   border: 1px solid rgba(52,211,153,0.3); }
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
+.btn {
+  padding: 7px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.btn:hover { border-color: var(--accent); background: rgba(79,195,247,0.06); }
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.btn-primary:hover { background: #38B2E8; border-color: #38B2E8; }
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-ok { background: rgba(52,211,153,0.12); color: var(--ok); border-color: rgba(52,211,153,0.4); }
+.btn-gate { background: rgba(245,158,11,0.12); color: var(--gate); border-color: rgba(245,158,11,0.4); }
+
+/* ── Verdict chips ────────────────────────────────────────────────────────── */
+.chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+.chip-read   { background: rgba(52,211,153,0.15); color: var(--ok); }
+.chip-skip   { background: rgba(107,114,128,0.2); color: var(--muted); }
+.chip-later  { background: rgba(245,158,11,0.15); color: var(--gate); }
+
+/* ── AI callout ───────────────────────────────────────────────────────────── */
+.ai-callout {
+  background: rgba(245,158,11,0.08);
+  border-left: 3px solid var(--gate);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  padding: 12px 16px;
+  font-size: 13px;
+  line-height: 1.7;
+  margin-top: 16px;
+}
+.ai-callout-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--gate);
+  margin-bottom: 8px;
+  letter-spacing: 0.04em;
+}
+
+/* ── Misc ─────────────────────────────────────────────────────────────────── */
+input, select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  padding: 7px 10px;
+}
+input:focus, select:focus { outline: none; border-color: var(--accent); }
+
+h1, h2, h3 { font-weight: 600; margin: 0 0 12px; }
+h1 { font-size: 18px; }
+h2 { font-size: 15px; color: var(--accent); }
+
+.mono { font-family: var(--font-mono); }
+.muted { color: var(--muted); }
+.ok { color: var(--ok); }
+.warn { color: var(--gate); }
+.crit { color: var(--crit); }
+
+/* ── Graph canvas ─────────────────────────────────────────────────────────── */
+.graph-container {
+  width: 100%;
+  height: calc(100vh - 80px);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}

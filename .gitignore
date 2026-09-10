@@ -1,0 +1,82 @@
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+
+# Vault — never commit research notes
+vault/
+00-Inbox/
+10-Papers/
+20-Concepts/
+30-Questions/
+40-MOC/
+50-Syntheses/
+60-Meta/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.venv/
+venv/
+env/
+dist/
+build/
+*.egg
+*.whl
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node / React / Frontend
+node_modules/
+services/assistant/frontend/dist/
+services/assistant/frontend/.vite/
+services/assistant/frontend/.next/
+*.tsbuildinfo
+
+# Database & volumes
+data/
+lancedb/
+*.db
+*.sqlite
+*.sqlite3
+
+# Docker & containers
+*.log
+.dockerignore
+
+# Editor & IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Local development
+.env.development
+.env.test
+local_config.py

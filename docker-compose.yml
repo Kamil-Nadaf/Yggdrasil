@@ -1,0 +1,90 @@
+version: "3.9"
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: yggdrasil-ollama
+    volumes:
+      - ollama_models:/root/.ollama
+    ports:
+      - "11434:11434"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  arxiv-daily:
+    build:
+      context: ./services/arxiv-daily
+      dockerfile: Dockerfile
+    container_name: yggdrasil-arxiv-daily
+    environment:
+      VAULT_PATH: /vault
+      ARXIV_QUERY: ${ARXIV_QUERY:-cat:astro-ph.HE}
+      KEYWORDS: ${KEYWORDS:-GRB,gamma-ray burst,prompt emission,internal shock,afterglow,magnetar}
+      AUTHOR_WATCH: ${AUTHOR_WATCH:-Zhang,Burgess,Iyyani,Ravasio,Beniamini}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - type: bind
+        source: ${VAULT_HOST_PATH}
+        target: /vault
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+  indexer:
+    build:
+      context: ./services/indexer
+      dockerfile: Dockerfile
+    container_name: yggdrasil-indexer
+    environment:
+      VAULT_PATH: /vault
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      EMBED_MODEL: ${EMBED_MODEL:-nomic-embed-text}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - type: bind
+        source: ${VAULT_HOST_PATH}
+        target: /vault
+        read_only: true
+      - lancedb_data:/data/lancedb
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+  assistant:
+    build:
+      context: ./services/assistant
+      dockerfile: Dockerfile
+    container_name: yggdrasil-assistant
+    ports:
+      - "8000:8000"
+    environment:
+      VAULT_PATH: /vault
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      EMBED_MODEL: ${EMBED_MODEL:-nomic-embed-text}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-5}
+      ZOTERO_USER_ID: ${ZOTERO_USER_ID:-}
+      ZOTERO_API_KEY: ${ZOTERO_API_KEY:-}
+      GATE_CHECK: ${GATE_CHECK:-true}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - type: bind
+        source: ${VAULT_HOST_PATH}
+        target: /vault
+      - lancedb_data:/data/lancedb
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+      indexer:
+        condition: service_started
+
+volumes:
+  ollama_models:
+  lancedb_data:

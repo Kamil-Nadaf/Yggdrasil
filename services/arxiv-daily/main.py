@@ -1,7 +1,7 @@
 """
 arxiv-daily/main.py
 
-Fetches new arXiv submissions from astro-ph.HE, writes:
+Fetches new arXiv submissions from astro-ph.HE and writes:
   - A daily Brief Markdown file:  {VAULT}/00-Inbox/Brief-YYYY-MM-DD.md
   - One paper note per result:    {VAULT}/10-Papers/{citekey}.md
     (skips if note already exists)
@@ -10,10 +10,10 @@ Runs on a schedule defined by CRON_TIME (default: 06:30 in TZ).
 Also runs once at startup.
 """
 
+import logging
 import os
 import re
 import time
-import logging
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -39,17 +39,19 @@ def slugify_citekey(author_last: str, year: int, title: str) -> str:
     return f"{last}{year}{first_word}"
 
 
-def flag_paper(title: str, abstract: str, authors: list[str]) -> bool:
-    """True if paper matches any keyword or watched author."""
+def match_paper(title: str, abstract: str, authors: list[str]) -> tuple[bool, bool]:
+    """Return (keyword_match, author_watch_match)."""
     text = (title + " " + abstract).lower()
-    for kw in KEYWORDS:
-        if kw in text:
-            return True
+    keyword_match = any(kw in text for kw in KEYWORDS)
+
+    author_match = False
     for author in authors:
-        for watched in AUTHOR_WATCH:
-            if watched in author.lower():
-                return True
-    return False
+        author_lower = author.lower()
+        if any(watched in author_lower for watched in AUTHOR_WATCH):
+            author_match = True
+            break
+
+    return keyword_match, author_match
 
 
 def paper_frontmatter(result: arxiv.Result) -> dict:
@@ -86,6 +88,25 @@ def paper_frontmatter(result: arxiv.Result) -> dict:
     }
 
 
+def paper_body() -> str:
+    return """## Claim
+
+## Evidence
+
+## Reasoning
+
+## Implications
+
+## Context
+
+## Adversarial Question
+
+## Confusions
+
+> [!ai]
+> """
+
+
 def write_paper_note(result: arxiv.Result, fm: dict) -> Path:
     """Write a paper note to 10-Papers/. Skips if already exists."""
     notes_dir = VAULT / "10-Papers"
@@ -94,13 +115,79 @@ def write_paper_note(result: arxiv.Result, fm: dict) -> Path:
     if path.exists():
         return path
 
-    # Build initial body — abstract only (user fills CERIC slots)
-    body = f"## Abstract\n\n{result.summary}\n\n## Notes\n\n"
-
-    post = frontmatter.Post(body, **fm)
+    post = frontmatter.Post(paper_body(), **fm)
     path.write_text(frontmatter.dumps(post))
     log.info(f"  Created note: {path.name}")
     return path
+
+
+def write_brief(today_str: str, fresh_results: list[arxiv.Result], keyword_matches: list[dict], author_matches: list[dict]) -> Path:
+    brief_dir = VAULT / "00-Inbox"
+    brief_dir.mkdir(parents=True, exist_ok=True)
+    brief_path = brief_dir / f"Brief-{today_str}.md"
+
+    lines = [
+        f"# arXiv Brief — {today_str}",
+        "",
+    ]
+
+    if not fresh_results:
+        lines.append("No new listings today (weekend or holiday).")
+    else:
+        lines += [
+            f"## Keyword matches",
+            "",
+        ]
+        if keyword_matches:
+            for paper in keyword_matches:
+                authors_str = ", ".join(paper["authors"]) + (" et al." if len(paper["authors"]) >= 3 else "")
+                lines.append(f"### [{paper['arxiv']}] {paper['title']}")
+                lines.append(f"**Authors:** {authors_str}")
+                lines.append(f"**Abstract:** {paper['abstract']}")
+                lines.append(f"**arXiv:** https://arxiv.org/abs/{paper['arxiv']}")
+                lines.append("")
+        else:
+            lines.append("No keyword matches today.")
+            lines.append("")
+
+        lines += [
+            "---",
+            "",
+            "## Author watch matches",
+            "",
+        ]
+        if author_matches:
+            for paper in author_matches:
+                authors_str = ", ".join(paper["authors"]) + (" et al." if len(paper["authors"]) >= 3 else "")
+                lines.append(f"### [{paper['arxiv']}] {paper['title']}")
+                lines.append(f"**Authors:** {authors_str}")
+                lines.append(f"**Abstract:** {paper['abstract']}")
+                lines.append(f"**arXiv:** https://arxiv.org/abs/{paper['arxiv']}")
+                lines.append("")
+        else:
+            lines.append("No author watch matches today.")
+            lines.append("")
+
+        lines += [
+            "---",
+            "",
+            "## All new papers today",
+            "",
+        ]
+        for paper in fresh_results:
+            lines.append(f"- [[{paper['citekey']}]] — {paper['title']}")
+
+    body = "\n".join(lines)
+    brief_post = frontmatter.Post(
+        body,
+        date=today_str,
+        source="arxiv",
+        category="astro-ph.HE",
+        count=len(fresh_results),
+    )
+    brief_path.write_text(frontmatter.dumps(brief_post))
+    log.info(f"  Brief written: {brief_path}")
+    return brief_path
 
 
 def fetch_and_write():
@@ -118,58 +205,41 @@ def fetch_and_write():
     results = list(client.results(search))
     log.info(f"  Fetched {len(results)} results")
 
-    # Filter to last 24h (arXiv can return older papers)
     cutoff = datetime.utcnow() - timedelta(hours=36)
-    fresh = [r for r in results if r.published and r.published.replace(tzinfo=None) >= cutoff]
+    fresh = []
+    for result in results:
+        if result.published is None:
+            continue
+        if result.published.replace(tzinfo=None) >= cutoff:
+            fresh.append(result)
+
     log.info(f"  Fresh (last 36h): {len(fresh)}")
 
-    flagged = []
-    all_papers = []
+    keyword_matches = []
+    author_matches = []
+    fresh_entries = []
 
     for result in fresh:
         authors = [str(a) for a in result.authors]
         fm = paper_frontmatter(result)
-        note_path = write_paper_note(result, fm)
-        is_flagged = flag_paper(result.title, result.summary, authors)
+        write_paper_note(result, fm)
 
+        keyword_match, author_match = match_paper(result.title, result.summary, authors)
         entry = {
             "citekey": fm["citekey"],
             "arxiv": fm["arxiv"],
             "title": result.title.replace("\n", " "),
             "authors": authors[:3],
-            "flagged": is_flagged,
+            "abstract": result.summary.replace("\n", " "),
         }
-        all_papers.append(entry)
-        if is_flagged:
-            flagged.append(entry)
+        fresh_entries.append(entry)
 
-    # Write Brief
-    brief_dir = VAULT / "00-Inbox"
-    brief_dir.mkdir(parents=True, exist_ok=True)
-    brief_path = brief_dir / f"Brief-{today_str}.md"
+        if keyword_match:
+            keyword_matches.append(entry)
+        if author_match:
+            author_matches.append(entry)
 
-    lines = [
-        f"# Daily Brief — {today_str}",
-        f"",
-        f"Query: `{ARXIV_QUERY}` · {len(fresh)} new papers · {len(flagged)} flagged",
-        f"",
-    ]
-
-    if flagged:
-        lines += ["## ⚑ Flagged Papers", ""]
-        for p in flagged:
-            authors_str = ", ".join(p["authors"]) + (" et al." if len(p["authors"]) >= 3 else "")
-            lines.append(f"- [[{p['citekey']}]] — {p['title']}")
-            lines.append(f"  {authors_str} · arXiv:{p['arxiv']}")
-            lines.append("")
-
-    lines += ["## All Papers", ""]
-    for p in all_papers:
-        flag = "⚑ " if p["flagged"] else ""
-        lines.append(f"- {flag}[[{p['citekey']}]] — {p['title']}")
-
-    brief_path.write_text("\n".join(lines))
-    log.info(f"  Brief written: {brief_path}")
+    write_brief(today_str, fresh_entries, keyword_matches, author_matches)
 
 
 def main():

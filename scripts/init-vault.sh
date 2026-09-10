@@ -18,13 +18,13 @@ mkdir -p \
   "$VAULT/10-Papers" \
   "$VAULT/20-Concepts" \
   "$VAULT/30-Questions" \
-  "$VAULT/40-MOC" \
-  "$VAULT/50-Syntheses" \
+  "$VAULT/40-Synthesis" \
+  "$VAULT/50-Projects" \
   "$VAULT/60-Meta"
 
 # Write a README so Syncthing picks up the folder immediately
 cat > "$VAULT/README.md" << 'EOF'
-# GRB Reading Vault
+# Yggdrasil Reading Vault
 
 Managed by the CERIC Reading System.
 Do **not** hand-edit frontmatter in `10-Papers/` — use the CERIC Editor.
@@ -32,12 +32,12 @@ Do **not** hand-edit frontmatter in `10-Papers/` — use the CERIC Editor.
 | Folder | Purpose |
 |--------|---------|
 | `00-Inbox` | Daily Brief files written by arxiv-daily cron |
-| `10-Papers` | One `.md` per paper (leaves) |
-| `20-Concepts` | Concept hub notes |
-| `30-Questions` | Open frontier questions |
-| `40-MOC` | Maps of content / index notes |
-| `50-Syntheses` | Weekly and topic syntheses |
-| `60-Meta` | Templates, config, system notes |
+| `10-Papers` | One `.md` per paper |
+| `20-Concepts` | Concept notes |
+| `30-Questions` | Open questions |
+| `40-Synthesis` | Weekly synthesis notes |
+| `50-Projects` | Project notes |
+| `60-Meta` | Templates, config, and system notes |
 EOF
 
 # Drop a concept note template into 60-Meta

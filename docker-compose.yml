@@ -1,20 +1,4 @@
-version: "3.9"
-
 services:
-  ollama:
-    image: ollama/ollama:latest
-    container_name: yggdrasil-ollama
-    volumes:
-      - ollama_models:/root/.ollama
-    ports:
-      - "11434:11434"
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-
   arxiv-daily:
     build:
       context: ./services/arxiv-daily
@@ -24,16 +8,15 @@ services:
       VAULT_PATH: /vault
       ARXIV_QUERY: ${ARXIV_QUERY:-cat:astro-ph.HE}
       KEYWORDS: ${KEYWORDS:-GRB,gamma-ray burst,prompt emission,internal shock,afterglow,magnetar}
-      AUTHOR_WATCH: ${AUTHOR_WATCH:-Zhang,Burgess,Iyyani,Ravasio,Beniamini}
+      AUTHOR_WATCH: ${AUTHOR_WATCH:-Zhang,Burgess,Iyyani,Ravasio,Beniamini,Pe'er}
+      CRON_TIME: ${CRON_TIME:-06:30}
+      MAX_RESULTS: ${MAX_RESULTS:-40}
       TZ: ${TZ:-Asia/Shanghai}
     volumes:
       - type: bind
         source: ${VAULT_HOST_PATH}
         target: /vault
     restart: unless-stopped
-    depends_on:
-      ollama:
-        condition: service_healthy
 
   indexer:
     build:
@@ -52,9 +35,6 @@ services:
         read_only: true
       - lancedb_data:/data/lancedb
     restart: unless-stopped
-    depends_on:
-      ollama:
-        condition: service_healthy
 
   assistant:
     build:
@@ -79,12 +59,6 @@ services:
         target: /vault
       - lancedb_data:/data/lancedb
     restart: unless-stopped
-    depends_on:
-      ollama:
-        condition: service_healthy
-      indexer:
-        condition: service_started
 
 volumes:
-  ollama_models:
   lancedb_data:

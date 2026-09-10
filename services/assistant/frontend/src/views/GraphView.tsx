@@ -80,7 +80,7 @@ export default function GraphView({ onOpenEditor }: Props) {
         if (d.folder === "10-Papers") onOpenEditor(d.id);
       })
       .call(
-        d3.drag<SVGCircleElement, typeof nodes[0]>()
+        d3.drag<any, any>()
           .on("start", (event, d) => { if (!event.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
           .on("drag", (event, d) => { d.fx = event.x; d.fy = event.y; })
           .on("end", (event, d) => { if (!event.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })

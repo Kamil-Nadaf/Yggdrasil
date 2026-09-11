@@ -153,6 +153,48 @@ def ensure_arxiv_in_zotero(arxiv_id: str) -> Optional[dict]:
         return None
 
 
+def add_paper_to_zotero(arxiv_id: str, title: str, authors: list, pdf_url: str = "") -> Optional[dict]:
+    """
+    Directly create a Zotero preprint item from known arXiv metadata (title/authors
+    already in hand from the arXiv API — no search-first round trip needed).
+    Raises on transport/API errors so the caller can surface a message; returns
+    None only if credentials are missing.
+    """
+    user_id = os.environ.get("ZOTERO_USER_ID", "")
+    api_key = os.environ.get("ZOTERO_API_KEY", "")
+    if not user_id or not api_key:
+        return None
+
+    creators = []
+    for name in authors:
+        parts = name.split(",", 1)
+        if len(parts) == 2:
+            creators.append({"creatorType": "author", "lastName": parts[0].strip(), "firstName": parts[1].strip()})
+        else:
+            creators.append({"creatorType": "author", "name": name.strip()})
+
+    resp = httpx.post(
+        f"{ZOTERO_API}/users/{user_id}/items",
+        headers={"Zotero-API-Key": api_key, "Content-Type": "application/json"},
+        json=[
+            {
+                "itemType": "preprint",
+                "title": title,
+                "creators": creators,
+                "url": pdf_url or f"https://arxiv.org/abs/{arxiv_id}",
+                "archiveID": f"arXiv:{arxiv_id}",
+                "repository": "arXiv",
+            }
+        ],
+        timeout=8.0,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if data.get("failed"):
+        raise RuntimeError(str(data["failed"]))
+    return {"arxiv_id": arxiv_id, "title": title, "zotero_response": data.get("successful", {})}
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _parse_bbt_authors(author_list: list) -> list[str]:

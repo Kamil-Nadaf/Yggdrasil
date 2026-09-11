@@ -52,12 +52,29 @@ services:
       ZOTERO_USER_ID: ${ZOTERO_USER_ID:-}
       ZOTERO_API_KEY: ${ZOTERO_API_KEY:-}
       GATE_CHECK: ${GATE_CHECK:-true}
+      LATEX_URL: ${LATEX_URL:-http://latex:9000}
       TZ: ${TZ:-Asia/Shanghai}
     volumes:
       - type: bind
         source: ${VAULT_HOST_PATH}
         target: /vault
       - lancedb_data:/data/lancedb
+    restart: unless-stopped
+
+  latex:
+    build:
+      context: ./services/latex
+      dockerfile: Dockerfile
+    container_name: yggdrasil-latex
+    environment:
+      VAULT_PATH: /vault
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - type: bind
+        source: ${VAULT_HOST_PATH}
+        target: /vault
+    expose:
+      - "9000"
     restart: unless-stopped
 
 volumes:

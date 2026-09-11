@@ -7,20 +7,67 @@ writing any code.
 
 ---
 
+## ⚠️ Known issue — read this before touching the vault
+
+`.env`'s `VAULT_HOST_PATH` currently points at `/Users/kamil/Projects/Yggdrasil/data`,
+**not** the original `/Users/kamil/Projects/Yggdrasil/vault`. `data/` only contains a
+couple of test files; the real vault — 33+ paper notes in `10-Papers/`, daily Briefs in
+`00-Inbox/`, templates in `60-Meta/` — is still sitting in `vault/`, untouched but
+**orphaned from every running container**. This happened via the Settings drawer's
+"Data Path" field (`services/assistant/frontend/src/components/SettingsDrawer.tsx`),
+which currently defaults to a host path instead of the in-container `/vault` mount.
+
+Before doing any further work: decide whether to point `VAULT_HOST_PATH` back at
+`vault/` (recommended — that's where all real data lives) or deliberately migrate to
+`data/`. Do not silently pick one — confirm with the user first, since either direction
+discards/orphans real content from someone's perspective.
+
+The Settings drawer's Data Path field should probably be constrained or removed —
+right now it lets the UI write an arbitrary host-side path into `.env`-adjacent state
+with no validation that it matches an actual container mount.
+
+---
+
+## ⚠️ Known bug — arXiv old-style IDs fail in search
+
+`ARXIV_ID_RE = re.compile(r"(\d{4}\.\d{4,5})(v\d+)?")` in `services/assistant/main.py`
+(`/api/arxiv/search`) only matches post-2007 arXiv IDs (`YYMM.NNNNN`, e.g.
+`2401.12345`). Pre-2007 IDs use an archive-prefixed format with no dot —
+`physics/0306138`, `hep-th/9901001`, `gr-qc/9805045` — which this regex does not
+match. Effect: the "arXiv ID / URL" search tab (`field=id` in `ArxivBrowser.tsx`)
+and the auto-detect branch in `arxiv_search()` both silently return "No results" for
+any old-style ID, or any URL containing one (e.g.
+`https://arxiv.org/pdf/physics/0306138`).
+
+Fix: extend the regex to also match the old-style `archive[.CAT]/NNNNNNN` format
+(e.g. `r"([a-z-]+(?:\.[A-Z]{2})?/\d{7})|(\d{4}\.\d{4,5})(v\d+)?"`) and make sure
+`arxiv_search()` tries both patterns before falling through to a field-prefixed
+search. Not yet fixed as of this writing.
+
+---
+
 ## What this is
 
-A browser-based reading tool with five views:
+A browser-based reading tool with **eight views**, navigated via a horizontal top bar
+(not a sidebar — see Frontend section):
 
-| View | Purpose |
-|------|---------|
-| **Triage** | Morning arXiv feed — read abstracts, write one Claim line, vote Drop/Queue/Read |
-| **CERIC Editor** | Fill 5 active-reading slots + Adversarial Question for a single paper |
-| **Graph** | D3 force-directed graph of [[wikilink]] connections between notes |
-| **Ask** | Search own notes via `/locate` and `/ask`; optional `/examine` after CERIC complete |
-| **Scores** | Daily/weekly scoring dashboard from frontmatter |
+| View (nav label) | Internal id | Purpose |
+|---|---|---|
+| **Dashboard** | `scores` | Daily/weekly scoring dashboard from frontmatter (default landing view) |
+| **Daily ArXiv** | `search` | 3-panel Overleaf-style workflow: Daily Papers → Shortlisted → My List (reading pane), resizable via `react-resizable-panels` |
+| **Search** | `browse` | Direct arXiv search (keyword / author / title / arXiv ID-URL fields, paginated) without leaving the app; supports the same select-text→CERIC toolbar as Daily ArXiv |
+| **Triage** | `triage` | Morning arXiv feed — read abstracts, write one Claim line, vote Drop/Queue/Read |
+| **CERIC Editor** | `editor` | Fill 5 active-reading slots + Adversarial Question for a single paper; has an internal **Collection** tab listing all papers with filters + progress bars |
+| **Graph** | `graph` | D3 force-directed graph of [[wikilink]] connections between notes |
+| **Ask** | `ask` | Search own notes via `/locate` and `/ask`; optional `/examine` after CERIC complete |
+| **LaTeX** | `latex` | Overleaf-style LaTeX editor: write → live PDF preview → save to vault, 3-pane resizable (file tree / editor / preview) |
 
-The vault is a folder of plain `.md` files synced via Syncthing. All state lives in
-YAML frontmatter of those files. Docker containers mount the vault as a bind mount.
+A gear icon in the top nav opens a **Settings drawer** (theme, editor prefs, data path,
+system info — see Settings section below).
+
+The vault is a folder of plain `.md` (and `.tex`, for LaTeX) files synced via Syncthing.
+All paper state lives in YAML frontmatter of `.md` files. Docker containers mount the
+vault as a bind mount.
 
 ---
 
@@ -35,6 +82,8 @@ yggdrasil/
 ├── scripts/
 │   └── init-vault.sh                ← creates vault folder structure
 ├── vault/                           ← gitignored; bind-mounted into containers
+│                                       (see "Known issue" above — currently NOT
+│                                        the active mount; .env points elsewhere)
 └── services/
     ├── arxiv-daily/                 ← cron: fetches arXiv feed, writes Brief.md
     │   ├── Dockerfile
@@ -44,29 +93,43 @@ yggdrasil/
     │   ├── Dockerfile
     │   ├── main.py
     │   └── requirements.txt
+    ├── latex/                       ← FastAPI + full TeX Live: compile/save/list .tex
+    │   ├── Dockerfile               ← texlive/texlive:latest base, apt-installs python3-pip first
+    │   └── latex_service.py         ← internal-only (port 9000, no host port published)
     └── assistant/                   ← FastAPI: API + Gate + serves React frontend
         ├── Dockerfile               ← multi-stage: builds React then serves via FastAPI
-        ├── main.py                  ← FastAPI app, all routes
-        ├── gate.py                  ← Gate logic (CRITICAL — read carefully)
+        ├── main.py                  ← FastAPI app, all routes (proxies /api/latex/* to `latex`)
+        ├── gate.py                  ← Gate logic (CRITICAL — read carefully, do not modify)
         ├── zotero.py                ← Zotero Web API + Better BibTeX integration
         ├── requirements.txt
         └── frontend/                ← React + Vite + TypeScript
-            ├── package.json
-            ├── vite.config.ts
+            ├── package.json         ← react, d3, codemirror (+ @codemirror/*), react-resizable-panels
+            ├── vite.config.ts       ← dev proxy: /api → http://localhost:8000
             ├── index.html
             └── src/
                 ├── main.tsx
-                ├── App.tsx
-                ├── api/client.ts    ← all fetch calls to FastAPI
+                ├── App.tsx           ← view routing, default view = "scores" (Dashboard)
+                ├── api/client.ts     ← all fetch calls to FastAPI (single `api` object)
                 ├── components/
-                │   ├── Nav.tsx
-                │   └── GateIndicator.tsx
+                │   ├── Nav.tsx           ← horizontal top bar, not a sidebar
+                │   ├── GateIndicator.tsx
+                │   ├── CericToolbar.tsx  ← shared select-text→CERIC-slot logic
+                │   │                        (CERIC_SLOTS, SlotIndicator, useCericAppend
+                │   │                        hook, CericSelectionToolbar) — consumed by
+                │   │                        both ArxivSearch.tsx and ArxivBrowser.tsx;
+                │   │                        any new CERIC-slot UI should reuse this,
+                │   │                        not reimplement it
+                │   └── SettingsDrawer.tsx    ← theme/editor prefs + Data Sync (Git)
+                │                                and Data Sync (Cloud/WebDAV) sections
                 └── views/
+                    ├── ScoresView.tsx     (Dashboard)
+                    ├── ArxivSearch.tsx    (Daily ArXiv — 3-panel)
+                    ├── ArxivBrowser.tsx   (Search)
                     ├── Triage.tsx
-                    ├── CERICEditor.tsx
+                    ├── CERICEditor.tsx    (Editor + Collection tab)
                     ├── GraphView.tsx
                     ├── AskView.tsx
-                    └── ScoresView.tsx
+                    └── LaTeXEditor.tsx
 ```
 
 ---
@@ -80,14 +143,21 @@ this layout. Run `scripts/init-vault.sh` to create it.
 vault/
 ├── 00-Inbox/        ← arxiv-daily writes Brief-YYYY-MM-DD.md here
 ├── 10-Papers/       ← one note per paper: {citekey}.md
+│                       citekey is either a Better BibTeX / Zotero-derived key
+│                       (e.g. "zhang2011internal"), OR — for papers captured
+│                       straight from arXiv Search before any Zotero lookup —
+│                       the bare arXiv id (e.g. "2609.10384v1.md"). Both are
+│                       valid citekeys; Gate/Scores/Graph don't care about format.
 ├── 20-Concepts/     ← concept notes: {slug}.md
 ├── 30-Questions/    ← open question notes
 ├── 40-Synthesis/    ← weekly synthesis notes
 ├── 50-Projects/     ← project notes (AstroSentinel, thesis-ch1, etc.)
-└── 60-Meta/
-    ├── Dashboard.md
-    ├── Ledger.md
-    └── Confusions.md
+├── 60-Meta/
+│   ├── Dashboard.md
+│   ├── Ledger.md
+│   └── Confusions.md
+└── 70-LaTeX/        ← .tex documents written in the LaTeX Editor view
+    └── _template.tex   ← starter template, excluded from the file list UI
 ```
 
 ---
@@ -98,7 +168,7 @@ Every file in `10-Papers/` must have this frontmatter exactly. The Gate reads it
 
 ```yaml
 ---
-citekey: zhang2011internal          # Better BibTeX key — also the filename (no .md)
+citekey: zhang2011internal          # Better BibTeX key, OR bare arXiv id — also the filename (no .md)
 arxiv: "1009.3338"                  # arXiv ID (string, no version suffix)
 title: "Internal shocks in GRBs"
 authors: ["Zhang, B.", "Pe'er, A."]
@@ -107,7 +177,7 @@ journal: "ApJ"
 doi: "10.1088/0004-637X/726/2/90"
 
 read: "2026-09-09"                  # ISO date string
-tier: 1                             # 0=triage only, 1=skeleton, 2=deep
+tier: 0                             # 0=triage only, 1=skeleton, 2=deep
 confidence: 0                       # 1–5: 1=can't paraphrase, 3=explain in meeting, 5=reproduce
 rating: 0                           # 1–5: worth returning to
 
@@ -160,6 +230,10 @@ Note body format (after frontmatter):
 > <!-- AI output only goes in this callout — never outside it -->
 ```
 
+Notes created via the "append a slot" flow (see below) get a full frontmatter skeleton
+written by `_ensure_paper_skeleton()` in `main.py` the first time text is appended —
+same schema as above, empty body, `python-frontmatter` writes it (never hand-rolled YAML).
+
 ---
 
 ## The Gate — CRITICAL, do not soften
@@ -173,7 +247,9 @@ This is not a UI warning. It is a hard server rejection. Do not add a bypass fla
 the frontend. Do not add a "skip gate" button. The gate exists to prevent the user from
 using AI as a summarizer before doing the active reading themselves.
 
-`gate.py` implementation is already written — do not change its logic.
+`gate.py` implementation is already written — do not change its logic. It has not been
+touched since the original build; every feature added since (LaTeX, arXiv Search,
+CERIC append-slot, Settings) was built around it, never through it.
 
 The frontend `GateIndicator` component shows which slots are filled (green dot) or
 empty (grey dot) as the user types. It is informational only; the enforcement is in the server.
@@ -193,93 +269,218 @@ GET  /api/brief/today
   Reads today's Brief-YYYY-MM-DD.md from 00-Inbox/
 
 GET  /api/papers
-  → [{citekey, title, tier, confidence, read, verdict}]
+  → [{citekey, frontmatter}]
   Lists all .md files in 10-Papers/
 
 GET  /api/papers/{citekey}
-  → full note object: frontmatter dict + body string
+  → { citekey, frontmatter, body, gate: {passed, missing, aq_missing?} }
 
 PUT  /api/papers/{citekey}
-  body: { frontmatter: {...}, body: string }
-  → { ok: true }
+  body: { frontmatter: {...}, body?: string }
+  → { ok: true, citekey }
   Writes frontmatter + body back to vault. Creates file if not exists.
 
 POST /api/papers/{citekey}/triage
-  body: { claim: string, verdict: "drop"|"queue"|"read" }
-  → { ok: true, citekey: string }
-  Saves claim + verdict to frontmatter. If verdict=="read", creates note skeleton
-  by fetching Zotero metadata (see Zotero section).
+  body: { verdict: "read"|"skip"|"later", claim?: string }
+  → { ok: true }
+
+POST /api/papers/{citekey}/append-slot
+  body: { slot: "claim"|"evidence"|"reasoning"|"implications"|"context", text: string,
+          title?, authors?, arxiv?, year? }
+  → { ok, citekey, slot, value }
+  Creates a skeleton note if this citekey has none yet (used when a paper reaches
+  CERIC via arXiv Search, before any Zotero lookup — citekey = bare arXiv id in that
+  case). NEVER overwrites existing slot content — always appends with a newline
+  separator. Always writes via python-frontmatter. This is the backend for the
+  "select text in arXiv Search's My List → push into a CERIC slot" toolbar.
+
+GET  /api/papers/{citekey}/raw
+  → { raw: string }
+  Read-only raw .md text (frontmatter + body), serialized by python-frontmatter's own
+  dumper. Used by the CERIC Collection tab's "Copy MD" button.
 ```
 
 ### AI endpoints
 
 ```
 POST /api/locate
-  body: { query: string, citekey?: string }
-  → { results: [{text, note_path, score}] }
-  Embeds query via Ollama → ANN search in LanceDB → returns top 5 chunks with source
+  body: { query: string, limit?: int }
+  → { results: [{citekey, chunk}] }
+  Embeds query via Ollama → ANN search in LanceDB → returns top chunks with source
 
 POST /api/ask
-  body: { question: string, citekey?: string }
-  → { answer: string, sources: [{note_path, excerpt}] }
-  Same as locate but calls Ollama for a short generated answer over retrieved context.
+  body: { question: string, limit?: int }
+  → { answer: string, sources: [{citekey, excerpt}] }
+  Same retrieval as locate, then calls Ollama for a short generated answer.
   Uses only vault content — never model knowledge about specific papers.
 
 POST /api/examine
-  body: { citekey: string, question: string }
-  → { response: string }
+  body: { citekey: string }
+  → { ok: true, response: string }
   GATE PROTECTED: returns 423 if gate.is_complete(citekey) is False.
   Calls Anthropic API (claude-sonnet-4-5 or env var ANTHROPIC_MODEL).
-  System prompt: "You are a rigorous PhD examiner. Quiz the student on their own
-  note. Do not summarize. Do not add information not in the note. Ask follow-up
-  questions. The note content follows."
-  Appends note content to system prompt; student's question is user turn.
+  Appends AI output as a `> [!ai]` callout in the note body — never into CERIC slots.
 ```
 
 ### Graph
 
 ```
 GET /api/graph
-  → { nodes: [{id, label, type, tier}], edges: [{source, target}] }
-  Parses all .md files in 10-Papers/ and 20-Concepts/ for [[wikilinks]].
-  type is "paper" | "concept" | "question"
+  → { nodes: [{id, label, folder, path}], edges: [{source, target}] }
+  Parses all .md files under the vault for [[wikilinks]].
 ```
 
 ### Zotero
 
 ```
 GET /api/zotero/search?q={query}
-  → { found: bool, metadata: {citekey, title, authors, year, journal, arxiv, doi} }
+  → metadata dict, or 404 if not found
   Tries Better BibTeX local API first (http://localhost:23119/better-bibtex/json-rpc).
-  Falls back to Zotero Web API (https://api.zotero.org/users/{ZOTERO_USER_ID}/items).
-  Returns empty metadata if not found.
+  Falls back to Zotero Web API. 404 if not found in either.
 
 POST /api/zotero/ensure/{arxiv_id}
-  → { citekey, metadata }
-  Looks up by arXiv ID. If not found returns { found: false }.
+  → metadata dict, or 404
+  Looks up by arXiv ID; if not found, tries to add it via Zotero Web API, then re-searches.
+
+POST /api/zotero/add-paper
+  body: { arxiv_id, title, authors: string[], pdf_url }
+  → { status: "ok"|"error", message?, item? }
+  Directly creates a Zotero preprint item from metadata already in hand (no search
+  round-trip — used by arXiv Search/Browser "+ Add to Zotero" buttons). NEVER throws
+  an HTTP error to the caller: missing ZOTERO_API_KEY or a Zotero-side failure both
+  come back as a normal 200 JSON body with status:"error".
 ```
+
+### arXiv (public API, no key required)
+
+```
+GET /api/arxiv/daily?max=200
+  → ArxivPaper[]
+  Latest astro-ph.HE papers, sorted by submission date.
+
+GET /api/arxiv/search?q=&field=all|author|title|id&start=0&max_results=50
+  → { papers: ArxivPaper[], total: int, start: int }
+  field="author" / "title" use exact arXiv field prefixes (au:/ti:) so an author
+  search returns EVERY paper by that person (paginated via start/max_results), not
+  just whatever a fuzzy all: match ranks in the first page. field="id" (or a bare
+  arXiv ID / arxiv.org URL in `q` regardless of `field`) is resolved as an exact
+  id_list lookup — see the "Known bug" callout above re: old-style IDs not matching
+  yet. total comes from arXiv's own opensearch:totalResults — the frontend uses
+  it to drive a "Load more" button (see ArxivBrowser.tsx). `_fetch_arxiv()` retries
+  once with backoff on a 429 from arXiv's rate limiter, then raises a 503 with a
+  human-readable message rather than crashing; `/api/arxiv/daily` responses are
+  cached in-memory for 180s per `max` value to reduce how often that limit is hit.
+
+  ArxivPaper = { id, title, authors: string[], abstract, arxiv_url, pdf_url,
+                 categories: string[], submitted }
+```
+
+### Vault sync (backup to your own remote, alongside/instead of Syncthing)
+
+```
+GET  /api/vault/git/status
+  → { is_repo, remote?, branch?, last_commit?, dirty_files? }
+
+POST /api/vault/git/init
+  body: { remote_url }
+  → { ok, message }
+  git init (if needed) + git remote add/set-url origin. Credentials are the user's
+  responsibility (embed a token in an HTTPS URL, or mount an SSH key into the
+  assistant container) — nothing is stored server-side beyond the remote URL itself.
+
+POST /api/vault/git/sync
+  → { ok, message, pushed? }
+  git add -A && commit (if dirty) && push. Never raises to the caller — every
+  failure mode (no repo, no remote, push rejected, network error) comes back as a
+  normal {ok: false, message} body. Built around a _run_git() subprocess helper.
+
+GET  /api/vault/webdav/status
+  → { configured, url?, username?, remote_dir?, last_sync? }
+
+POST /api/vault/webdav/config
+  body: { url, username, password, remote_dir }
+  → { ok, message }
+  Saved to vault/.ygg-config/webdav.json (git-ignored automatically — see below).
+  For Nextcloud/ownCloud/Koofr/etc. — anything exposing a WebDAV endpoint. There is
+  no OAuth-based Google Drive / iCloud account linking (would need an app
+  registration + consent screen per provider); WebDAV is the practical alternative
+  that needs no OAuth.
+
+POST /api/vault/webdav/sync
+  → { ok, message, pushed? }
+  Mirrors every vault file to the WebDAV remote via PUT (MKCOL for directories as
+  needed), skipping .git/ and .ygg-config/. Same never-raises-to-caller pattern.
+```
+
+Both sync features are independent of each other and of Syncthing — a user can run
+any combination. `_webdav_ensure_gitignore()` appends `.ygg-config/` to
+`vault/.gitignore` the first time a WebDAV remote is saved, so the WebDAV password
+never ends up in a git-synced commit.
+
+### LaTeX (thin proxy to the internal `latex` service)
+
+The `latex` container is `expose`d, not `ports`-published — only the `assistant`
+container can reach it (`LATEX_URL=http://latex:9000`), keeping a single published
+port (8000) for Tailscale access, same as every other view.
+
+```
+POST   /api/latex/compile
+  body: { source: string, filename: string }
+  → 200 { pdf_b64, log, errors: [] }  or  422 { log, errors: [string] }
+  Runs latexmk in a scratch /tmp dir inside the latex container. Never touches the vault.
+
+POST   /api/latex/save
+  body: { filename: string, source: string }
+  → { path: "70-LaTeX/{filename}.tex" }
+
+GET    /api/latex/files
+  → { files: [{name, modified, size}], folders?: string[] }
+
+POST   /api/latex/folders
+  body: { path: string }  → creates a folder under 70-LaTeX/
+
+GET    /api/latex/files/{filename:path}
+  → { source: string }
+
+DELETE /api/latex/files/{filename:path}
+  → { ok: true }
+```
+
+Filenames are validated against a strict `[A-Za-z0-9._-]+` regex in
+`services/latex/latex_service.py` to block path traversal.
 
 ### Scores
 
 ```
 GET /api/scores/today
-  → { date, points: int, breakdown: [{action, pts}], streak: int }
+  → { date, points: int, detail: [{action, citekey?, pts}] }
 
 GET /api/scores/week
-  → { week_start, total: int, target: 55, breakdown: [...], streak: int }
+  → { days: ScoreDay[], week_total: int, week_target: 55 }
 ```
 
 **Scoring rules (read from frontmatter across vault):**
 - triage verdict written: 1 pt (cap 10/day)
 - T1 note complete (all 5 slots filled): 5 pts
 - `aq_written: true`: 2 pts (separate from above)
-- concept note updated (2nd paper linked): 4 pts
-- new concept/question note: 5 pts
-- `tier: 2` note complete: 15 pts
-- weekly synthesis in 40-Synthesis/ (≥300 words): 10 pts (cap 1/week)
-- confusion marked resolved in 60-Meta/Confusions.md: 3 pts
+- concept note updated (`updated` == today): 4 pts
+- weekly synthesis (`created` == today, cap 1/day in current implementation): 10 pts
 
-Streak: survives if ≥3 pts earned that day. Freeze tokens: tracked in 60-Meta/Ledger.md.
+### System info & settings
+
+```
+GET  /api/info
+  → { texVersion, vaultPath, diskFree, availablePaths: string[] }
+  availablePaths lists every subdirectory under VAULT — feeds the Settings drawer's
+  Data Path dropdown. See the "Known issue" callout at the top of this file.
+
+POST /api/settings
+  body: { latexDir?, userAccount? }
+  → { ok: true, message: "Settings received (not persisted yet)" }
+  NOT ACTUALLY PERSISTED SERVER-SIDE — currently a no-op acknowledgement. The
+  Settings drawer's real persistence is client-side localStorage
+  (theme, fontSize, tabWidth, lineWrap, autoCompile, userAccount, latexDir).
+```
 
 ---
 
@@ -287,203 +488,194 @@ Streak: survives if ≥3 pts earned that day. Freeze tokens: tracked in 60-Meta/
 
 ### Shared
 
-- Dark theme only. Colors: bg `#0D1117`, surface `#161B27`, border `#2A3447`,
-  text `#CDD9E5`, accent `#4FC3F7`, ok `#34D399`, gate/warn `#F59E0B`, crit `#F87171`.
+- Dark theme only was the original spec; **now three themes**: Dark (default),
+  Light, and Paper (e-ink/grayscale, serif fonts, squared corners, no shadows).
+  Theme tokens redefined per-theme in `index.css` under `:root[data-theme="..."]`;
+  persisted to `localStorage("theme")`, applied via a `data-theme` attribute on
+  `<html>` in `App.tsx` on mount.
+- Base tokens: bg `#0D1117`, surface `#161B27`, border `#2A3447`, text `#CDD9E5`,
+  accent `#4FC3F7`, ok `#34D399`, gate/warn `#F59E0B`, crit `#F87171`.
 - Font: `IBM Plex Mono` for labels/code, `IBM Plex Sans` for body. Load from Google Fonts.
-- Nav: left sidebar (desktop) or bottom bar (mobile). Icons only on mobile.
-- No UI framework. Plain CSS modules or vanilla CSS-in-JS. Keep it minimal.
+- **Nav is a horizontal top bar** (`Nav.tsx` / `.app-nav`), not a left sidebar as
+  originally spec'd — `.app-shell` is `flex-direction: column`, nav is a fixed-height
+  row with the logo, nav tabs, and a settings gear button, all left-to-right.
+- No UI framework. Plain CSS in `index.css`. Keep it minimal.
+- Settings drawer (`SettingsDrawer.tsx`): 360px right-side drawer, sections for
+  Appearance (theme), Account, Editor (font size/tab width/line wrap/auto-compile),
+  Data (path), **Data Sync (Git)** (remote URL, Init/Update Remote, Sync Now, live
+  status — `api.vault.git*`), **Data Sync (Cloud/WebDAV)** (URL/username/password/
+  remote folder, Sync Now — `api.vault.webdav*`), About (system info from `/api/info`).
 
-### Triage view
+### Dashboard view (`ScoresView.tsx`, nav id `scores`)
+
+Default landing view. Today strip (pts, streak), weekly progress bar toward the 55pt
+target, daily breakdown tiles, scoring rules legend. Data from `/api/scores/today`
+and `/api/scores/week`.
+
+### Daily ArXiv view (`ArxivSearch.tsx`, nav id `search`)
+
+3-panel resizable layout (`react-resizable-panels`, sizes persisted to
+`localStorage("yggdrasil:panel-sizes")`):
+- **Panel 1 — Daily Papers**: live client-side keyword filter over up to 200
+  astro-ph.HE papers (`/api/arxiv/daily?max=200`); `➕ Shortlist` per row.
+- **Panel 2 — Shortlisted**: persisted to `localStorage("yggdrasil:shortlist")`;
+  `→ Read` loads into Panel 3, `✕ Remove`.
+- **Panel 3 — My List**: full reading pane for the active paper — persisted to
+  `localStorage("yggdrasil:my-list")`. `↗ Open PDF`, `↗ Open arXiv`,
+  `+ Add to Zotero` (the *only* place Zotero appears in this view). Below: compact
+  "Saved" cards for every paper ever loaded here, click to re-select as active.
+  **Select any text in the title/abstract → a `[C][E][R][I][C]` toolbar appears →
+  clicking a letter appends the selection to that CERIC slot** via
+  `POST /api/papers/{citekey}/append-slot` (citekey = arXiv id if the paper has no
+  Zotero citekey yet). Shows a toast (`Added to Evidence ✓`), a brief accent flash,
+  and a `[C✓][E✓][R·][I·][C·]` fill indicator next to the title and on every saved
+  card. This selection→slot behavior lives in `components/CericToolbar.tsx`
+  (`useCericAppend` hook + `CericSelectionToolbar`/`SlotIndicator` components), shared
+  with the Search view below — don't reimplement it per-view.
+
+### Search view (`ArxivBrowser.tsx`, nav id `browse`)
+
+Single-query arXiv search with field tabs — **Keyword** (`all:`, fuzzy, relevance-sorted),
+**Author** (`au:"..."`, exact field match, date-sorted), **Title** (`ti:"..."`),
+**arXiv ID / URL** (`field=id`, exact single-paper lookup, no pagination — see the
+"Known bug" callout re: old-style IDs). Author/Title exist specifically so "show me
+every paper by Bin-Bin Zhang" actually works, instead of a fuzzy 50-result cap. Shows
+`Showing N of TOTAL results` with a `Load more` button that pages via
+`start`/`max_results` (hidden for the `id` field, since it's always exactly one
+result). Each result: category badge, title, up to 3 authors + "+N more" toggle,
+a 2-line clamped abstract preview with a "show full abstract" expand, and — same as
+Daily ArXiv — select any text to get the `[C][E][R][I][C]` toolbar via the shared
+`CericToolbar.tsx` hook. Actions: `↗ Open PDF` / `↗ Open arXiv` / `+ Add to Zotero`.
+Header (title, field tabs, search bar, result count) is centered; results render in
+a responsive CSS grid that fills the full window width, not a fixed-width column.
+
+### Triage view (`Triage.tsx`)
 
 - Header: today's date + paper count from brief
 - Paper list: one card per paper. Shows: title, first author, year, abstract (collapsed,
   expand on click), arXiv link.
-- Each card has a Claim input (single line, placeholder "What does this assert that
-  wasn't known last week?") and three buttons: Drop (red) / Queue (amber) / Read (green).
-- On "Read": calls `POST /api/papers/{arxiv_id}/triage`, then calls
-  `GET /api/zotero/search?q={arxiv_id}` to show Zotero status (found / not found).
-  If not found, shows "Add to Zotero" link using `zotero://select/library` scheme.
+- Each card has a Claim input (single line) and three buttons: Drop (red) / Queue (amber) / Read (green).
+- On "Read": calls `POST /api/papers/{citekey}/triage`, then Zotero status shown via
+  `GET /api/zotero/search?q={arxiv_id}`.
 - Completed papers (verdict set) show a grey checkmark and collapse.
-- Today's point total shown in top-right corner.
 
-### CERIC Editor view
+### CERIC Editor view (`CERICEditor.tsx`)
 
-- Left panel: paper metadata (title, authors, journal, year, arXiv link, Zotero status).
-- Main area: five labelled textareas, one per CERIC slot. Each label shows the hunting
-  prompt:
-  - **C — Claim**: "What does this assert that wasn't known last week?"
-  - **E — Evidence**: "Which figure carries the claim? What would it look like if false?"
-  - **R — Reasoning**: "Where is the leap? Which step requires trust, not data?"
-  - **I — Implications**: "If this holds, what observation would settle it?"
-  - **C — Context**: "What gap made this necessary? Which paper does it argue against? (cite key)"
-- Below slots: Adversarial Question textarea. A toggle "AQ written ✓" flips
-  `aq_written: true` in frontmatter via PUT.
-- Right panel: `GateIndicator` — 6 dots (5 slots + AQ), green when filled.
-  Below indicator: "Gate: LOCKED 🔒" or "Gate: OPEN 🔓".
-- Save button: auto-saves on blur (debounced 800ms). Also a manual Save button.
-- AI section (below gate indicator, only enabled when gate is OPEN):
-  - Ask input + submit → calls `POST /api/examine`
-  - Response rendered in a visually distinct callout box (amber border, labelled AI).
+Two internal tabs, toggled by buttons at the top of the view (not a separate nav item):
 
-### Graph view
+- **Editor tab**: left panel paper metadata; five labelled textareas (one per CERIC
+  slot, with hunting-prompt placeholders); Adversarial Question textarea + `aq_written`
+  toggle; `GateIndicator` (6 dots); auto-save-on-blur + manual Save; `/examine` button
+  (disabled until gate conditions met), AI response in an amber `.ai-callout`.
+- **Collection tab**: lists every paper in `10-Papers/` (`GET /api/papers`). Filter bar
+  — date, keyword (title + tags), status (draft/complete, derived client-side from
+  slot-fill + `aq_written`). Each row: title, arXiv id/citekey, date, 5-slot progress
+  bar, `Copy MD` (via `GET /api/papers/{citekey}/raw`, clipboard), `Open in LaTeX`
+  (builds a `\subsection{title}` + `\paragraph{slot}` snippet client-side, clipboard).
+  Clicking a row opens it in the Editor tab.
 
-- Full-area D3 force-directed graph. Load D3 from npm (`d3` package, not CDN).
-- Nodes: paper notes (blue circles, size by tier), concept notes (green diamonds),
-  question notes (amber triangles).
-- Edges: [[wikilink]] connections (grey lines).
-- Click node → opens that note in CERIC Editor (papers) or a simple text view (concepts).
-- Search input to highlight/filter nodes by title or tag.
-- Zoom and pan enabled.
+`onSelectPaper` prop (wired to `App.tsx`'s `openEditor`) lets the Collection tab jump
+straight into editing a paper without going through Triage.
 
-### Ask view
+### Graph view (`GraphView.tsx`)
 
-- Search input at top (full width).
-- Mode toggle: Locate (returns excerpts with source) | Ask (returns generated answer).
-- Results list: each result shows the source note path (clickable → opens CERIC Editor),
-  a relevance score bar, and the matched excerpt.
-- Separate panel: Examine (only shown if a paper is selected in CERIC Editor and gate
-  is open). Ask field + response callout.
+Full-area D3 force-directed graph (npm `d3`, not CDN). Nodes: paper/concept/question
+notes. Edges: `[[wikilink]]` connections. Click node → opens CERIC Editor (papers) or
+a text view (concepts). Search input to highlight/filter. Zoom/pan enabled.
 
-### Scores view
+### Ask view (`AskView.tsx`)
 
-- Today strip: pts earned today, streak days, freeze tokens remaining.
-- Progress bar: today's pts toward daily minimum (3 pt streak threshold).
-- Weekly bar: total pts toward 55 pt weekly target.
-- Breakdown table: action, pts, date — last 14 days.
-- All data from `GET /api/scores/today` and `GET /api/scores/week`.
+Search input, mode toggle (Locate | Ask), results with source path + relevance +
+excerpt. Examine panel shown only when a gate-open paper is selected.
+
+### LaTeX view (`LaTeXEditor.tsx`)
+
+3-pane resizable layout (file tree / CodeMirror editor / PDF preview), same
+`react-resizable-panels` pattern as Daily ArXiv. CodeMirror 6 with
+`@codemirror/legacy-modes`' `stex` mode via `StreamLanguage` for LaTeX syntax
+highlighting. Toolbar: file picker, filename input, Save, Compile, Delete. Editor
+shows a `Line N, Col N` status bar. Preview pane shows the compiled PDF (base64 →
+`data:` URL in an `<iframe>`) or a scrollable compile-error log on 422. All requests
+go through `/api/latex/*` on the assistant — the `latex` service itself is never
+reached directly by the browser.
 
 ---
 
 ## Zotero integration detail
 
-`zotero.py` implements two lookup strategies:
+`zotero.py` implements three functions:
 
-**Strategy 1 — Better BibTeX (preferred, local):**
-```python
-POST http://localhost:23119/better-bibtex/json-rpc
-{
-  "jsonrpc": "2.0", "method": "item.search",
-  "params": [{"query": arxiv_id}]
-}
-```
-Returns citekey directly. Only works when Zotero desktop is running on Mac mini.
-Wrap in try/except — if unreachable, fall through to Strategy 2.
+**`search_zotero(query)`** — two-strategy fallback:
+1. Better BibTeX local JSON-RPC (`http://localhost:23119/better-bibtex/json-rpc`,
+   `item.search` method) — only works when Zotero desktop is running locally.
+2. Zotero Web API (`GET https://api.zotero.org/users/{id}/items?q=...`) — needs
+   `ZOTERO_USER_ID` + `ZOTERO_API_KEY`. Citekey constructed as
+   `{first_author_last}{year}{first_title_word}` since the Web API doesn't return one.
 
-**Strategy 2 — Zotero Web API (fallback, always-on):**
-```
-GET https://api.zotero.org/users/{ZOTERO_USER_ID}/items
-    ?q={arxiv_id}&format=json&include=data
-Authorization: Zotero {ZOTERO_API_KEY}
-```
-Parse response for: title, creators, date, publicationTitle, DOI, extra (contains arXiv ID).
-Citekey is not returned by the Web API — construct it as `{first_author_last}{year}{first_title_word}`.
+**`ensure_arxiv_in_zotero(arxiv_id)`** — searches first; if not found, POSTs a
+preprint item by URL, then re-searches.
 
-Expose via `zotero.lookup(arxiv_id: str) -> dict | None`.
+**`add_paper_to_zotero(arxiv_id, title, authors, pdf_url)`** — direct item creation
+from metadata already known (no search round-trip); used by the arXiv Search/Browser
+"+ Add to Zotero" buttons. Raises on transport/API errors (caller in `main.py` catches
+and returns `{status:"error"}`), returns `None` only when credentials are missing.
 
 ---
 
 ## arxiv-daily service
 
-Runs as a cron at 06:30 CST (TZ: Asia/Shanghai). Uses the `arxiv` Python package.
+Unchanged from original spec. Runs as a cron at 06:30 CST (TZ: Asia/Shanghai). Uses the
+`arxiv` Python package. Query: `cat:astro-ph.HE` filtered by `KEYWORDS` env var, author
+watch from `AUTHOR_WATCH`. Writes `vault/00-Inbox/Brief-{YYYY-MM-DD}.md`. Weekend/no-op
+handling: writes a short "No new listings today" note rather than a blank file.
 
-Query: `cat:astro-ph.HE` filtered by keywords from `KEYWORDS` env var.
-Author watch from `AUTHOR_WATCH` env var (comma-separated last names).
-
-Output: writes `vault/00-Inbox/Brief-{YYYY-MM-DD}.md` with this format:
-
-```markdown
----
-date: "2026-09-09"
-source: arxiv
-category: astro-ph.HE
-count: 12
----
-
-# arXiv Brief — 2026-09-09
-
-## Keyword matches
-
-### [2609.01234] Title of paper
-**Authors:** Zhang, B.; Pe'er, A.
-**Abstract:** ...
-**arXiv:** https://arxiv.org/abs/2609.01234
-
----
-
-## Author watch matches
-...
-
-## All new papers today
-...
-```
-
-Weekend handling: if arXiv returns no new papers (announced-date same as previous run),
-write a brief note: `# arXiv Brief — {date}\n\nNo new listings today (weekend or holiday).`
-Do not write a blank file.
+Note: this is a *separate* code path from `/api/arxiv/daily` and `/api/arxiv/search`
+in `main.py` — those hit the live arXiv API directly on each request (used by Daily
+ArXiv / Search views); arxiv-daily is the once-a-day cron that seeds the Triage brief.
+Both independently call `export.arxiv.org` (now `https://`, following redirects —
+the API 301s HTTP→HTTPS as of the underlying arxiv package's requests too).
 
 ---
 
 ## indexer service
 
-Uses `watchdog` to monitor `vault/10-Papers/` and `vault/20-Concepts/` for file changes.
-
-On change:
-1. Read the .md file with `python-frontmatter`
-2. Split body into chunks (~400 tokens, overlap 50)
-3. Embed each chunk via `POST http://ollama:11434/api/embeddings`
-   with `{"model": "nomic-embed-text", "prompt": chunk}`
-4. Upsert into LanceDB at `/lancedb/vault.lance`
-   Schema: `{id: str, citekey: str, chunk: str, embedding: vector(768), note_path: str}`
-
-On delete: remove all chunks for that citekey from LanceDB.
-
-Startup: index all existing files on first run if LanceDB is empty.
-
----
-
-## Build order — do not skip steps
-
-### Phase 1 (build first — gets the daily habit running)
-1. `scripts/init-vault.sh`
-2. `services/arxiv-daily/` — cron + Brief.md writer
-3. `services/assistant/gate.py` — Gate logic (already written, do not modify logic)
-4. `services/assistant/zotero.py` — Zotero lookup
-5. `services/assistant/main.py` — all API routes
-6. `services/assistant/frontend/` — Triage view + CERIC Editor + Nav
-
-### Phase 2 (adds AI examination)
-7. Wire `/api/examine` in main.py to Anthropic SDK
-8. Add AI section to CERIC Editor frontend
-9. GateIndicator component
-
-### Phase 3 (adds search and graph)
-10. `services/indexer/` — watchdog + LanceDB ingest
-11. Wire `/api/locate` and `/api/ask` in main.py via LanceDB
-12. Graph view frontend (D3)
-13. Ask view frontend
-
-### Phase 4 (completes the system)
-14. Scores view frontend
-15. `/api/scores/today` and `/api/scores/week` endpoints
-16. Mobile-responsive layout
+Unchanged from original spec. Uses `watchdog` to monitor `10-Papers/` and
+`20-Concepts/`. Chunks (~400 tokens, 50 overlap), embeds via Ollama
+(`nomic-embed-text`), upserts into LanceDB at `/data/lancedb/vault.lance`. Startup
+indexes all existing files if LanceDB is empty; delete removes all chunks for that citekey.
 
 ---
 
 ## Hard constraints — do not violate
 
-1. **Never write into any CERIC slot** from server or AI code. The five slots are written
-   ONLY by the user. The server reads them (for the Gate), never sets them.
+1. **Never write into any CERIC slot** from server or AI code, *except* the explicit,
+   user-triggered `POST /api/papers/{citekey}/append-slot` endpoint — and even that
+   only appends verbatim text the user selected themselves; it never generates or
+   summarizes. The five slots are otherwise written ONLY by the user via direct
+   textarea edits. The server reads them (for the Gate), never auto-populates them.
 2. **Never call Anthropic API** from any endpoint except `/api/examine`, and only after
    `gate.is_complete()` returns True.
 3. **AI output always goes in a callout block** in the frontend — visually distinct from
    the user's own writing. Label it `AI · /examine` with amber styling.
-4. **Never summarize a paper** automatically. The `/api/ask` endpoint searches the user's
-   own notes — it does not fetch the paper PDF or abstract and summarize it.
-5. **vault/ is read-only for indexer** and **read-only for assistant**. Only `arxiv-daily`
-   writes to 00-Inbox. The user writes to 10-Papers via the CERIC Editor PUT endpoint.
-6. The Gate check in `gate.py` must not be modified. Do not add `bypass` parameters.
-7. All `.md` writes must use `python-frontmatter` to preserve existing frontmatter keys.
-   Never overwrite frontmatter by hand-writing YAML strings.
+4. **Never summarize a paper automatically.** `/api/ask` searches the user's own notes
+   only. `/api/arxiv/daily` and `/api/arxiv/search` return raw arXiv metadata
+   (title/authors/abstract as arXiv wrote them) — fine, since that's not an AI summary,
+   it's just relaying the paper's own listed abstract.
+5. **vault/ is read-only for indexer.** Only `arxiv-daily` writes to `00-Inbox`. The
+   user writes to `10-Papers` via CERIC Editor / append-slot; the `latex` service
+   writes only to `70-LaTeX`.
+6. **The Gate check in `gate.py` must not be modified.** Do not add `bypass` parameters.
+7. **All `.md` writes must use `python-frontmatter`**, never hand-written YAML strings.
+   (Client-side "Copy MD"/"Open in LaTeX" clipboard actions in the Collection tab are
+   read-only display formatting, not file writes, and don't need to go through this —
+   but they still source the frontmatter from `GET /api/papers/{citekey}/raw`, which
+   itself uses `frontmatter.dumps()`.)
+8. **The `latex` service never touches anything outside `70-LaTeX/`.** No cross-talk
+   with `10-Papers` or any other vault folder.
+9. **Zotero errors never crash a view.** Every Zotero-touching endpoint
+   (`/api/zotero/*`) returns a normal JSON body on failure (404 or
+   `{status:"error", message}`), never lets an unhandled exception surface as a 500
+   in a place the frontend can't gracefully show.
 
 ---
 
@@ -492,12 +684,16 @@ Startup: index all existing files on first run if LanceDB is empty.
 ```
 # Vault
 VAULT_HOST_PATH=/data/grb-vault        # absolute path on host; bind-mounted into containers
+                                        # ⚠️ see "Known issue" at top of this file —
+                                        # verify this actually points at your real vault
 
 # arXiv
 ARXIV_QUERY=cat:astro-ph.HE
 KEYWORDS=GRB,gamma-ray burst,prompt emission,internal shock,afterglow,magnetar
 AUTHOR_WATCH=Zhang,Burgess,Iyyani,Ravasio,Beniamini,Pe'er
 TZ=Asia/Shanghai
+CRON_TIME=06:30
+MAX_RESULTS=40
 
 # Zotero
 ZOTERO_USER_ID=                         # numeric user ID from zotero.org/settings/keys
@@ -513,16 +709,47 @@ EMBED_MODEL=nomic-embed-text
 
 # Gate
 GATE_CHECK=true                         # set to false ONLY during initial development testing
+
+# LaTeX (internal docker-network URL; only override if you moved the service)
+LATEX_URL=http://latex:9000
 ```
+
+Note: `ollama` itself is **not** defined in `docker-compose.yml` — it's expected to run
+as a separate container/compose stack on the same Docker network (that's why
+`OLLAMA_URL` defaults to the DNS name `http://ollama:11434` rather than `localhost`).
 
 ---
 
 ## First-run checklist (for human, not agent)
 
-1. Copy `.env.example` to `.env` and fill in all values
-2. Set `VAULT_HOST_PATH` to an existing directory (or run `scripts/init-vault.sh`)
-3. `docker compose up -d ollama`
-4. `docker exec grb-ollama ollama pull nomic-embed-text`
+1. Copy `.env.example` to `.env` and fill in all values — **and confirm
+   `VAULT_HOST_PATH` points at the directory with your real vault content** (see
+   "Known issue" at top).
+2. Run `scripts/init-vault.sh` if the vault directory doesn't exist yet.
+3. `docker compose up -d ollama` (from whatever compose file/stack defines it)
+4. `docker exec <ollama-container> ollama pull nomic-embed-text`
 5. `docker compose up -d arxiv-daily` — confirm Brief.md appears next morning
-6. `docker compose up -d assistant` — open `http://mac-mini-tailscale-ip:8000`
+6. `docker compose up -d assistant latex` — open `http://mac-mini-tailscale-ip:8000`
+   (the `latex` container has no published port; only `assistant` needs one)
 7. `docker compose up -d indexer` — after ~20 notes exist in vault
+
+---
+
+## Working with Cursor / other tools on this repo
+
+- The frontend build is **not** hot-reloaded into the running container — after any
+  change under `services/assistant/frontend/src/`, you must:
+  ```
+  cd services/assistant/frontend && npm run build
+  cd ../../.. && docker compose build assistant && docker compose up -d assistant
+  ```
+  (`vite.config.ts` does proxy `/api` → `localhost:8000` for local `npm run dev`,
+  which is faster for iteration if you don't need the full container loop.)
+- Same rebuild-and-restart pattern applies to `services/latex/` after editing
+  `latex_service.py` — rebuild the `latex` image, not `assistant`.
+- `services/latex/Dockerfile` installs `python3-pip` via `apt-get` before `pip3
+  install` — `texlive/texlive:latest`'s Debian base does not ship pip by default.
+  Don't remove that step.
+- The frontend has no test suite yet. Verify changes with `npx tsc --noEmit`, `npm
+  run build`, and a manual `curl` smoke-test of any touched `/api/*` route before
+  considering a change done.

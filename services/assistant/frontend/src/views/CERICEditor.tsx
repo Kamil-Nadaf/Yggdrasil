@@ -13,9 +13,152 @@ const SLOTS = [
 interface Props {
   citekey: string | null;
   onBack: () => void;
+  onSelectPaper?: (citekey: string) => void;
 }
 
-export default function CERICEditor({ citekey, onBack }: Props) {
+function slotsFilledCount(fm: PaperFrontmatter): number {
+  return SLOTS.filter((s) => ((fm[s.key] as string) || "").trim()).length;
+}
+
+function escLatex(s: string): string {
+  return s.replace(/([%$&#_{}])/g, "\\$1");
+}
+
+function buildLatexSnippet(fm: PaperFrontmatter): string {
+  const parts = [`\\subsection{${escLatex(fm.title || "Untitled")}}`];
+  for (const s of SLOTS) {
+    const val = ((fm[s.key] as string) || "").trim();
+    if (val) {
+      const heading = s.label.split(" — ")[1] || s.key;
+      parts.push(`\\paragraph{${escLatex(heading)}} ${escLatex(val)}`);
+    }
+  }
+  return parts.join("\n\n");
+}
+
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function CollectionTab({ onSelect }: { onSelect: (citekey: string) => void }) {
+  const [papers, setPapers] = useState<Paper[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [dateFilter, setDateFilter] = useState("");
+  const [keyword, setKeyword] = useState("");
+  const [status, setStatus] = useState<"all" | "draft" | "complete">("all");
+  const [copyMsg, setCopyMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.papers.list()
+      .then(setPapers)
+      .finally(() => setLoading(false));
+  }, []);
+
+  function flashCopyMsg(text: string) {
+    setCopyMsg(text);
+    setTimeout(() => setCopyMsg(null), 2500);
+  }
+
+  async function handleCopyMd(citekey: string) {
+    try {
+      const r = await api.papers.raw(citekey);
+      flashCopyMsg((await copyToClipboard(r.raw)) ? `Copied ${citekey}.md` : "Copy failed — clipboard unavailable");
+    } catch {
+      flashCopyMsg("Copy failed");
+    }
+  }
+
+  async function handleCopyLatex(fm: PaperFrontmatter) {
+    const ok = await copyToClipboard(buildLatexSnippet(fm));
+    flashCopyMsg(ok ? "Copied LaTeX snippet" : "Copy failed — clipboard unavailable");
+  }
+
+  const filtered = papers.filter((p) => {
+    const fm = p.frontmatter;
+    if (dateFilter && fm.read !== dateFilter) return false;
+    if (keyword) {
+      const q = keyword.toLowerCase();
+      const hay = `${fm.title || ""} ${((fm.tags as string[]) || []).join(" ")}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    const filled = slotsFilledCount(fm);
+    const isComplete = filled === 5 && Boolean(fm.aq_written);
+    if (status === "draft" && isComplete) return false;
+    if (status === "complete" && !isComplete) return false;
+    return true;
+  });
+
+  if (loading) return <div className="muted">Loading…</div>;
+
+  return (
+    <div>
+      <div className="card" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
+        <input
+          type="text"
+          placeholder="Search title or tags…"
+          value={keyword}
+          onChange={(e) => setKeyword(e.target.value)}
+          style={{ flex: 1, minWidth: 160 }}
+        />
+        <select value={status} onChange={(e) => setStatus(e.target.value as "all" | "draft" | "complete")}>
+          <option value="all">All</option>
+          <option value="draft">Draft</option>
+          <option value="complete">Complete</option>
+        </select>
+        {copyMsg && <span className="ok mono" style={{ fontSize: 12 }}>{copyMsg}</span>}
+      </div>
+
+      <div style={{ marginTop: 16 }}>
+        {filtered.length === 0 ? (
+          <div className="muted">No papers match this filter.</div>
+        ) : (
+          filtered.map((p) => {
+            const fm = p.frontmatter;
+            const filled = slotsFilledCount(fm);
+            return (
+              <div key={p.citekey} className="card" style={{ cursor: "pointer" }} onClick={() => onSelect(p.citekey)}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {fm.title || p.citekey}
+                    </div>
+                    <div className="muted mono" style={{ fontSize: 11 }}>
+                      {fm.arxiv ? `arXiv:${fm.arxiv}` : p.citekey}{fm.read ? ` · ${fm.read}` : ""}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+                    <button className="btn" onClick={() => handleCopyMd(p.citekey)}>Copy MD</button>
+                    <button className="btn" onClick={() => handleCopyLatex(fm)}>Open in LaTeX</button>
+                  </div>
+                </div>
+                <div style={{ height: 6, background: "var(--border)", borderRadius: 3, overflow: "hidden", marginTop: 8 }}>
+                  <div
+                    style={{
+                      height: "100%",
+                      width: `${(filled / 5) * 100}%`,
+                      background: filled === 5 ? "var(--ok)" : "var(--accent)",
+                      transition: "width 0.3s",
+                    }}
+                  />
+                </div>
+                <div className="muted mono" style={{ fontSize: 10, marginTop: 4 }}>{filled}/5 slots</div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function CERICEditor({ citekey, onBack, onSelectPaper }: Props) {
+  const [tab, setTab] = useState<"editor" | "collection">(citekey ? "editor" : "collection");
   const [paper, setPaper] = useState<Paper | null>(null);
   const [form, setForm] = useState<Partial<PaperFrontmatter>>({});
   const [saving, setSaving] = useState(false);
@@ -26,6 +169,7 @@ export default function CERICEditor({ citekey, onBack }: Props) {
 
   useEffect(() => {
     if (!citekey) return;
+    setTab("editor");
     api.papers.get(citekey).then((p) => {
       setPaper(p);
       setForm(p.frontmatter);
@@ -71,8 +215,38 @@ export default function CERICEditor({ citekey, onBack }: Props) {
     }
   }
 
-  if (!citekey) return <div className="muted">No paper selected — go to Triage and click Read.</div>;
-  if (!paper) return <div className="muted">Loading…</div>;
+  const tabBar = (
+    <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+      <button className={`btn${tab === "editor" ? " btn-primary" : ""}`} onClick={() => setTab("editor")}>Editor</button>
+      <button className={`btn${tab === "collection" ? " btn-primary" : ""}`} onClick={() => setTab("collection")}>Collection</button>
+    </div>
+  );
+
+  if (tab === "collection") {
+    return (
+      <div>
+        {tabBar}
+        <CollectionTab onSelect={(ck) => { onSelectPaper?.(ck); }} />
+      </div>
+    );
+  }
+
+  if (!citekey) {
+    return (
+      <div>
+        {tabBar}
+        <div className="muted">No paper selected — pick one from Collection or Triage.</div>
+      </div>
+    );
+  }
+  if (!paper) {
+    return (
+      <div>
+        {tabBar}
+        <div className="muted">Loading…</div>
+      </div>
+    );
+  }
 
   const fm = form;
   const gate = paper.gate;
@@ -81,6 +255,7 @@ export default function CERICEditor({ citekey, onBack }: Props) {
 
   return (
     <div>
+      {tabBar}
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16 }}>
         <button className="btn" onClick={onBack}>← Triage</button>
         <h1 style={{ margin: 0, flex: 1 }}>

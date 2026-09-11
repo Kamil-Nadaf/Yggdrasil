@@ -20,7 +20,8 @@ mkdir -p \
   "$VAULT/30-Questions" \
   "$VAULT/40-Synthesis" \
   "$VAULT/50-Projects" \
-  "$VAULT/60-Meta"
+  "$VAULT/60-Meta" \
+  "$VAULT/70-LaTeX"
 
 # Write a README so Syncthing picks up the folder immediately
 cat > "$VAULT/README.md" << 'EOF'
@@ -38,6 +39,7 @@ Do **not** hand-edit frontmatter in `10-Papers/` — use the CERIC Editor.
 | `40-Synthesis` | Weekly synthesis notes |
 | `50-Projects` | Project notes |
 | `60-Meta` | Templates, config, and system notes |
+| `70-LaTeX` | LaTeX documents written in the LaTeX Editor view |
 EOF
 
 # Drop a concept note template into 60-Meta
@@ -94,6 +96,19 @@ created: ""
 
 ## What Would Resolve This
 <!-- Observation, simulation, or derivation that would close the question. -->
+EOF
+
+# Drop a starter LaTeX template
+cat > "$VAULT/70-LaTeX/_template.tex" << 'EOF'
+\documentclass[12pt]{article}
+\usepackage{amsmath, amssymb, graphicx, hyperref}
+\title{Your Title}
+\author{Your Name}
+\date{\today}
+\begin{document}
+\maketitle
+\section{Introduction}
+\end{document}
 EOF
 
 echo "✓ Vault structure ready."

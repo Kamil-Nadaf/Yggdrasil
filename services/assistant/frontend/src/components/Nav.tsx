@@ -23,7 +23,7 @@ export default function Nav({ current, onNavigate, onSettingsOpen, onPageEdit, p
   return (
     <nav className="app-nav">
       <div className="nav-brand">
-        <img src="/yggdrasil-logo.jpg" alt="" className="nav-logo-img" />
+        <span className="nav-logo-img" aria-hidden="true" />
         <span className="nav-logo-text">YGGDRASIL</span>
       </div>
       <div className="nav-tabs">

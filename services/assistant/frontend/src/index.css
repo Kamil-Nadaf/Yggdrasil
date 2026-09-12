@@ -329,9 +329,17 @@ body {
 .nav-logo-img {
   width: 32px;
   height: 32px;
-  border-radius: 50%;
-  object-fit: cover;
+  flex-shrink: 0;
   display: block;
+  background-color: var(--accent);
+  -webkit-mask-image: url(/yggdrasil-logo.png);
+  mask-image: url(/yggdrasil-logo.png);
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
 }
 
 .nav-logo-text {

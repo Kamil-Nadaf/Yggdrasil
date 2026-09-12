@@ -65,6 +65,20 @@
   border-style: solid;
 }
 
+/* Paper — dark mode: same monochrome e-ink character, inverted. Toggled via
+   the Light/Dark buttons in Settings → Appearance (data-mode attribute). */
+:root[data-theme="paper"][data-mode="dark"] {
+  --bg:       #121212;
+  --surface:  #1B1B1A;
+  --border:   #3A3835;
+  --text:     #ECECE8;
+  --muted:    #9C978D;
+  --accent:   #FFFFFF;
+  --ok:       #CFCFCF;
+  --gate:     #9A9A9A;
+  --crit:     #6E6E6E;
+}
+
 /* ── Tactile theme (neo-skeuomorphic / soft-3D) ───────────────────────────────
    Warm neutral surfaces, raised + inset shapes via layered box-shadow instead
    of hard borders, terracotta/copper accent. */
@@ -154,6 +168,63 @@
 :root[data-theme="tactile"] .nav-item.active {
   box-shadow: var(--tactile-shadow-pressed);
   border-radius: var(--radius);
+}
+
+/* Tactile — dark mode: same soft-3D clay shapes on a charcoal base. Toggled
+   via the Light/Dark buttons in Settings → Appearance (data-mode attribute).
+   Higher specificity than the base tactile block above, so it overrides
+   cleanly without !important. */
+:root[data-theme="tactile"][data-mode="dark"] {
+  /* Surface is kept noticeably lighter than bg — on a light background the
+     neumorphic look reads fine from shadow contrast alone, but on a dark
+     background shadows barely register, so cards need real surface/bg
+     separation plus a hairline border or they visually merge into the page. */
+  --bg:       color-mix(in srgb, var(--accent) 10%, #1D1A15);
+  --surface:  color-mix(in srgb, var(--accent) 10%, #332B21);
+  --border:   color-mix(in srgb, var(--accent) 30%, #4A4032);
+  --text:     #F1EAE0;
+  --muted:    #B3A791;
+  --ok:       #7FA378;
+  --gate:     #D9A857;
+  --crit:     #D06A5D;
+
+  --tactile-shadow-raised: 5px 5px 14px rgba(0, 0, 0, 0.6), -5px -5px 14px rgba(255, 255, 255, 0.05);
+  --tactile-shadow-inset: inset 3px 3px 8px rgba(0, 0, 0, 0.65), inset -3px -3px 8px rgba(255, 255, 255, 0.04);
+  --tactile-shadow-pressed: inset 2px 2px 6px rgba(0, 0, 0, 0.7), inset -2px -2px 6px rgba(255, 255, 255, 0.04);
+}
+
+:root[data-theme="tactile"][data-mode="dark"] .card {
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+:root[data-theme="tactile"][data-mode="dark"] .dash-week-card,
+:root[data-theme="tactile"][data-mode="dark"] .dash-days-card {
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.45);
+}
+
+:root[data-theme="tactile"][data-mode="dark"] .app-nav {
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+
+:root[data-theme="tactile"][data-mode="dark"] .btn {
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+
+:root[data-theme="tactile"][data-mode="dark"] .btn:hover {
+  box-shadow: 5px 5px 12px rgba(0, 0, 0, 0.65), -5px -5px 12px rgba(255, 255, 255, 0.06);
+}
+
+:root[data-theme="tactile"][data-mode="dark"] input,
+:root[data-theme="tactile"][data-mode="dark"] select,
+:root[data-theme="tactile"][data-mode="dark"] textarea {
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+:root[data-theme="tactile"][data-mode="dark"] .heatmap-cell,
+:root[data-theme="tactile"][data-mode="dark"] .habit-chip,
+:root[data-theme="tactile"][data-mode="dark"] .task-kanban-card {
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
 }
 
 /* Custom theme: JS writes the CSS variables on <html> from Settings. */
@@ -1421,6 +1492,7 @@ h2 { font-size: 15px; color: var(--accent); }
   align-items: center;
   position: sticky;
   top: 0;
+  z-index: 5;
   background: var(--surface);
 }
 
@@ -1606,6 +1678,33 @@ h2 { font-size: 15px; color: var(--accent); }
   font-size: 11px;
   color: var(--text);
   text-align: center;
+}
+
+.theme-mode-toggle {
+  display: flex;
+  gap: 6px;
+}
+
+.theme-mode-btn {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.theme-mode-btn:hover {
+  color: var(--text);
+}
+
+.theme-mode-btn.selected {
+  border-color: var(--accent);
+  color: var(--text);
+  font-weight: 600;
 }
 
 .theme-color-grid {

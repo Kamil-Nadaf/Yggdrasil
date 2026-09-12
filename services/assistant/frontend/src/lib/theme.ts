@@ -95,6 +95,20 @@ const PAPER_PRESET: CustomTheme = {
   fontFamily: "Georgia, Garamond, serif",
 };
 
+/** Paper — dark mode: same monochrome e-ink character, inverted. */
+export const PAPER_DARK_PRESET: CustomTheme = {
+  bg: "#121212",
+  surface: "#1B1B1A",
+  border: "#3A3835",
+  text: "#ECECE8",
+  muted: "#9C978D",
+  accent: "#FFFFFF",
+  ok: "#CFCFCF",
+  gate: "#9A9A9A",
+  crit: "#6E6E6E",
+  fontFamily: "Georgia, Garamond, serif",
+};
+
 /** Tactile — neo-skeuomorphic / soft-3D: warm neutral surfaces, raised & inset
  * shapes via box-shadow (see index.css), copper/terracotta accent. */
 export const TACTILE_PRESET: CustomTheme = {
@@ -109,6 +123,52 @@ export const TACTILE_PRESET: CustomTheme = {
   crit: "#B5544A",
   fontFamily: '"IBM Plex Sans", system-ui, sans-serif',
 };
+
+/** Tactile — dark mode: same soft-3D clay shapes, on a charcoal base. Surface
+ * is kept noticeably lighter than bg (unlike a typical dark UI) because the
+ * neumorphic look depends on that separation being visible — shadows alone
+ * don't read well against a very dark backdrop. */
+export const TACTILE_DARK_PRESET: CustomTheme = {
+  bg: "#1D1A15",
+  surface: "#332B21",
+  border: "#4A4032",
+  text: "#F1EAE0",
+  muted: "#B3A791",
+  accent: "#C97B4A",
+  ok: "#7FA378",
+  gate: "#D9A857",
+  crit: "#D06A5D",
+  fontFamily: '"IBM Plex Sans", system-ui, sans-serif',
+};
+
+export type ThemeMode = "light" | "dark";
+
+/** Only Paper and Tactile support a light/dark mode toggle — Dark is already
+ * dark and Custom is fully user-picked colour-by-colour. */
+export const MODE_TOGGLE_THEMES = new Set(["paper", "tactile"]);
+
+const MODE_KEY = "yggdrasil:theme-mode";
+
+function loadThemeModes(): Record<string, ThemeMode> {
+  try {
+    const raw = localStorage.getItem(MODE_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as Record<string, ThemeMode>;
+  } catch {
+    return {};
+  }
+}
+
+export function loadThemeMode(themeId: string): ThemeMode {
+  return loadThemeModes()[themeId] === "dark" ? "dark" : "light";
+}
+
+export function saveThemeMode(themeId: string, mode: ThemeMode) {
+  const all = loadThemeModes();
+  all[themeId] = mode;
+  localStorage.setItem(MODE_KEY, JSON.stringify(all));
+  applyTheme();
+}
 
 /** Preset accent hues offered as a colour bar for the Tactile theme —
  * surfaces/shadows stay the same, only the accent hue changes. */
@@ -317,8 +377,13 @@ function resolveThemeId(): string {
 
 function presetTokens(themeId: string): CustomTheme {
   if (themeId === "custom") return loadCustomTheme();
-  if (themeId === "paper") return { ...PAPER_PRESET };
-  if (themeId === "tactile") return { ...TACTILE_PRESET, accent: loadTactileAccent() };
+  if (themeId === "paper") return { ...(loadThemeMode("paper") === "dark" ? PAPER_DARK_PRESET : PAPER_PRESET) };
+  if (themeId === "tactile") {
+    return {
+      ...(loadThemeMode("tactile") === "dark" ? TACTILE_DARK_PRESET : TACTILE_PRESET),
+      accent: loadTactileAccent(),
+    };
+  }
   return { ...CUSTOM_DEFAULTS };
 }
 
@@ -377,6 +442,11 @@ export function applyTheme(pageId?: PageId) {
   const theme = resolveThemeId();
   document.documentElement.setAttribute("data-theme", theme);
   document.documentElement.setAttribute("data-page", currentPageId);
+  if (MODE_TOGGLE_THEMES.has(theme)) {
+    document.documentElement.setAttribute("data-mode", loadThemeMode(theme));
+  } else {
+    document.documentElement.removeAttribute("data-mode");
+  }
   if (theme === "custom") {
     applyCustomVars(loadCustomTheme());
   } else {

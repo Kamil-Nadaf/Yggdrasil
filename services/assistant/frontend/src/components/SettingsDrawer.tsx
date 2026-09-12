@@ -15,14 +15,20 @@ import {
   THEMES,
   TACTILE_ACCENTS,
   DEFAULT_THEME,
+  MODE_TOGGLE_THEMES,
+  PAPER_DARK_PRESET,
+  TACTILE_DARK_PRESET,
   applyTheme,
   loadCustomTheme,
   saveCustomTheme,
   customFromPreset,
   loadTactileAccent,
   saveTactileAccent,
+  loadThemeMode,
+  saveThemeMode,
   hexOk,
   type CustomTheme,
+  type ThemeMode,
 } from "../lib/theme";
 import {
   APP_FONTS,
@@ -142,6 +148,7 @@ export default function SettingsDrawer({ open, onClose }: Props) {
 
   const [customTheme, setCustomTheme] = useState<CustomTheme>(() => loadCustomTheme());
   const [tactileAccent, setTactileAccent] = useState<string>(() => loadTactileAccent());
+  const [modeTick, setModeTick] = useState(0);
   const [appFonts, setAppFonts] = useState<AppFonts>(() => loadAppFonts());
   const [mcpConnections, setMcpConnections] = useState<McpConnection[]>(() => loadMcpConnections());
 
@@ -342,6 +349,13 @@ export default function SettingsDrawer({ open, onClose }: Props) {
     applyTheme();
   };
 
+  const activeThemeMode: ThemeMode = loadThemeMode(settings.theme);
+  const pickMode = (mode: ThemeMode) => {
+    saveThemeMode(settings.theme, mode);
+    setModeTick((n) => n + 1);
+  };
+  void modeTick;
+
   function updateCustom<K extends keyof CustomTheme>(key: K, value: CustomTheme[K]) {
     const next = { ...customTheme, [key]: value };
     setCustomTheme(next);
@@ -441,30 +455,70 @@ export default function SettingsDrawer({ open, onClose }: Props) {
           <div className="settings-item">
             <label>Theme</label>
             <div className="theme-picker">
-              {THEMES.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  className={`theme-card${settings.theme === t.id ? " selected" : ""}`}
-                  onClick={() => handleThemeChange(t.id)}
-                  title={t.label}
-                >
-                  <span className="theme-card-swatch" style={{ background: (t.id === "custom" ? customTheme : t.swatch).bg }}>
-                    <span className="theme-card-dot" style={{ background: (t.id === "custom" ? customTheme : t.swatch).surface }} />
-                    <span
-                      className="theme-card-dot"
-                      style={{ background: t.id === "custom" ? customTheme.accent : t.id === "tactile" ? tactileAccent : t.swatch.accent }}
-                    />
-                    <span className="theme-card-bar" style={{ background: (t.id === "custom" ? customTheme : t.swatch).text }} />
-                  </span>
-                  <span className="theme-card-label">{t.label}</span>
-                </button>
-              ))}
+              {THEMES.map((t) => {
+                const isDarkMode = MODE_TOGGLE_THEMES.has(t.id) && loadThemeMode(t.id) === "dark";
+                const swatch =
+                  t.id === "custom"
+                    ? customTheme
+                    : isDarkMode
+                      ? t.id === "paper"
+                        ? PAPER_DARK_PRESET
+                        : TACTILE_DARK_PRESET
+                      : t.swatch;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    className={`theme-card${settings.theme === t.id ? " selected" : ""}`}
+                    onClick={() => handleThemeChange(t.id)}
+                    title={t.label}
+                  >
+                    <span className="theme-card-swatch" style={{ background: swatch.bg }}>
+                      <span className="theme-card-dot" style={{ background: swatch.surface }} />
+                      <span
+                        className="theme-card-dot"
+                        style={{ background: t.id === "custom" ? customTheme.accent : t.id === "tactile" ? tactileAccent : swatch.accent }}
+                      />
+                      <span className="theme-card-bar" style={{ background: swatch.text }} />
+                    </span>
+                    <span className="theme-card-label">
+                      {t.label}
+                      {isDarkMode ? " (Dark)" : ""}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
             <div className="settings-info" style={{ marginTop: 8 }}>
               Shared across the app. Use <strong>Edit page</strong> in the top bar to colour a single view.
             </div>
           </div>
+
+          {MODE_TOGGLE_THEMES.has(settings.theme) && (
+            <div className="settings-item">
+              <label>Mode</label>
+              <div className="theme-mode-toggle">
+                <button
+                  type="button"
+                  className={`theme-mode-btn${activeThemeMode === "light" ? " selected" : ""}`}
+                  onClick={() => pickMode("light")}
+                >
+                  ☀ Light
+                </button>
+                <button
+                  type="button"
+                  className={`theme-mode-btn${activeThemeMode === "dark" ? " selected" : ""}`}
+                  onClick={() => pickMode("dark")}
+                >
+                  ☾ Dark
+                </button>
+              </div>
+              <div className="settings-info" style={{ marginTop: 8 }}>
+                {THEMES.find((t) => t.id === settings.theme)?.label} remembers its own Light/Dark choice — Dark and
+                Custom are unaffected.
+              </div>
+            </div>
+          )}
 
           <div className="settings-item" style={{ marginTop: 14 }}>
             <label>Fonts</label>

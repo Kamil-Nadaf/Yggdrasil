@@ -1,0 +1,62 @@
+\tikzposterlatexaffectionproofoff %enlever phrase en bas à droite
+\usetheme{Simple} %différents thèmes tikzposter
+
+% ---- Couleurs
+\definecolor{mypink1}{rgb}{0.858, 0.188, 0.478}
+\definecolor{titlecolor}{RGB}{74, 114, 159}
+\definecolor{titledarkcolor}{RGB}{51,102,153}
+\definecolor{LightGrey}{RGB}{232, 232, 232}
+\definecolor{Grey}{RGB}{222, 223, 225}
+\definecolor{DarkerGrey}{RGB}{215,217,219}
+\definecolor{FontColor}{RGB}{131,136,138}
+\definecolor{Red}{RGB}{204,0,0}
+%\definecolor{L-lig}{RGB}{25,124,192}
+%\definecolor{eric-lab}{RGB}{54,104,163}
+\definecolor{eric-lab}{RGB}{255,73,1} 
+\definecolor{eric}{RGB}{255,255,255}
+
+
+
+\definecolor{Orange}{RGB}{240,163,10} %ERIC orange
+\definecolor{Gray}{RGB}{186,200,211}
+\definecolor{LightRed}{RGB}{214,98,93}
+\definecolor{LightBlue}{RGB}{160,200,217}
+\definecolor{LightGreen}{RGB}{130,161,119}
+\definecolor{Violet}{RGB}{190,144,252}
+% ----
+
+\colorlet{blocktitlefgcolor}{eric-lab} %titre des blocks
+\colorlet{blocktitlebgcolor}{Grey} %couleur des lignes blocks
+%\colorlet{blockbodybgcolor}{mypink1}%????
+\colorlet{blockbodyfgcolor}{FontColor} %couleur du texte dans blocks
+
+\colorlet{innerblocktitlefgcolor}{white}
+\colorlet{notefrcolor}{Red!60} % ligne autour cadre notes
+\colorlet{notefgcolor}{white} % couleur police notes
+\colorlet{notebgcolor}{Red!60} % BG couleur des notes
+
+
+% ---- Titre
+\settitle{ 
+\begin{minipage}[b]{0.8\linewidth}
+\vspace{2cm}
+\hspace{1cm}\color{black}{ \Huge\textsc{\textbf{\@title}} \par } \vspace*{2em} \hspace{1cm}\color{black}{\LARGE \@author \par} \vspace*{2em} \hspace{1cm}{\Large \@institute}\vspace{0.5cm} \end{minipage}
+\hfill
+\begin{minipage}{0.2\linewidth}
+
+\vspace{-15cm}
+%%% insert second logo at the top
+%\transparent{0.6}\includegraphics[scale=1.1]{images/Logos/ericlogo.png}
+
+\vspace{5cm} 
+
+\hspace{1.5cm}\transparent{0.6}\includegraphics[scale=1.9]{images/Logos/ericlogo.png}
+ \end{minipage}}
+
+\definetitlestyle{sampletitle}{
+width=840mm, roundedcorners=0, linewidth=2pt, innersep=15pt,
+titletotopverticalspace=0mm, titletoblockverticalspace=30mm
+}{\begin{scope}[line width=\titlelinewidth, rounded corners=\titleroundedcorners]\draw[fill=eric-lab, color=eric]
+(\titleposleft,\titleposbottom) rectangle (\titleposright,\titlepostop);
+\end{scope}}
+

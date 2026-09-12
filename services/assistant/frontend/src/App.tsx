@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import Nav from "./components/Nav";
 import SettingsDrawer from "./components/SettingsDrawer";
-import Triage from "./views/Triage";
 import CERICEditor from "./views/CERICEditor";
 import GraphView from "./views/GraphView";
 import AskView from "./views/AskView";
@@ -9,8 +8,9 @@ import ScoresView from "./views/ScoresView";
 import LaTeXEditor from "./views/LaTeXEditor";
 import ArxivSearch from "./views/ArxivSearch";
 import ArxivBrowser from "./views/ArxivBrowser";
+import TasksView from "./views/TasksView";
 
-export type View = "triage" | "editor" | "graph" | "ask" | "scores" | "latex" | "search" | "browse";
+export type View = "editor" | "graph" | "ask" | "scores" | "latex" | "search" | "browse" | "tasks";
 
 export default function App() {
   const [view, setView] = useState<View>("scores");
@@ -32,9 +32,16 @@ export default function App() {
   return (
     <div className="app-shell">
       <Nav current={view} onNavigate={setView} onSettingsOpen={() => setSettingsOpen(true)} />
-      <main className="app-content">
-        {view === "triage" && <Triage onOpenEditor={openEditor} />}
-        {view === "editor" && <CERICEditor citekey={editorCitekey} onBack={() => setView("triage")} onSelectPaper={openEditor} />}
+      <main className={`app-content${view === "latex" ? " app-content--flush" : ""}`}>
+        {view === "editor" && (
+          <CERICEditor
+            citekey={editorCitekey}
+            onBack={() => setView("search")}
+            onSelectPaper={openEditor}
+            onPaperDeleted={() => setEditorCitekey(null)}
+          />
+        )}
+        {view === "tasks" && <TasksView />}
         {view === "graph" && <GraphView onOpenEditor={openEditor} />}
         {view === "ask" && <AskView />}
         {view === "scores" && <ScoresView />}

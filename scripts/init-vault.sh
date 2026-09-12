@@ -21,7 +21,8 @@ mkdir -p \
   "$VAULT/40-Synthesis" \
   "$VAULT/50-Projects" \
   "$VAULT/60-Meta" \
-  "$VAULT/70-LaTeX"
+  "$VAULT/70-LaTeX" \
+  "$VAULT/80-Tasks"
 
 # Write a README so Syncthing picks up the folder immediately
 cat > "$VAULT/README.md" << 'EOF'
@@ -40,6 +41,7 @@ Do **not** hand-edit frontmatter in `10-Papers/` — use the CERIC Editor.
 | `50-Projects` | Project notes |
 | `60-Meta` | Templates, config, and system notes |
 | `70-LaTeX` | LaTeX documents written in the LaTeX Editor view |
+| `80-Tasks` | Task / routine notes (one `.md` per task) |
 EOF
 
 # Drop a concept note template into 60-Meta

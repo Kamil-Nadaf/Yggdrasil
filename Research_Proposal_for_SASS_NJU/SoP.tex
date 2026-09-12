@@ -1,0 +1,153 @@
+\section*{\fontsize{12.5 pt}{10 pt}\selectfont{Introduction and Scientific Rationale}}
+
+\hfill
+
+Gamma-Ray Bursts (GRBs) represent the most energetic and luminous events in the universe since the Big Bang, releasing more energy in a few seconds than our Sun does in its entire lifetime. What makes them important to study is their short event duration and high energetic regime, which help us to use them as extreme energy laboratories for our studies. This field of transient studies has now entered the 'Golden Era' of Time-Domain and Multi-Messenger Astronomy. This revolution is driven by a synergy of ground-breaking facilities: the Gravitational Wave (GW) detectors (LIGO/Virgo/KAGRA), high-energy neutrino observatories (IceCube/KM3NeT), and electromagnetic missions such as the SWIFT, Fermi-GBM, Einstein Probe (EP), SVOM, and next-generation neutrino detectors and CTAs. Additionally, the GRID mission, led by Dr. Bin-Bin Zhang’s group at Nanjing University, provides a unique platform for monitoring the transient sky using a distributed network of CubeSats.
+
+\vspace{0.10 cm}
+
+Despite decades of observation since their discovery in the 1960s, the fundamental physics governing these events remains obscured. Key open questions persist regarding the precise nature of the progenitor and remnant, particle acceleration and dissipation mechanisms, spectral diversity, and peculiar features observed in multiwavelength studies. A significant gap exists between high-precision data and the theoretical models used to interpret them. Standard one-zone emission models are insufficient to explain the complex temporal and spectral features observed during the prompt phase of GRBs. 
+
+\vspace{0.10 cm}
+
+My doctoral research aims to bridge this gap by combining analytical hydrodynamic modeling with data-driven analysis. Building upon my current collaboration with \textbf{Prof. Bin-Bin Zhang} as a senior visiting student at \textbf{Nanjing University}, I propose a multi-disciplinary research program that integrates theoretical modelling, multi-wavelength observations, and advanced machine learning techniques to probe the physics of GRB jets and their progenitors. 
+
+\vspace{0.10 cm}
+
+During my doctoral research, I plan to actively work with international collaborations with leading institutes and experimental teams working on high-energy and multimessenger astrophysics. These include academic institutions such as the University of Hong Kong, Yunnan University, Aryabhatta Research Institute of Observational Sciences (ARIES), University of Bath, the Open University of Israel, Louisiana State University, KTH Royal Institute of Technology, AstroParticule et Cosmologie Laboratory (APC), INAF-IAPS, and University of Rome. I also aim to closely engage with major observational facilities and missions, including Einstein Probe, LHAASO, Fermi Large Area Telescope, CubeSat, Mephisto, Cherenkov Telescope Array Observatory (CTAO), ASTRI Mini-Array, Swift Observatory, IceCube Neutrino Observatory, KM3NeT, and the LIGO-Virgo Collaboration. These collaborations will provide a strong observational and theoretical foundation for my work in multimessenger studies of transient astrophysical sources. The following are my detailed research objectives, which provide a vision for my doctoral research. 
+
+\section*{\fontsize{12.5 pt}{10 pt}\selectfont{Detailed Research Objectives}}
+
+\hfill
+
+My research program is structured around three interconnected pillars, designed to move from theoretical foundations to observational validation and technical innovation.
+
+\subsection*{\fontsize{12 pt}{10 pt}\selectfont{Pillar 1: Theory and Modelling :}}
+
+The primary theoretical objective is to understand the complete timeline of a GRB: the cataclysmic merger or collapse (central engine) launching the jet resulting into schocks, these schocks along with strong magnetic fields accelerating particles and dissipation of energy when this jet interacts with the circumburst medium.
+
+\vspace{0.10 cm}
+
+\subsubsection*{\fontsize{11.5 pt}{10 pt}\selectfont{Internal Shock Hydrodynamics (FS/RS Interplay) :}}
+
+\begin{itemize}
+    \itemsep0em 
+    \item Standard one-zone models are insufficient to explain the temporal and spectral evolution of GRB pulses, as they don’t consider coupled emission from multiple shock (FS-RS) regions. Recent hydrodynamic studies \cite{Rahaman_2023} \cite{rahaman2023internalshockshydrodynamicscollision} state that the interaction between forward (FS) and reverse shocks (RS) produced in relativistic shell collisions is essential to reproduce the observed diversity in GRB pulse morphology and spectral evolution.
+    \item Currently, Prof. Zhang and I are collaborating with Prof. Jonathan Granot to apply their self-consistent hydrodynamic two-parameter RS model to GRB pulses. Our approach is to fit this FS-RS model directly to time-resolved GRB data to quantitatively constrain the shock dynamics and radiation processes. This methodology provides a physically grounded test of multi-zone shock models for GRB prompt emission.
+\end{itemize}
+
+\subsubsection*{\fontsize{11.5 pt}{10 pt}\selectfont{Particle acceleration :}}
+
+The physical processes responsible for $\gamma$-ray emission and particle acceleration during the prompt phase of GRBs are still unclear.
+
+\begin{itemize}
+    \itemsep0em 
+    \item Standard diffusive shock acceleration (DSA) is only consistent with a low energy photon index ( -$\frac{3}{2}$ in the fast-cooling regime) and not with hard prompt spectra observed in many bursts, which violate the canonical synchrotron "line of death" $(-\frac{2}{3}$). Likewise, the simple forward-shock synchrotron model also struggles to explain VHE photons, as electrons cool faster than they can be accelerated, instead requiring strong inverse-Compton (IC) emission \cite{gill2022gammarayburststevenergies}. 
+    \item Current models commonly assume a constant magnetic field, which is physically unrealistic; however, Particle-in-cell (PIC) simulations suggest that shock-generated magnetic fields decay rapidly downstream, significantly altering acceleration and radiation processes \cite{Ryde_2022}.
+    
+    \item Therefore, these purely leptonic models (synchrotron+IC/SSC) fail to explain the spectral diversity, sharp breaks, hard spectral slopes, VHE photon emission, and modulation of spectra due to a downstream decaying magnetic field, among other phenomena. Motivated by these challenges, we propose to investigate particle acceleration mechanisms beyond the standard synchrotron limit, incorporating decaying magnetic fields, time-dependent acceleration, radiative and dissipative processes. For this purpose, I look forward to collaborating with experts in this field, like Prof. Felix Ryde, Prof. Granot, Prof. Asaf Pe’er, and Prof. Bing Zhang.
+\end{itemize}
+
+\subsubsection*{\fontsize{11.5 pt}{10 pt}\selectfont{Central Engine Dynamics and Quasi-Periodic Oscillations (QPOs) :}}
+The nature of the post-merger remnant in short GRBs (sGRB) remains a critical open question. We are interested in investigating the delayed collapse scenario.
+
+\begin{itemize}
+    \itemsep0em 
+    \item Where a hypermassive neutron star (HMNS) \cite{Chirenti_2023} or short-lived millisecond pulsar (magnetar) 
+    \cite{Chen_2025} survives temporarily before collapsing into a black hole, it may undergo an oscillatory phase or precession temporarily to avoid its collapse for a short period of time further producing Quasi-Periodic Oscillations (QPOs).
+    
+    \item Alternatively, tidal disruption of a neutron star (NS) by a rapidly spinning low-mass black hole (BH) might also produce a sGRB. Where, due to spin-orbit misalignment, jet precession might occur through interaction with winds from the accretion disc, also producing QPOs \cite{Li__2023} \cite{Chen_2024}. 
+    
+    \item These QPOs further modulate the emitted $\gamma$-ray, and detecting these QPO signatures offers a better way of searching for spin-orbit misaligned mergers, which is not the current strategy of GW detectors. Since these QPOs (ranging from a few Hz to a few kHz) contain information beyond standard $\gamma$-ray light curves, we require observations with high time resolution from next-generation detectors that have a better signal-to-noise ratio (S/N).
+    \item I am interested in modelling these types of remnants and searching for QPOs with Prof. Zhang's group, while comparing the results with simulated GW signals from the next generation of detectors, along with multiwavelength studies. It will enable us to analyse observed X-ray plateaus and extended emission  \cite{Rowlinson_2013}, as well as distinguish between HMNS/magnetar precession and BH accretion-jet modulation scenarios, thereby constraining the nature of the central engine and merger geometry.
+\end{itemize}
+
+\subsection*{\fontsize{12 pt}{10 pt}\selectfont{Pillar 2: Multi-Wavelength and Multi-Messenger Study :}}
+
+\subsubsection*{\fontsize{11.5 pt}{10 pt}\selectfont{X-ray Transients and Archival Flares :}}
+\begin{itemize}
+    \itemsep0em 
+    \item Recent observations from Einstein Probe have revealed that extended soft X-ray emission following sGRB prompt emission might be more common than previously thought, and the central engine does not stop after the prompt phase; some late-time activity continues. However, similar signals in historical X-ray and $\gamma$-ray data might have been considered as background noise or fast X-ray transients (FXTs) of uncertain origin. This raises an open possibility that extended emissions associated with SGRBs have been overlooked, limiting our understanding of these late-time activities. 
+    \item To address this problem, we have started to conduct systematic re-analysis of archival data from past X-ray missions overlapping with onboard $\gamma$-ray instruments. Using techniques from recent studies, such as \cite{zand2025bepposaxwfccatalogfastxray}, we will search for previously unrecognised and untargeted X-ray flares in the post-prompt phase of SGRBs. This will allow us to reassess these historical light curves and identify signatures of extended central engine activity.
+\end{itemize}
+
+\subsubsection*{\fontsize{11.5 pt}{10 pt}\selectfont{Early Optical Afterglows : 
+}}
+
+\begin{itemize}
+    \itemsep0em 
+    \item Early optical observations play an important role in probing the physical conditions of GRBs during prompt and immediate afterglow phases. Rapid multi-band optical follow-up observations have shown that early optical emission provides us with constraints on circumburst medium properties, afterglow energetics, and the origin of optically faint or dark GRBs.
+    \item Such early optical signals are often missed without rapid-response, wide-band photometric coverage, which emphasizes the importance of systematic optical monitoring for multiwavelength GRB studies.
+    \item We propose to strengthen this effort through a close collaboration with Dr. Brajesh Kumar for coordinated multi-band photometric observations using a 1.6 m facility at Lijiang Observatory named Multi-channel Photometric Survey Telescope (Mephisto). This facility is equipped with six optical bands (uvgriz), and it can perform simultaneous observations in ugi or vrz bands at a particular pointing. This filter system covers a wide wavelength range, from ~320 to 1050 nm, which will be very useful for investigating the GRB prompt and afterglow phases. 	
+    \item The color indices of the optical afterglows can be utilized as an important parameter in the context of ongoing physical processes. Therefore, multi-band observations are very crucial. The Mephisto’s ability of quick monitoring and simultaneously make multi-band observations will provide the multi-color information very accurately, which will help us better understand the underlying physics of GRBs afterglows.
+    \item Mephisto-based observations during its commissioning phase demonstrate that early optical behavior, when combined with X-ray data, is essential for accurately interpreting the medium surrounding the GRBs. Its ability to obtain near-simultaneous multi-band optical data has already proven effective for early GRB follow-up, and it will enable improving the constraints on early-time emission processes and circumburst conditions \cite{cheng2024simultaneousmultibandphotometryearly} \cite{du2025multiwavelengthanalysisgrb250101a}.
+\end{itemize}
+
+\subsubsection*{\fontsize{11.5 pt}{10 pt}\selectfont{Gravitational-Wave Counterparts : 
+}}
+\begin{itemize}
+    \itemsep0em 
+    \item Multimessenger observations have already demonstrated that joint detection in GW, along with EM follow-up, can break parameter degeneracies and constrain merger and jet geometry \cite{Gianfagna_2023}.  Analysis on events such as GW 211211A done by Prof. Zhang’s group also challenges the conventional short/long GRB classification and possible merger candidates (NS-WD) for the progenitor \cite{Yin_2023}. 
+    \item To address these questions regarding merger and central engine dynamics, QPOs, neutron star physics, etc., we aim to employ waveform template modelling across multiple GW bands, especially in the decihertz regime, where early inspiral signals can be tracked, to improve parameter estimation and advance the early-warning strategies to synchronise GW alerts with GRB and multiwavelength follow-up. We aim to do this while collaborating with expert research groups working in GW theory and numerical simulations. This can improve source localisation, EM characterisation of prompt phase and kilonovae. This will also combine population-based event-rate predictions with realistic multimessenger observations.
+\end{itemize}
+
+\subsubsection*{\fontsize{11.5 pt}{10 pt}\selectfont{Hadronic Signatures:}}
+
+\begin{itemize}
+    \itemsep0em 
+    \item Very High Energy (VHE; ≳100 GeV) emission detected in recent observations of several GRB afterglows suggests the presence of emission components beyond the standard leptonic radiation framework. Internal shock hydrodynamic models \cite{Waxman_1995} \cite{Waxman_1997}, as well as lepto-hadronic models \cite{Asano_2012}  \href{https://github.com/mariapetro/LeHaMoC}{LeHaMoc}, \href{
+https://am3.readthedocs.io/en/latest/}{AM$^{3}$} have been proposed to explain these VHE Photons, ultrahigh-energy cosmic rays (UHECR), and PeV neutrinos.
+
+    \item Non-detections of neutrinos by IceCube, KM3NeT and GRAND200k already place strong limits on microphysical parameters, jet energy, circumburst properties and hadronic efficiencies \cite{mondal2025multimessengerstudygrb}. 
+    \item Since ground-based γ-ray facilities, including Large Area Cherenkov Telescope (LACT), Gamma-ASTRI and LHAASO, broadly cover Northern Hemisphere observations, collaboration with CTAO is needed to extend the VHE $\gamma$-ray coverage in the Southern Hemisphere. This will offer a complementary window to investigate extreme emission processes from transients.
+    
+    \item In the future, I propose to bridge this gap between phenomenological studies and observational discrepancies by collaborating with experts like Prof. Zhang, Dr. J. Joshi, Dr. M. Petropolou, and transient research groups at INAF-IAPS to search for photohadronic signatures further constraining our model parameters. 
+\end{itemize}
+
+\subsection*{\fontsize{12 pt}{10 pt}\selectfont{Pillar 3: Computation and Instrumentation :}}
+
+\subsubsection*{\fontsize{11.5 pt}{10 pt}\selectfont{Machine Learning Techniques : }}
+
+\begin{itemize}
+    \itemsep0em 
+    \item Several key challenges, like robust classification beyond the traditional long/short paradigm, detection of faint or complex bursts, and the extraction of physical parameters from noisy, incomplete, and heterogeneous datasets, are difficult to solve in GRB research.
+    \item Classical statistical methods usually struggle with high-dimensionality and non-linear correlations present in temporal and spectral properties of GRBs, which lead to ambiguities in population studies and also limit our ability to identify sub-classes or rare events. These limitations are increasing evidently as GRB archives from missions such as Swift and Fermi continue to grow in size and complexity. \cite{Parmiggiani_2021} \cite{Manchanda_2025}.
+    
+    \item Analysis using Machine learning and deep learning techniques offers a powerful and flexible framework to address these challenges. They enable data-driven classification, feature extraction, anomaly detection, and parameter inference in a unified manner. Recent studies have demonstrated the effectiveness of supervised and unsupervised ML methods in GRB classification, event detection, and real-time analysis pipelines, particularly in the context of next-generation observatories and multi-messenger astronomy \cite{zhang2024advancinggammarayburstidentification} \cite{Baroncelli:2023bgn}. Especially transformers are able to capture long-range dependencies and can extract features and correlate signals with physical parameters to improve GRB classification and parameter inference.
+    
+    \item We aim to develop and apply these ML-based tools to GRB studies and collaborate actively with expert groups working at the interface of high-energy astrophysics and artificial intelligence.
+\end{itemize}
+
+\newpage
+\subsubsection*{\fontsize{11.5 pt}{10 pt}\selectfont{GRID Instrumentation : }}
+
+\begin{itemize}
+    \itemsep0em 
+    \item The primary aim of Prof. Zhang’s lab is to develop Gamma-Ray Integrated Detectors (GRID), thereby monitoring the transient $\gamma$-ray sky in the energy range from 10 keV to 2 MeV using scintillation detectors onboard CubeSats in low Earth orbits. The primary targets of GRID are the GRBs in the local universe. Its goal is working with ground-based GW detectors such as LIGO and VIRGO, to accumulate a sample of GRBs associated with the merger of two compact stars and study jets and related physics of those objects. It also involves observing and studying other $\gamma$-ray transients such as LGRBs, soft $\gamma$-ray repeaters, terrestrial $\gamma$-ray flashes, and solar flares \cite{Wen_2019}.
+    
+    \item With multiple CubeSats in various orbits, GRID is unaffected by the Earth occultation and serves as a full-time and all-sky monitor. With about 10 CubeSats in operation, GRID is capable of localizing a faint GRB like 170817A with a 90\% error radius of about 10 degrees, through triangulation and flux modulation. The first GRID detector onboard a CubeSat has been launched into a Sun-synchronous orbit and is currently under test \cite{Wen_2019}.
+    \item My work will focus on data development for the laboratory-simulated GRB sources to characterize detector response for the GRID. This effort will support fine-tuning of GRID’s transient detection and localization performance in the multi-messenger era. 
+\end{itemize}
+
+\vspace{0.10 cm}
+
+This research proposal is based upon my ongoing work in collaboration with \textbf{Prof. Bin-Bin Zhang}, where I am actively engaged in an \textbf{archival study of X-ray flares} and \textbf{self-consistent RS hydrodynamic modeling of GRBs}. Under his supervision, I aim to conduct this research step by step progressively, utilizing a comprehensive multimessenger approach in order to investigate transients during doctoral studies. Through the support of the \textbf{China Scholarship Council (CSC) fellowship}, I am committed to conducting high-quality doctoral research and contributing meaningfully to Prof. Zhang's research group, the \textbf{School of Astronomy and Space Sciences} at \textbf{Nanjing University}, and the broader scientific community.
+
+
+\vspace{3 cm}
+
+\noindent Written By :\\
+\textbf{Kamil Nadaf} \\
+Senior Visiting Student\\
+
+\vspace{3 cm}
+
+\noindent Approved By :\\
+\textbf{Prof. Bin-Bin Zhang}\\
+School of Astronomy and Space Sciences\\
+Nanjing University
+
+
+
+%\subsubsection*{\fontsize{12.5 pt}{10 pt}\selectfont{}}
+%\subsection*{\fontsize{13 pt}{10 pt}\selectfont{}}

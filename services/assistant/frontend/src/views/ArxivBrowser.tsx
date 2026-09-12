@@ -10,7 +10,7 @@ const FIELD_OPTIONS: { value: ArxivSearchField; label: string; placeholder: stri
   { value: "all", label: "Keyword", placeholder: "Search title, abstract, keyword…" },
   { value: "author", label: "Author", placeholder: "e.g. Bin-Bin Zhang" },
   { value: "title", label: "Title", placeholder: "Exact or partial title…" },
-  { value: "id", label: "arXiv ID / URL", placeholder: "e.g. 2401.12345 or https://arxiv.org/abs/2401.12345" },
+  { value: "id", label: "arXiv ID / URL", placeholder: "e.g. 2401.12345 or physics/0306138 or arxiv.org/abs/…" },
 ];
 
 export default function ArxivBrowser() {

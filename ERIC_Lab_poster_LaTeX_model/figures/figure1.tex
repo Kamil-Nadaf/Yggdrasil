@@ -1,0 +1,23 @@
+\begin{tikzpicture}
+\node[draw=Orange,fill=Orange,text=black,text width=6cm, rounded corners, text centered] (item1) at (2,4) {item1};
+
+\node[draw=Orange,fill=Orange,text=black,text width=6cm,rounded corners, text centered] (item2) at (2,0) {item2};
+
+\node[draw=Gray,text width=5cm,fill=Gray,rounded corners, text centered, text=black] (item3) at (10,4) {item3};
+
+\node[draw=LightRed,text width=5cm,fill=LightRed,text=black,rounded corners, text centered] (item4) at (10,-3) {item4};
+
+\node[draw=LightBlue,text width=5cm,text=black,fill=LightBlue,rounded corners, text centered] (item5) at (10,0) {item5};
+
+\node[draw=LightGreen,fill=LightGreen,text=black,text width=5cm,rounded corners, text centered] (item6) at (18,0) {item6};
+
+\draw[->, line width=1mm, draw=FontColor] (item1) to (item2);
+\draw[->,line width=1mm, draw=FontColor] (item2) to (item3);
+\draw[->,line width=1mm,draw=FontColor] (item2) to (item4);
+\draw[->,line width=1mm,draw=FontColor] (item2) to (item5);
+\draw[->,line width=1mm,draw=FontColor] (item3) to (item6);
+\draw[->,line width=1mm,draw=FontColor] (item5) to (item6);
+\draw[->,line width=1mm,draw=FontColor] (item4) to (item6);
+
+\end{tikzpicture}
+

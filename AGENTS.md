@@ -28,21 +28,12 @@ with no validation that it matches an actual container mount.
 
 ---
 
-## ⚠️ Known bug — arXiv old-style IDs fail in search
+## arXiv ID matching (new + old style)
 
-`ARXIV_ID_RE = re.compile(r"(\d{4}\.\d{4,5})(v\d+)?")` in `services/assistant/main.py`
-(`/api/arxiv/search`) only matches post-2007 arXiv IDs (`YYMM.NNNNN`, e.g.
-`2401.12345`). Pre-2007 IDs use an archive-prefixed format with no dot —
-`physics/0306138`, `hep-th/9901001`, `gr-qc/9805045` — which this regex does not
-match. Effect: the "arXiv ID / URL" search tab (`field=id` in `ArxivBrowser.tsx`)
-and the auto-detect branch in `arxiv_search()` both silently return "No results" for
-any old-style ID, or any URL containing one (e.g.
-`https://arxiv.org/pdf/physics/0306138`).
-
-Fix: extend the regex to also match the old-style `archive[.CAT]/NNNNNNN` format
-(e.g. `r"([a-z-]+(?:\.[A-Z]{2})?/\d{7})|(\d{4}\.\d{4,5})(v\d+)?"`) and make sure
-`arxiv_search()` tries both patterns before falling through to a field-prefixed
-search. Not yet fixed as of this writing.
+`ARXIV_ID_RE` in `services/assistant/main.py` (`/api/arxiv/search`) matches both
+post-2007 IDs (`YYMM.NNNNN`, e.g. `2401.12345`) and pre-2007 archive-prefixed IDs
+(`physics/0306138`, `hep-th/9901001`, `math.GT/0309136`, optional `vN` suffix).
+Bare IDs and arxiv.org URLs containing either form resolve via `id_list`.
 
 ---
 
@@ -53,11 +44,11 @@ A browser-based reading tool with **eight views**, navigated via a horizontal to
 
 | View (nav label) | Internal id | Purpose |
 |---|---|---|
-| **Dashboard** | `scores` | Daily/weekly scoring dashboard from frontmatter (default landing view) |
+| **Dashboard** | `scores` | Habit check-in + GitHub-style heatmap + weekly points (default landing view) |
 | **Daily ArXiv** | `search` | 3-panel Overleaf-style workflow: Daily Papers → Shortlisted → My List (reading pane), resizable via `react-resizable-panels` |
 | **Search** | `browse` | Direct arXiv search (keyword / author / title / arXiv ID-URL fields, paginated) without leaving the app; supports the same select-text→CERIC toolbar as Daily ArXiv |
-| **Triage** | `triage` | Morning arXiv feed — read abstracts, write one Claim line, vote Drop/Queue/Read |
-| **CERIC Editor** | `editor` | Fill 5 active-reading slots + Adversarial Question for a single paper; has an internal **Collection** tab listing all papers with filters + progress bars |
+| **Notes** | `editor` | Fill 5 active-reading slots + Adversarial Question for a single paper; has an internal **Collection** tab listing all papers with filters + progress bars |
+| **Tasks** | `tasks` | ClickUp-style List (nested parent/sub-tasks) + Kanban (To Do / In Progress / Done) via `@dnd-kit/core`; vault `80-Tasks/` |
 | **Graph** | `graph` | D3 force-directed graph of [[wikilink]] connections between notes |
 | **Ask** | `ask` | Search own notes via `/locate` and `/ask`; optional `/examine` after CERIC complete |
 | **LaTeX** | `latex` | Overleaf-style LaTeX editor: write → live PDF preview → save to vault, 3-pane resizable (file tree / editor / preview) |
@@ -156,9 +147,9 @@ vault/
 │   ├── Dashboard.md
 │   ├── Ledger.md
 │   └── Confusions.md
-└── 70-LaTeX/        ← .tex documents written in the LaTeX Editor view
-    └── _template.tex   ← starter template, excluded from the file list UI
-```
+└── 70-LaTeX/ ← .tex documents written in the LaTeX Editor view
+ │   └── _template.tex ← starter template, excluded from the file list UI
+ └── 80-Tasks/ ← one note per task: {task-id}.md (title, status, tags, parent, due, recurring)
 
 ---
 
@@ -280,6 +271,10 @@ PUT  /api/papers/{citekey}
   → { ok: true, citekey }
   Writes frontmatter + body back to vault. Creates file if not exists.
 
+DELETE /api/papers/{citekey}
+  → { ok: true, citekey }
+  Permanently deletes `10-Papers/{citekey}.md`. Rejects path traversal.
+
 POST /api/papers/{citekey}/triage
   body: { verdict: "read"|"skip"|"later", claim?: string }
   → { ok: true }
@@ -364,8 +359,8 @@ GET /api/arxiv/search?q=&field=all|author|title|id&start=0&max_results=50
   search returns EVERY paper by that person (paginated via start/max_results), not
   just whatever a fuzzy all: match ranks in the first page. field="id" (or a bare
   arXiv ID / arxiv.org URL in `q` regardless of `field`) is resolved as an exact
-  id_list lookup — see the "Known bug" callout above re: old-style IDs not matching
-  yet. total comes from arXiv's own opensearch:totalResults — the frontend uses
+  id_list lookup — both new-style (`2401.12345`) and old-style (`physics/0306138`)
+  IDs are matched. total comes from arXiv's own opensearch:totalResults — the frontend uses
   it to drive a "Load more" button (see ArxivBrowser.tsx). `_fetch_arxiv()` retries
   once with backoff on a 429 from arXiv's rate limiter, then raises a 503 with a
   human-readable message rather than crashing; `/api/arxiv/daily` responses are
@@ -449,6 +444,35 @@ DELETE /api/latex/files/{filename:path}
 Filenames are validated against a strict `[A-Za-z0-9._-]+` regex in
 `services/latex/latex_service.py` to block path traversal.
 
+
+### Habits & Tasks
+
+```
+GET  /api/habits/{date}
+  → { date, habits: { [key]: bool|number } }
+  Keys are dynamic — whatever exists in frontmatter.
+
+POST /api/habits/{date}
+  body: { habits: {...} }
+  → { ok, date, habits }
+  Creates `60-Meta/Daily-YYYY-MM-DD.md` on first write (python-frontmatter).
+
+GET  /api/habits/range?start=&end=
+  → { days: [{ date, habits }] }
+  Feeds the Dashboard heatmap.
+
+GET  /api/tasks
+  → { tasks: Task[] }
+
+POST /api/tasks
+  body: { title, status?, tags?, parent?, due?, recurring?, body? }
+  → { ok, task }
+
+GET / PUT / DELETE /api/tasks/{id}
+  Task frontmatter: title, status (todo|in_progress|done), tags[], parent, due,
+  completed_date, recurring. Files live in `80-Tasks/{id}.md`.
+```
+
 ### Scores
 
 ```
@@ -465,6 +489,8 @@ GET /api/scores/week
 - `aq_written: true`: 2 pts (separate from above)
 - concept note updated (`updated` == today): 4 pts
 - weekly synthesis (`created` == today, cap 1/day in current implementation): 10 pts
+- task completed (`80-Tasks/`, `status=done` and `completed_date` == today): 2 pts each (cap 15 pts/day)
+- habit checked (`60-Meta/Daily-YYYY-MM-DD.md`, each truthy habit key): 1 pt each
 
 ### System info & settings
 
@@ -537,8 +563,8 @@ and `/api/scores/week`.
 
 Single-query arXiv search with field tabs — **Keyword** (`all:`, fuzzy, relevance-sorted),
 **Author** (`au:"..."`, exact field match, date-sorted), **Title** (`ti:"..."`),
-**arXiv ID / URL** (`field=id`, exact single-paper lookup, no pagination — see the
-"Known bug" callout re: old-style IDs). Author/Title exist specifically so "show me
+**arXiv ID / URL** (`field=id`, exact single-paper lookup, no pagination — new- and
+old-style IDs). Author/Title exist specifically so "show me
 every paper by Bin-Bin Zhang" actually works, instead of a fuzzy 50-result cap. Shows
 `Showing N of TOTAL results` with a `Load more` button that pages via
 `start`/`max_results` (hidden for the `id` field, since it's always exactly one
@@ -559,7 +585,7 @@ a responsive CSS grid that fills the full window width, not a fixed-width column
   `GET /api/zotero/search?q={arxiv_id}`.
 - Completed papers (verdict set) show a grey checkmark and collapse.
 
-### CERIC Editor view (`CERICEditor.tsx`)
+### Notes view (`CERICEditor.tsx`, nav label **Notes**)
 
 Two internal tabs, toggled by buttons at the top of the view (not a separate nav item):
 
@@ -571,7 +597,8 @@ Two internal tabs, toggled by buttons at the top of the view (not a separate nav
   — date, keyword (title + tags), status (draft/complete, derived client-side from
   slot-fill + `aq_written`). Each row: title, arXiv id/citekey, date, 5-slot progress
   bar, `Copy MD` (via `GET /api/papers/{citekey}/raw`, clipboard), `Open in LaTeX`
-  (builds a `\subsection{title}` + `\paragraph{slot}` snippet client-side, clipboard).
+  (builds a `\subsection{title}` + `\paragraph{slot}` snippet client-side, clipboard),
+  `Delete` (confirm → `DELETE /api/papers/{citekey}`, removes the vault note).
   Clicking a row opens it in the Editor tab.
 
 `onSelectPaper` prop (wired to `App.tsx`'s `openEditor`) lets the Collection tab jump

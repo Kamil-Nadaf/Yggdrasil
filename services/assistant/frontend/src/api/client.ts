@@ -79,6 +79,12 @@ export interface LatexCompileResult {
 export interface LatexListResponse {
   files: LatexFile[];
   folders?: string[];
+  assets?: LatexFile[];
+}
+
+/** Encode each path segment so nested paths like MyPaper/main survive the URL. */
+function encodeLatexPath(name: string): string {
+  return name.split("/").map(encodeURIComponent).join("/");
 }
 
 export interface ArxivPaper {
@@ -106,6 +112,25 @@ export interface ZoteroAddResult {
   item?: unknown;
 }
 
+export interface Task {
+  id: string;
+  title: string;
+  status: "todo" | "in_progress" | "done";
+  tags: string[];
+  parent: string | null;
+  due: string;
+  completed_date: string;
+  recurring: boolean;
+  body?: string;
+}
+
+export type AiProviderConfig = {
+  provider: string;
+  api_key?: string;
+  base_url?: string;
+  model?: string;
+};
+
 // ── API calls ──────────────────────────────────────────────────────────────
 
 export const api = {
@@ -118,6 +143,8 @@ export const api = {
     get: (citekey: string) => req<Paper>("GET", `/api/papers/${citekey}`),
     update: (citekey: string, frontmatter: Partial<PaperFrontmatter>, body?: string) =>
       req("PUT", `/api/papers/${citekey}`, { frontmatter, body }),
+    delete: (citekey: string) =>
+      req<{ ok: boolean; citekey: string }>("DELETE", `/api/papers/${encodeURIComponent(citekey)}`),
     triage: (citekey: string, verdict: string, claim?: string) =>
       req("POST", `/api/papers/${citekey}/triage`, { verdict, claim }),
     appendSlot: (
@@ -137,14 +164,52 @@ export const api = {
   locate: (query: string, limit = 5) =>
     req<{ results: { citekey: string; chunk: string }[] }>("POST", "/api/locate", { query, limit }),
 
-  ask: (question: string, limit = 6) =>
+  ask: (question: string, limit = 6, provider?: AiProviderConfig) =>
     req<{ answer: string; sources: { citekey: string; excerpt: string }[] }>("POST", "/api/ask", {
       question,
       limit,
+      provider: provider || undefined,
     }),
 
-  examine: (citekey: string) =>
-    req<{ ok: boolean; response: string }>("POST", "/api/examine", { citekey }),
+  feynman: {
+    status: () =>
+      req<{
+        ok: boolean;
+        installed: boolean;
+        reachable: boolean;
+        internalUrl: string;
+        publicUrl: string;
+        wsUrl: string;
+        port: string;
+        docsUrl: string;
+        message: string;
+        mode?: string;
+      }>("GET", "/api/feynman/status"),
+  },
+
+  examine: (citekey: string, provider?: AiProviderConfig) =>
+    req<{ ok: boolean; response: string }>("POST", "/api/examine", { citekey, provider: provider || undefined }),
+
+  habits: {
+    get: (day: string) => req<{ date: string; habits: Record<string, boolean | number> }>("GET", `/api/habits/${day}`),
+    set: (day: string, habits: Record<string, boolean | number>) =>
+      req<{ ok: boolean; date: string; habits: Record<string, boolean | number> }>("POST", `/api/habits/${day}`, { habits }),
+    range: (start: string, end: string) =>
+      req<{ days: { date: string; habits: Record<string, boolean | number> }[] }>(
+        "GET",
+        `/api/habits/range?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
+      ),
+  },
+
+  tasks: {
+    list: () => req<{ tasks: Task[] }>("GET", "/api/tasks"),
+    create: (body: Partial<Task> & { title: string }) =>
+      req<{ ok: boolean; task: Task }>("POST", "/api/tasks", body),
+    get: (id: string) => req<Task>("GET", `/api/tasks/${id}`),
+    update: (id: string, body: Partial<Task>) =>
+      req<{ ok: boolean; task: Task }>("PUT", `/api/tasks/${id}`, body),
+    delete: (id: string) => req<{ ok: boolean; id: string }>("DELETE", `/api/tasks/${id}`),
+  },
 
   graph: () => req<GraphData>("GET", "/api/graph"),
 
@@ -168,6 +233,11 @@ export const api = {
     today: () => req<ScoreDay>("GET", "/api/scores/today"),
     week: () =>
       req<{ days: ScoreDay[]; week_total: number; week_target: number }>("GET", "/api/scores/week"),
+    range: (start: string, end: string) =>
+      req<{ days: ScoreDay[] }>(
+        "GET",
+        `/api/scores/range?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
+      ),
   },
 
   latex: {
@@ -177,9 +247,21 @@ export const api = {
       req<{ path: string }>("POST", "/api/latex/save", { filename, source }),
     createFolder: (path: string) =>
       req<{ path: string }>("POST", "/api/latex/folders", { path }),
+    deleteFolder: (path: string) =>
+      req<{ ok: boolean; path: string }>("DELETE", `/api/latex/folders/${encodeLatexPath(path)}`),
     listFiles: () => req<LatexListResponse>("GET", "/api/latex/files"),
-    getFile: (name: string) => req<{ source: string }>("GET", `/api/latex/files/${encodeURIComponent(name)}`),
-    deleteFile: (name: string) => req<{ ok: boolean }>("DELETE", `/api/latex/files/${encodeURIComponent(name)}`),
+    getFile: (name: string) =>
+      req<{ source: string }>("GET", `/api/latex/files/${encodeLatexPath(name)}`),
+    deleteFile: (name: string) =>
+      req<{ ok: boolean }>("DELETE", `/api/latex/files/${encodeLatexPath(name)}`),
+    uploadAsset: (path: string, content_b64: string) =>
+      req<{ path: string; size: number }>("POST", "/api/latex/assets", { path, content_b64 }),
+    deleteAsset: (path: string) =>
+      req<{ ok: boolean }>("DELETE", `/api/latex/assets/${encodeLatexPath(path)}`),
+    zip: (path: string) =>
+      req<{ filename: string; zip_b64: string }>("GET", `/api/latex/zip/${encodeLatexPath(path)}`),
+    rename: (src: string, dest: string) =>
+      req<{ ok: boolean; src: string; dest: string }>("POST", "/api/latex/rename", { src, dest }),
   },
 
   vault: {

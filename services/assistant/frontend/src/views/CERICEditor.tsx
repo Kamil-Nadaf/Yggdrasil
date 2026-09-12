@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { api, type Paper, type PaperFrontmatter } from "../api/client";
 import GateIndicator from "../components/GateIndicator";
+import { getActiveProviderPayload } from "../lib/aiProvider";
 
 const SLOTS = [
   { key: "claim",       label: "C — Claim",       hint: "What is the paper's central claim?" },
@@ -14,6 +15,7 @@ interface Props {
   citekey: string | null;
   onBack: () => void;
   onSelectPaper?: (citekey: string) => void;
+  onPaperDeleted?: () => void;
 }
 
 function slotsFilledCount(fm: PaperFrontmatter): number {
@@ -45,13 +47,20 @@ async function copyToClipboard(text: string): Promise<boolean> {
   }
 }
 
-function CollectionTab({ onSelect }: { onSelect: (citekey: string) => void }) {
+function CollectionTab({
+  onSelect,
+  onDeleted,
+}: {
+  onSelect: (citekey: string) => void;
+  onDeleted?: (citekey: string) => void;
+}) {
   const [papers, setPapers] = useState<Paper[]>([]);
   const [loading, setLoading] = useState(true);
   const [dateFilter, setDateFilter] = useState("");
   const [keyword, setKeyword] = useState("");
   const [status, setStatus] = useState<"all" | "draft" | "complete">("all");
   const [copyMsg, setCopyMsg] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   useEffect(() => {
     api.papers.list()
@@ -76,6 +85,24 @@ function CollectionTab({ onSelect }: { onSelect: (citekey: string) => void }) {
   async function handleCopyLatex(fm: PaperFrontmatter) {
     const ok = await copyToClipboard(buildLatexSnippet(fm));
     flashCopyMsg(ok ? "Copied LaTeX snippet" : "Copy failed — clipboard unavailable");
+  }
+
+  async function handleDelete(citekey: string, title?: string) {
+    const label = title || citekey;
+    if (!window.confirm(`Delete note for “${label}”?\n\nThis removes vault/10-Papers/${citekey}.md permanently.`)) {
+      return;
+    }
+    setDeleting(citekey);
+    try {
+      await api.papers.delete(citekey);
+      setPapers((prev) => prev.filter((p) => p.citekey !== citekey));
+      flashCopyMsg(`Deleted ${citekey}`);
+      onDeleted?.(citekey);
+    } catch (e) {
+      flashCopyMsg(e instanceof Error ? e.message : "Delete failed");
+    } finally {
+      setDeleting(null);
+    }
   }
 
   const filtered = papers.filter((p) => {
@@ -135,6 +162,13 @@ function CollectionTab({ onSelect }: { onSelect: (citekey: string) => void }) {
                   <div style={{ display: "flex", gap: 6, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
                     <button className="btn" onClick={() => handleCopyMd(p.citekey)}>Copy MD</button>
                     <button className="btn" onClick={() => handleCopyLatex(fm)}>Open in LaTeX</button>
+                    <button
+                      className="btn btn-crit"
+                      disabled={deleting === p.citekey}
+                      onClick={() => handleDelete(p.citekey, fm.title)}
+                    >
+                      {deleting === p.citekey ? "…" : "Delete"}
+                    </button>
                   </div>
                 </div>
                 <div style={{ height: 6, background: "var(--border)", borderRadius: 3, overflow: "hidden", marginTop: 8 }}>
@@ -157,11 +191,12 @@ function CollectionTab({ onSelect }: { onSelect: (citekey: string) => void }) {
   );
 }
 
-export default function CERICEditor({ citekey, onBack, onSelectPaper }: Props) {
+export default function CERICEditor({ citekey, onBack, onSelectPaper, onPaperDeleted }: Props) {
   const [tab, setTab] = useState<"editor" | "collection">(citekey ? "editor" : "collection");
   const [paper, setPaper] = useState<Paper | null>(null);
   const [form, setForm] = useState<Partial<PaperFrontmatter>>({});
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [examining, setExamining] = useState(false);
   const [examineResult, setExamineResult] = useState<string | null>(null);
   const [examineError, setExamineError] = useState<string | null>(null);
@@ -191,6 +226,27 @@ export default function CERICEditor({ citekey, onBack, onSelectPaper }: Props) {
     setSaving(false);
   }
 
+  async function handleDeleteNote() {
+    if (!citekey) return;
+    const label = (form.title as string) || citekey;
+    if (!window.confirm(`Delete note for “${label}”?\n\nThis removes vault/10-Papers/${citekey}.md permanently.`)) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      await api.papers.delete(citekey);
+      setPaper(null);
+      setForm({});
+      setDirty(false);
+      setTab("collection");
+      onPaperDeleted?.();
+    } catch (e) {
+      setExamineError(e instanceof Error ? e.message : "Delete failed");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   async function handleExamine() {
     if (!citekey) return;
     if (dirty) await save();
@@ -198,7 +254,7 @@ export default function CERICEditor({ citekey, onBack, onSelectPaper }: Props) {
     setExamineError(null);
     setExamineResult(null);
     try {
-      const r = await api.examine(citekey);
+      const r = await api.examine(citekey, getActiveProviderPayload());
       setExamineResult(r.response);
       // Reload paper to show updated body with AI callout
       const updated = await api.papers.get(citekey);
@@ -226,7 +282,10 @@ export default function CERICEditor({ citekey, onBack, onSelectPaper }: Props) {
     return (
       <div>
         {tabBar}
-        <CollectionTab onSelect={(ck) => { onSelectPaper?.(ck); }} />
+        <CollectionTab
+          onSelect={(ck) => { onSelectPaper?.(ck); }}
+          onDeleted={(ck) => { if (ck === citekey) onPaperDeleted?.(); }}
+        />
       </div>
     );
   }
@@ -235,7 +294,7 @@ export default function CERICEditor({ citekey, onBack, onSelectPaper }: Props) {
     return (
       <div>
         {tabBar}
-        <div className="muted">No paper selected — pick one from Collection or Triage.</div>
+        <div className="muted">No paper selected — pick one from Collection or Daily ArXiv.</div>
       </div>
     );
   }
@@ -257,12 +316,15 @@ export default function CERICEditor({ citekey, onBack, onSelectPaper }: Props) {
     <div>
       {tabBar}
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16 }}>
-        <button className="btn" onClick={onBack}>← Triage</button>
+        <button className="btn" onClick={onBack}>← Daily ArXiv</button>
         <h1 style={{ margin: 0, flex: 1 }}>
           {fm.title || citekey}
         </h1>
         <button className="btn btn-primary" onClick={save} disabled={saving || !dirty}>
           {saving ? "Saving…" : "Save"}
+        </button>
+        <button className="btn btn-crit" onClick={handleDeleteNote} disabled={deleting}>
+          {deleting ? "…" : "Delete"}
         </button>
       </div>
 

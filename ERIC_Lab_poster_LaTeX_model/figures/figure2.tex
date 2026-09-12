@@ -1,0 +1,14 @@
+\begin{tikzpicture}
+\node[draw=Orange,fill=Orange,text=black,text width=6cm, rounded corners, text centered] (item1) at (2,4) {item1};
+
+\node[draw=Orange,fill=Orange,text=black,text width=6cm,rounded corners, text centered] (item2) at (2,1) {item2};
+
+\node[draw=Gray,text width=5cm,fill=Gray,rounded corners, text centered, text=FontColor, text=black] (item3) at (10,1) {item3};
+
+\node[draw=LightGreen,text width=5cm,fill=LightGreen,text=black,rounded corners, text centered] (item4) at (18,1) {item4};
+
+\draw[->, line width=1mm, draw=FontColor] (item1) to (item2);
+\draw[->,line width=1mm, draw=FontColor] (item2) to (item3);
+\draw[->,line width=1mm, draw=FontColor] (item3) to (item4);
+
+\end{tikzpicture}

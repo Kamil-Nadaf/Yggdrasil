@@ -6,12 +6,21 @@ Routes:
   GET  /api/papers
   GET  /api/papers/{citekey}
   PUT  /api/papers/{citekey}
+  DELETE /api/papers/{citekey}
   POST /api/papers/{citekey}/triage
   POST /api/papers/{citekey}/append-slot
   GET  /api/papers/{citekey}/raw
   POST /api/locate
   POST /api/ask
-  POST /api/examine          ← GATE PROTECTED; only Anthropic call
+  POST /api/examine          ← GATE PROTECTED; AI call (provider from request, not stored)
+  GET  /api/habits/range
+  GET  /api/habits/{date}
+  POST /api/habits/{date}
+  GET  /api/tasks
+  POST /api/tasks
+  GET  /api/tasks/{id}
+  PUT  /api/tasks/{id}
+  DELETE /api/tasks/{id}
   GET  /api/graph
   GET  /api/zotero/search
   POST /api/zotero/ensure/{arxiv_id}
@@ -20,6 +29,7 @@ Routes:
   GET  /api/arxiv/search
   GET  /api/scores/today
   GET  /api/scores/week
+  GET  /api/scores/range
   POST /api/latex/compile    ← proxied to the internal `latex` service
   POST /api/latex/save
   GET  /api/latex/files
@@ -40,6 +50,7 @@ import re
 import glob
 import json
 import time
+import uuid
 import asyncio
 import subprocess
 import xml.etree.ElementTree as ET
@@ -69,6 +80,8 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5")
 GATE_CHECK = os.environ.get("GATE_CHECK", "true").lower() != "false"
 LATEX_URL = os.environ.get("LATEX_URL", "http://latex:9000")
+FEYNMAN_URL = os.environ.get("FEYNMAN_URL", "http://feynman:6174").rstrip("/")
+FEYNMAN_HOST_PORT = os.environ.get("FEYNMAN_HOST_PORT", "6174")
 LANCEDB_PATH = "/data/lancedb"
 
 app = FastAPI(title="CERIC Reading System")
@@ -199,6 +212,24 @@ async def update_paper(citekey: str, payload: PaperUpdate):
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(frontmatter.dumps(post))
+    return {"ok": True, "citekey": citekey}
+
+
+@app.delete("/api/papers/{citekey}")
+async def delete_paper(citekey: str):
+    """
+    Permanently delete a paper note from 10-Papers/.
+    Only touches a single .md file under that folder — no path traversal.
+    """
+    if not citekey or "/" in citekey or "\\" in citekey or citekey in (".", "..") or ".." in citekey:
+        raise HTTPException(status_code=400, detail="Invalid citekey")
+    path = paper_path(citekey).resolve()
+    papers_dir = (VAULT / "10-Papers").resolve()
+    if path.parent != papers_dir:
+        raise HTTPException(status_code=400, detail="Invalid citekey")
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail=f"Paper not found: {citekey}")
+    path.unlink()
     return {"ok": True, "citekey": citekey}
 
 
@@ -340,17 +371,103 @@ async def locate(payload: LocateQuery):
 
 # ── Ask (RAG over user's notes only) ─────────────────────────────────────────
 
+class ProviderConfig(BaseModel):
+    """Client-supplied AI config — used for this request only, never persisted."""
+    provider: str = "ollama"  # ollama | lmstudio | claude | deepseek | kimi | huggingface
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    model: Optional[str] = None
+
+
 class AskQuery(BaseModel):
     question: str
     limit: int = 6
+    provider: Optional[ProviderConfig] = None
+
+
+async def _llm_generate(prompt: str, cfg: Optional[ProviderConfig]) -> str:
+    """Call the client-selected provider. Keys come from the request body only."""
+    provider = (cfg.provider if cfg else "ollama") or "ollama"
+    model = (cfg.model if cfg and cfg.model else None)
+    api_key = (cfg.api_key if cfg else None) or ""
+    base_url = (cfg.base_url if cfg and cfg.base_url else None)
+
+    if provider in ("ollama", "lmstudio"):
+        url = (base_url or OLLAMA_URL).rstrip("/")
+        gen_model = model or "llama3.2"
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{url}/api/generate",
+                json={"model": gen_model, "prompt": prompt, "stream": False},
+                timeout=90.0,
+            )
+            if resp.status_code >= 400:
+                resp = await client.post(
+                    f"{url}/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key or 'lm-studio'}"},
+                    json={
+                        "model": gen_model,
+                        "messages": [{"role": "user", "content": prompt}],
+                    },
+                    timeout=90.0,
+                )
+                resp.raise_for_status()
+                return resp.json()["choices"][0]["message"]["content"]
+            resp.raise_for_status()
+            return resp.json().get("response", "")
+
+    if provider == "claude":
+        key = api_key or ANTHROPIC_API_KEY
+        if not key:
+            raise HTTPException(status_code=400, detail="Claude API key required (set it in Settings)")
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": model or ANTHROPIC_MODEL,
+                    "max_tokens": 1024,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+                timeout=90.0,
+            )
+            resp.raise_for_status()
+            return resp.json()["content"][0]["text"]
+
+    defaults = {
+        "deepseek": ("https://api.deepseek.com", "deepseek-chat"),
+        "kimi": ("https://api.moonshot.cn/v1", "moonshot-v1-8k"),
+        "huggingface": ("https://router.huggingface.co/v1", "meta-llama/Meta-Llama-3-8B-Instruct"),
+    }
+    default_base, default_model = defaults.get(provider, ("", "gpt-4o-mini"))
+    url = (base_url or default_base).rstrip("/")
+    if not url:
+        raise HTTPException(status_code=400, detail=f"base_url required for provider {provider}")
+    if not api_key:
+        raise HTTPException(status_code=400, detail=f"API key required for {provider} (set it in Settings)")
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{url}/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "content-type": "application/json"},
+            json={
+                "model": model or default_model,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=90.0,
+        )
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
 
 
 @app.post("/api/ask")
 async def ask(payload: AskQuery):
     """
-    Search user's notes via LanceDB and generate an answer with Ollama.
-    CONSTRAINT: This endpoint never calls Anthropic API. It answers from
-    the user's own notes only — not from the underlying LLM's parametric knowledge.
+    Search user's notes via LanceDB and generate an answer.
+    Provider/API key come from the request (browser localStorage) — never stored server-side.
     """
     table = get_table()
     if table is None:
@@ -379,40 +496,35 @@ async def ask(payload: AskQuery):
         f"EXCERPTS:\n{context}\n\nANSWER:"
     )
 
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            f"{OLLAMA_URL}/api/generate",
-            json={"model": "llama3.2", "prompt": prompt, "stream": False},
-            timeout=60.0,
-        )
-        resp.raise_for_status()
-        answer = resp.json().get("response", "")
+    try:
+        answer = await _llm_generate(prompt, payload.provider)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM request failed: {e}") from e
 
     sources = [{"citekey": r["citekey"], "excerpt": r["chunk"][:200]} for r in results]
     return {"answer": answer, "sources": sources}
 
 
-# ── Examine (GATE PROTECTED — only Anthropic call in the system) ───────────────
+# ── Examine (GATE PROTECTED) ───────────────────────────────────────────────────
 
 class ExaminePayload(BaseModel):
     citekey: str
+    provider: Optional[ProviderConfig] = None
 
 
 @app.post("/api/examine")
 async def examine(payload: ExaminePayload):
     """
     Run deep AI analysis on a paper. GATE PROTECTED.
-
-    HTTP 423 Locked is returned if gate check fails.
-    Anthropic API is called ONLY from here, ONLY after gate passes.
-    AI output is written as a > [!ai] callout block in the note body.
+    Provider/API key from the request body only — never persisted.
     CERIC slots are NEVER written by this endpoint.
     """
     path = paper_path(payload.citekey)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Paper not found")
 
-    # ── Gate check ─────────────────────────────────────────────────────────
     if GATE_CHECK:
         try:
             check_gate(path)
@@ -427,11 +539,9 @@ async def examine(payload: ExaminePayload):
                 },
             )
 
-    # ── Load note ──────────────────────────────────────────────────────────
     post = frontmatter.load(str(path))
     fm = post.metadata
 
-    # ── Fetch relevant context from vault ──────────────────────────────────
     vec = await embed(fm.get("claim", "") + " " + fm.get("adversarial_question", ""))
     table = get_table()
     context_chunks = []
@@ -446,7 +556,6 @@ async def examine(payload: ExaminePayload):
 
     context_str = "\n\n".join(context_chunks) if context_chunks else "No prior notes indexed yet."
 
-    # ── Build prompt ───────────────────────────────────────────────────────
     user_prompt = f"""You are reviewing a GRB astrophysics paper based on a researcher's active reading notes.
 
 Paper: {fm.get('title', '')} ({fm.get('year', '')})
@@ -474,28 +583,16 @@ Your task:
 
 Do NOT summarize the paper. Do NOT restate the CERIC slots. Add value beyond what the researcher wrote."""
 
-    if not ANTHROPIC_API_KEY:
-        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not configured")
-
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": ANTHROPIC_MODEL,
-                "max_tokens": 1024,
-                "messages": [{"role": "user", "content": user_prompt}],
-            },
-            timeout=60.0,
+    try:
+        cfg = payload.provider or ProviderConfig(
+            provider="claude", api_key=ANTHROPIC_API_KEY or None, model=ANTHROPIC_MODEL
         )
-        resp.raise_for_status()
-        ai_text = resp.json()["content"][0]["text"]
+        ai_text = await _llm_generate(user_prompt, cfg)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM request failed: {e}") from e
 
-    # ── Append AI callout to note body (NEVER writes CERIC slots) ─────────
     ts = datetime.now().strftime("%Y-%m-%d %H:%M")
     callout = f"\n\n> [!ai] AI · /examine · {ts}\n"
     for line in ai_text.splitlines():
@@ -586,6 +683,14 @@ ARXIV_NS = {
 }
 
 
+def _arxiv_id_from_atom_url(atom_id: str) -> str:
+    """Extract arXiv id from atom entry id — preserves archive/YYMMNNN for old papers."""
+    m = re.search(r"arxiv\.org/abs/(.+)$", atom_id, re.IGNORECASE)
+    if m:
+        return m.group(1)
+    return atom_id.rsplit("/", 1)[-1] if atom_id else ""
+
+
 def _parse_arxiv_atom(xml_text: str) -> tuple[list[dict], int]:
     root = ET.fromstring(xml_text)
 
@@ -600,7 +705,7 @@ def _parse_arxiv_atom(xml_text: str) -> tuple[list[dict], int]:
     papers = []
     for entry in root.findall("atom:entry", ARXIV_NS):
         arxiv_url = (entry.findtext("atom:id", default="", namespaces=ARXIV_NS) or "").strip()
-        arxiv_id = arxiv_url.rsplit("/", 1)[-1] if arxiv_url else ""
+        arxiv_id = _arxiv_id_from_atom_url(arxiv_url)
         title = re.sub(r"\s+", " ", (entry.findtext("atom:title", default="", namespaces=ARXIV_NS) or "")).strip()
         abstract = re.sub(r"\s+", " ", (entry.findtext("atom:summary", default="", namespaces=ARXIV_NS) or "")).strip()
         authors = [
@@ -683,7 +788,17 @@ async def arxiv_daily(max: int = 200):
     return papers
 
 
-ARXIV_ID_RE = re.compile(r"(\d{4}\.\d{4,5})(v\d+)?")
+# New-style (Apr 2007+): 0704.0001 / 1501.00001 / 2401.12345v2
+# Old-style (1991–Mar 2007): hep-th/9901001, math.GT/0309136, physics/0306138v1
+ARXIV_ID_RE = re.compile(
+    r"(?:"
+    r"[a-z-]+(?:\.[a-z]{2})?/\d{7}"   # old: archive[/] or archive.CC/
+    r"|"
+    r"\d{4}\.\d{4,5}"                 # new: YYMM.NNNNN
+    r")"
+    r"(?:v\d+)?",
+    re.IGNORECASE,
+)
 
 ARXIV_FIELD_PREFIX = {"author": "au", "title": "ti", "all": "all"}
 
@@ -700,12 +815,18 @@ async def arxiv_search(q: str, field: str = "all", start: int = 0, max_results: 
 
     A bare arXiv ID or an arxiv.org URL is still resolved as an exact id_list
     lookup regardless of `field` (used by "add by arXiv ID or link" flows).
+    Accepts both post-2007 IDs (2401.12345) and old-style archive IDs
+    (physics/0306138, hep-th/9901001).
     """
     q = q.strip()
     m = ARXIV_ID_RE.search(q)
     if field == "id" or (m and (ARXIV_ID_RE.fullmatch(q) or "arxiv.org" in q)):
         if not m:
-            raise HTTPException(status_code=400, detail=f'"{q}" doesn\'t look like an arXiv ID or URL (expected e.g. 2401.12345)')
+            raise HTTPException(
+                status_code=400,
+                detail=f'"{q}" doesn\'t look like an arXiv ID or URL '
+                       f"(expected e.g. 2401.12345 or physics/0306138)",
+            )
         papers, total = await _fetch_arxiv({"id_list": m.group(0), "max_results": 1})
         return {"papers": papers, "total": total, "start": 0}
 
@@ -775,6 +896,11 @@ async def latex_create_folder(payload: dict):
     return await _proxy_latex("POST", "/folders", json=payload)
 
 
+@app.delete("/api/latex/folders/{folder_path:path}")
+async def latex_delete_folder(folder_path: str):
+    return await _proxy_latex("DELETE", f"/folders/{folder_path}")
+
+
 @app.get("/api/latex/files/{filename:path}")
 async def latex_get_file(filename: str):
     return await _proxy_latex("GET", f"/files/{filename}")
@@ -783,6 +909,262 @@ async def latex_get_file(filename: str):
 @app.delete("/api/latex/files/{filename:path}")
 async def latex_delete_file(filename: str):
     return await _proxy_latex("DELETE", f"/files/{filename}")
+
+
+@app.post("/api/latex/assets")
+async def latex_upload_asset(payload: dict):
+    return await _proxy_latex("POST", "/assets", json=payload)
+
+
+@app.delete("/api/latex/assets/{asset_path:path}")
+async def latex_delete_asset(asset_path: str):
+    return await _proxy_latex("DELETE", f"/assets/{asset_path}")
+
+
+@app.get("/api/latex/zip/{rel:path}")
+async def latex_zip(rel: str):
+    return await _proxy_latex("GET", f"/zip/{rel}", timeout=60.0)
+
+
+@app.post("/api/latex/rename")
+async def latex_rename(payload: dict):
+    return await _proxy_latex("POST", "/rename", json=payload)
+
+
+# ── Habits (60-Meta/Daily-YYYY-MM-DD.md) ───────────────────────────────────────
+
+DEFAULT_HABIT_KEYS = {
+    "rise": False,
+    "arxiv": False,
+    "reading": False,
+    "research": False,
+    "extra_read": False,
+    "exercise": False,
+    "mental": False,
+}
+
+
+def _parse_iso_date(s: str) -> str:
+    try:
+        return date.fromisoformat(s).strftime("%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid date: {s}")
+
+
+def habit_path(day: str) -> Path:
+    return VAULT / "60-Meta" / f"Daily-{day}.md"
+
+
+def _load_habits(day: str) -> dict:
+    path = habit_path(day)
+    if not path.exists():
+        return {"date": day, "habits": {}}
+    post = frontmatter.load(str(path))
+    habits = post.metadata.get("habits")
+    if not isinstance(habits, dict):
+        habits = {}
+    return {"date": post.metadata.get("date") or day, "habits": habits}
+
+
+def _write_habits(day: str, habits: dict) -> dict:
+    path = habit_path(day)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        post = frontmatter.load(str(path))
+    else:
+        post = frontmatter.Post("")
+        post.metadata["date"] = day
+        # Seed defaults only on first create; later writes keep whatever keys the client sends.
+        post.metadata["habits"] = dict(DEFAULT_HABIT_KEYS)
+    # Merge: client may send a partial dict; preserve unknown keys unless overwritten.
+    existing = post.metadata.get("habits") if isinstance(post.metadata.get("habits"), dict) else {}
+    merged = {**existing, **habits}
+    post.metadata["date"] = day
+    post.metadata["habits"] = merged
+    path.write_text(frontmatter.dumps(post))
+    return {"date": day, "habits": merged}
+
+
+@app.get("/api/habits/range")
+async def habits_range(start: str, end: str):
+    start_d = date.fromisoformat(_parse_iso_date(start))
+    end_d = date.fromisoformat(_parse_iso_date(end))
+    if end_d < start_d:
+        raise HTTPException(status_code=400, detail="end must be >= start")
+    if (end_d - start_d).days > 400:
+        raise HTTPException(status_code=400, detail="range too large (max 400 days)")
+    days = []
+    cur = start_d
+    while cur <= end_d:
+        days.append(_load_habits(cur.strftime("%Y-%m-%d")))
+        cur += timedelta(days=1)
+    return {"days": days}
+
+
+@app.get("/api/habits/{day}")
+async def get_habits(day: str):
+    day = _parse_iso_date(day)
+    return _load_habits(day)
+
+
+class HabitsPayload(BaseModel):
+    habits: dict[str, Any]
+
+
+@app.post("/api/habits/{day}")
+async def post_habits(day: str, payload: HabitsPayload):
+    day = _parse_iso_date(day)
+    return {"ok": True, **_write_habits(day, payload.habits)}
+
+
+# ── Tasks (80-Tasks/{id}.md) ──────────────────────────────────────────────────
+
+TASK_STATUSES = {"todo", "in_progress", "done"}
+
+
+def tasks_dir() -> Path:
+    d = VAULT / "80-Tasks"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def task_path(task_id: str) -> Path:
+    if not task_id or "/" in task_id or "\\" in task_id or ".." in task_id:
+        raise HTTPException(status_code=400, detail="Invalid task id")
+    return tasks_dir() / f"{task_id}.md"
+
+
+def _task_from_post(task_id: str, post) -> dict:
+    fm = dict(post.metadata)
+    return {
+        "id": task_id,
+        "title": fm.get("title") or task_id,
+        "status": fm.get("status") or "todo",
+        "tags": fm.get("tags") if isinstance(fm.get("tags"), list) else [],
+        "parent": fm.get("parent"),
+        "due": fm.get("due") or "",
+        "completed_date": fm.get("completed_date") or "",
+        "recurring": bool(fm.get("recurring")),
+        "body": post.content or "",
+    }
+
+
+def _maybe_reset_recurring(task: dict, post, path: Path) -> dict:
+    """If recurring and completed on a previous local calendar day, reset to todo."""
+    if not task.get("recurring") or task.get("status") != "done":
+        return task
+    completed = task.get("completed_date") or ""
+    today = date.today().strftime("%Y-%m-%d")
+    if completed and completed < today:
+        post.metadata["status"] = "todo"
+        post.metadata["completed_date"] = ""
+        path.write_text(frontmatter.dumps(post))
+        task["status"] = "todo"
+        task["completed_date"] = ""
+    return task
+
+
+@app.get("/api/tasks")
+async def list_tasks():
+    out = []
+    for p in sorted(tasks_dir().glob("*.md")):
+        post = frontmatter.load(str(p))
+        task = _task_from_post(p.stem, post)
+        task = _maybe_reset_recurring(task, post, p)
+        out.append(task)
+    return {"tasks": out}
+
+
+class TaskCreate(BaseModel):
+    title: str
+    status: str = "todo"
+    tags: list[str] = []
+    parent: Optional[str] = None
+    due: Optional[str] = None
+    recurring: bool = False
+    body: Optional[str] = ""
+
+
+@app.post("/api/tasks")
+async def create_task(payload: TaskCreate):
+    status = payload.status if payload.status in TASK_STATUSES else "todo"
+    task_id = "t" + uuid.uuid4().hex[:12]
+    path = task_path(task_id)
+    post = frontmatter.Post(payload.body or "")
+    post.metadata.update(
+        {
+            "title": payload.title.strip() or "Untitled",
+            "status": status,
+            "tags": payload.tags or [],
+            "parent": payload.parent,
+            "due": payload.due or "",
+            "completed_date": date.today().strftime("%Y-%m-%d") if status == "done" else "",
+            "recurring": bool(payload.recurring),
+        }
+    )
+    path.write_text(frontmatter.dumps(post))
+    return {"ok": True, "task": _task_from_post(task_id, post)}
+
+
+@app.get("/api/tasks/{task_id}")
+async def get_task(task_id: str):
+    path = task_path(task_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Task not found")
+    post = frontmatter.load(str(path))
+    task = _maybe_reset_recurring(_task_from_post(task_id, post), post, path)
+    return task
+
+
+class TaskUpdate(BaseModel):
+    title: Optional[str] = None
+    status: Optional[str] = None
+    tags: Optional[list[str]] = None
+    parent: Optional[str] = None
+    due: Optional[str] = None
+    recurring: Optional[bool] = None
+    body: Optional[str] = None
+    completed_date: Optional[str] = None
+
+
+@app.put("/api/tasks/{task_id}")
+async def update_task(task_id: str, payload: TaskUpdate):
+    path = task_path(task_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Task not found")
+    post = frontmatter.load(str(path))
+    data = payload.model_dump(exclude_unset=True)
+    if "status" in data and data["status"] not in TASK_STATUSES:
+        raise HTTPException(status_code=400, detail=f"Invalid status: {data['status']}")
+    if "status" in data:
+        if data["status"] == "done" and not data.get("completed_date"):
+            data["completed_date"] = date.today().strftime("%Y-%m-%d")
+        if data["status"] != "done":
+            data["completed_date"] = ""
+    for k, v in data.items():
+        if k == "body":
+            post.content = v if v is not None else ""
+        else:
+            post.metadata[k] = v
+    path.write_text(frontmatter.dumps(post))
+    return {"ok": True, "task": _task_from_post(task_id, post)}
+
+
+@app.delete("/api/tasks/{task_id}")
+async def delete_task(task_id: str):
+    path = task_path(task_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Task not found")
+    # Also clear parent pointers? Leave orphans as top-level by nulling parent refs.
+    for p in tasks_dir().glob("*.md"):
+        if p.stem == task_id:
+            continue
+        post = frontmatter.load(str(p))
+        if post.metadata.get("parent") == task_id:
+            post.metadata["parent"] = None
+            p.write_text(frontmatter.dumps(post))
+    path.unlink()
+    return {"ok": True, "id": task_id}
 
 
 # ── Scores ────────────────────────────────────────────────────────────────────
@@ -839,6 +1221,30 @@ def compute_scores_for_day(target_date: date) -> dict:
             detail.append({"action": "weekly_synthesis", "note": p.stem, "pts": 10})
             synth_written = True
 
+    # Tasks completed today: 2 pts each, cap 15/day
+    tasks_dir_path = VAULT / "80-Tasks"
+    if tasks_dir_path.exists():
+        task_pts = 0
+        for p in tasks_dir_path.glob("*.md"):
+            if task_pts >= 15:
+                break
+            post = frontmatter.load(str(p))
+            fm = post.metadata
+            if fm.get("status") == "done" and fm.get("completed_date") == date_str:
+                points += 2
+                task_pts += 2
+                detail.append({"action": "task_done", "citekey": p.stem, "pts": 2})
+
+    # Habits checked today: 1 pt each (dynamic keys)
+    habit_file = VAULT / "60-Meta" / f"Daily-{date_str}.md"
+    if habit_file.exists():
+        post = frontmatter.load(str(habit_file))
+        habits = post.metadata.get("habits") if isinstance(post.metadata.get("habits"), dict) else {}
+        for key, val in habits.items():
+            if val is True or val == 1:
+                points += 1
+                detail.append({"action": f"habit:{key}", "pts": 1})
+
     return {"date": date_str, "points": points, "detail": detail}
 
 
@@ -853,6 +1259,71 @@ async def scores_week():
     days = [compute_scores_for_day(today - timedelta(days=i)) for i in range(6, -1, -1)]
     total = sum(d["points"] for d in days)
     return {"days": days, "week_total": total, "week_target": 55}
+
+
+@app.get("/api/scores/range")
+async def scores_range(start: str, end: str):
+    """Daily points from start..end inclusive — feeds the Dashboard lightcurve."""
+    try:
+        start_d = date.fromisoformat(start)
+        end_d = date.fromisoformat(end)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date")
+    if end_d < start_d:
+        raise HTTPException(status_code=400, detail="end must be >= start")
+    if (end_d - start_d).days > 400:
+        raise HTTPException(status_code=400, detail="range too large (max 400 days)")
+    days = []
+    cur = start_d
+    while cur <= end_d:
+        days.append(compute_scores_for_day(cur))
+        cur += timedelta(days=1)
+    return {"days": days}
+
+
+# ── Feynman (CLI terminal — https://www.feynman.is) ────────────────────────────
+
+@app.get("/api/feynman/status")
+async def feynman_status(request: Request):
+    """Probe the Feynman terminal container and return browser WS/HTTP URLs."""
+    installed = False
+    reachable = False
+    detail = ""
+    mode = "terminal"
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(FEYNMAN_URL + "/health", timeout=4.0, follow_redirects=True)
+            reachable = resp.status_code < 500
+            installed = True
+            detail = f"HTTP {resp.status_code}"
+            try:
+                body = resp.json()
+                mode = str(body.get("mode") or mode)
+            except Exception:
+                pass
+    except httpx.RequestError as e:
+        detail = str(e) or e.__class__.__name__
+
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "localhost"
+    hostname = host.split(":")[0]
+    # Prefer same scheme as the page when behind TLS (Tailscale serve, etc.)
+    xf_proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "http").split(",")[0].strip()
+    ws_scheme = "wss" if xf_proto == "https" else "ws"
+    public_url = f"{xf_proto}://{hostname}:{FEYNMAN_HOST_PORT}/"
+    ws_url = f"{ws_scheme}://{hostname}:{FEYNMAN_HOST_PORT}/ws"
+
+    return {
+        "ok": reachable,
+        "installed": installed or reachable,
+        "reachable": reachable,
+        "mode": mode,
+        "internalUrl": FEYNMAN_URL,
+        "publicUrl": public_url,
+        "wsUrl": ws_url,
+        "port": FEYNMAN_HOST_PORT,
+        "docsUrl": "https://www.feynman.is",
+        "message": detail if not reachable else "Feynman terminal is running",
+    }
 
 
 # ── System Info & Settings ─────────────────────────────────────────────────────

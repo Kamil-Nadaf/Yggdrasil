@@ -1019,7 +1019,7 @@ async def post_habits(day: str, payload: HabitsPayload):
 
 # ── Tasks (80-Tasks/{id}.md) ──────────────────────────────────────────────────
 
-TASK_STATUSES = {"todo", "in_progress", "done"}
+TASK_STATUS_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 
 
 def tasks_dir() -> Path:
@@ -1087,7 +1087,7 @@ class TaskCreate(BaseModel):
 
 @app.post("/api/tasks")
 async def create_task(payload: TaskCreate):
-    status = payload.status if payload.status in TASK_STATUSES else "todo"
+    status = payload.status.strip().lower() if payload.status and TASK_STATUS_RE.fullmatch(payload.status.strip().lower()) else "todo"
     task_id = "t" + uuid.uuid4().hex[:12]
     path = task_path(task_id)
     post = frontmatter.Post(payload.body or "")
@@ -1134,8 +1134,11 @@ async def update_task(task_id: str, payload: TaskUpdate):
         raise HTTPException(status_code=404, detail="Task not found")
     post = frontmatter.load(str(path))
     data = payload.model_dump(exclude_unset=True)
-    if "status" in data and data["status"] not in TASK_STATUSES:
-        raise HTTPException(status_code=400, detail=f"Invalid status: {data['status']}")
+    if "status" in data:
+        raw = (data["status"] or "").strip().lower()
+        if not TASK_STATUS_RE.fullmatch(raw):
+            raise HTTPException(status_code=400, detail=f"Invalid status: {data['status']}")
+        data["status"] = raw
     if "status" in data:
         if data["status"] == "done" and not data.get("completed_date"):
             data["completed_date"] = date.today().strftime("%Y-%m-%d")
@@ -1605,6 +1608,395 @@ async def vault_webdav_sync():
     cfg["last_sync"] = datetime.now().isoformat()
     _WEBDAV_CONFIG_PATH.write_text(json.dumps(cfg))
     return {"ok": True, "message": f"Synced {pushed} file(s) ✓", "pushed": pushed}
+
+
+# ── Auto-sync (periodic, opt-in) — runs the git/webdav sync you already ───────
+# configured above on a timer, so you don't have to remember to click "Sync
+# Now". Off by default. Config lives next to the webhook config below.
+
+_AUTOSYNC_CONFIG_PATH = VAULT / ".ygg-config" / "autosync.json"
+
+
+def _autosync_load_config() -> dict:
+    if not _AUTOSYNC_CONFIG_PATH.exists():
+        return {"enabled": False, "interval_minutes": 30, "target": "git"}
+    try:
+        return json.loads(_AUTOSYNC_CONFIG_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {"enabled": False, "interval_minutes": 30, "target": "git"}
+
+
+class AutoSyncConfigPayload(BaseModel):
+    enabled: bool
+    interval_minutes: int = 30
+    target: str = "git"  # "git" | "webdav" | "both"
+
+
+@app.get("/api/vault/autosync/status")
+async def autosync_status():
+    cfg = _autosync_load_config()
+    return {**cfg, "last_run": cfg.get("last_run")}
+
+
+@app.post("/api/vault/autosync/config")
+async def autosync_config(payload: AutoSyncConfigPayload):
+    _AUTOSYNC_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    cfg = {
+        "enabled": payload.enabled,
+        "interval_minutes": max(5, payload.interval_minutes),
+        "target": payload.target if payload.target in ("git", "webdav", "both") else "git",
+        "last_run": _autosync_load_config().get("last_run"),
+    }
+    _AUTOSYNC_CONFIG_PATH.write_text(json.dumps(cfg))
+    _webdav_ensure_gitignore()
+    return {"ok": True, "message": "Auto-sync settings saved"}
+
+
+async def _autosync_loop():
+    """Background loop: every 5 min, check if it's time to auto-sync per config."""
+    while True:
+        await asyncio.sleep(300)
+        try:
+            cfg = _autosync_load_config()
+            if not cfg.get("enabled"):
+                continue
+            last_run = cfg.get("last_run")
+            interval = timedelta(minutes=cfg.get("interval_minutes", 30))
+            if last_run:
+                try:
+                    if datetime.now() - datetime.fromisoformat(last_run) < interval:
+                        continue
+                except ValueError:
+                    pass
+            target = cfg.get("target", "git")
+            if target in ("git", "both"):
+                try:
+                    await vault_git_sync()
+                except Exception:
+                    pass
+            if target in ("webdav", "both"):
+                try:
+                    await vault_webdav_sync()
+                except Exception:
+                    pass
+            cfg["last_run"] = datetime.now().isoformat()
+            _AUTOSYNC_CONFIG_PATH.write_text(json.dumps(cfg))
+        except Exception:
+            pass  # never let a background sync tick crash the app
+
+
+# ── Weekly score digest → webhook (Slack/Discord-compatible) ──────────────────
+
+_WEBHOOK_CONFIG_PATH = VAULT / ".ygg-config" / "webhook.json"
+
+
+def _webhook_load_config() -> Optional[dict]:
+    if not _WEBHOOK_CONFIG_PATH.exists():
+        return None
+    try:
+        return json.loads(_WEBHOOK_CONFIG_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+class WebhookConfigPayload(BaseModel):
+    url: str
+    enabled: bool = True
+    day_of_week: int = 6  # 0=Monday .. 6=Sunday
+    hour: int = 18        # 24h, local container time
+
+
+@app.get("/api/webhook/status")
+async def webhook_status():
+    cfg = _webhook_load_config()
+    if not cfg:
+        return {"configured": False}
+    return {
+        "configured": True,
+        "url": cfg.get("url", ""),
+        "enabled": cfg.get("enabled", False),
+        "day_of_week": cfg.get("day_of_week", 6),
+        "hour": cfg.get("hour", 18),
+        "last_sent": cfg.get("last_sent"),
+    }
+
+
+@app.post("/api/webhook/config")
+async def webhook_config(payload: WebhookConfigPayload):
+    url = payload.url.strip()
+    if not url:
+        return {"ok": False, "message": "Webhook URL is required"}
+    _WEBHOOK_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    existing = _webhook_load_config() or {}
+    existing.update(
+        {
+            "url": url,
+            "enabled": payload.enabled,
+            "day_of_week": max(0, min(6, payload.day_of_week)),
+            "hour": max(0, min(23, payload.hour)),
+        }
+    )
+    _WEBHOOK_CONFIG_PATH.write_text(json.dumps(existing))
+    _webdav_ensure_gitignore()
+    return {"ok": True, "message": "Webhook saved"}
+
+
+def _build_digest_markdown(period: str) -> tuple[str, int, str, str]:
+    today = date.today()
+    if period == "month":
+        start = today.replace(day=1)
+    else:
+        start = today - timedelta(days=today.weekday())  # Monday of this week
+    start_str = start.isoformat()
+    today_str = today.isoformat()
+
+    lines = [f"# Reading Digest — {start_str} to {today_str}", ""]
+    count = 0
+    for p in sorted((VAULT / "10-Papers").glob("*.md")):
+        post = frontmatter.load(str(p))
+        fm = post.metadata
+        read_date = str(fm.get("read") or "").strip()
+        if not re.match(r"^\d{4}-\d{2}-\d{2}", read_date) or read_date < start_str:
+            continue
+        count += 1
+        lines.append(f"## {fm.get('title', p.stem)}")
+        meta_bits = [f"arXiv:{fm.get('arxiv')}" if fm.get("arxiv") else None, f"read {read_date}"]
+        lines.append(f"*{' · '.join(b for b in meta_bits if b)}*")
+        lines.append("")
+        for slot in ["claim", "evidence", "reasoning", "implications", "context"]:
+            val = str(fm.get(slot) or "").strip()
+            if val:
+                lines.append(f"**{slot.capitalize()}:** {val}")
+        aq = str(fm.get("adversarial_question") or "").strip()
+        if aq:
+            lines.append(f"**Adversarial Question:** {aq}")
+        lines.append("")
+    if count == 0:
+        lines.append("_No papers completed in this period._")
+    return "\n".join(lines), count, start_str, today_str
+
+
+@app.get("/api/digest")
+async def get_digest(period: str = "week"):
+    """Markdown reading digest — papers whose `read` date falls in the period."""
+    markdown, count, start_str, end_str = _build_digest_markdown(period if period == "month" else "week")
+    return {"markdown": markdown, "count": count, "start": start_str, "end": end_str}
+
+
+async def _send_webhook_message(url: str, text: str) -> tuple[bool, str]:
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(url, json={"text": text, "content": text}, timeout=15.0)
+            if resp.status_code >= 300:
+                return False, f"Webhook returned HTTP {resp.status_code}"
+            return True, "Sent ✓"
+    except httpx.HTTPError as e:
+        return False, f"Webhook request failed: {e}"
+
+
+def _weekly_digest_message() -> str:
+    today = date.today()
+    days = [compute_scores_for_day(today - timedelta(days=i)) for i in range(6, -1, -1)]
+    total = sum(d["points"] for d in days)
+    digest_md, count, start_str, end_str = _build_digest_markdown("week")
+    lines = [
+        f"*Yggdrasil weekly digest* — {start_str} to {end_str}",
+        f"Score: {total} / 55 pts · {count} paper(s) completed this week",
+    ]
+    return "\n".join(lines) + "\n\n" + digest_md
+
+
+@app.post("/api/webhook/test")
+async def webhook_test():
+    cfg = _webhook_load_config()
+    if not cfg or not cfg.get("url"):
+        return {"ok": False, "message": "No webhook URL configured — set one above first"}
+    ok, message = await _send_webhook_message(cfg["url"], _weekly_digest_message())
+    if ok:
+        cfg["last_sent"] = date.today().isoformat()
+        _WEBHOOK_CONFIG_PATH.write_text(json.dumps(cfg))
+    return {"ok": ok, "message": message}
+
+
+async def _weekly_digest_loop():
+    """Background loop: checks hourly, sends the weekly digest once per the
+    configured day/hour, guarded so it only fires once per calendar day."""
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            cfg = _webhook_load_config()
+            if not cfg or not cfg.get("enabled") or not cfg.get("url"):
+                continue
+            now = datetime.now()
+            if now.weekday() != cfg.get("day_of_week", 6) or now.hour != cfg.get("hour", 18):
+                continue
+            if cfg.get("last_sent") == now.date().isoformat():
+                continue
+            ok, _ = await _send_webhook_message(cfg["url"], _weekly_digest_message())
+            if ok:
+                cfg["last_sent"] = now.date().isoformat()
+                _WEBHOOK_CONFIG_PATH.write_text(json.dumps(cfg))
+        except Exception:
+            pass  # never let a background digest tick crash the app
+
+
+@app.on_event("startup")
+async def _start_background_loops():
+    asyncio.create_task(_autosync_loop())
+    asyncio.create_task(_weekly_digest_loop())
+
+
+# ── Full-text search over your own notes (not vector search — exact substring,
+# case-insensitive, across frontmatter + body of every note in the vault) ─────
+
+@app.get("/api/search")
+async def search_notes(q: str, limit: int = 30):
+    q_norm = q.strip().lower()
+    if not q_norm:
+        return {"results": []}
+    results = []
+    for md in sorted(VAULT.rglob("*.md")):
+        if md.parent.name == ".ygg-config":
+            continue
+        try:
+            post = frontmatter.load(str(md))
+        except Exception:
+            continue
+        fm = post.metadata
+        haystack_parts = [
+            str(fm.get("title", "")),
+            " ".join(fm.get("tags") or []),
+            " ".join(fm.get("authors") or []),
+            str(fm.get("claim", "")),
+            str(fm.get("evidence", "")),
+            str(fm.get("reasoning", "")),
+            str(fm.get("implications", "")),
+            str(fm.get("context", "")),
+            post.content,
+        ]
+        combined = "\n".join(haystack_parts)
+        idx = combined.lower().find(q_norm)
+        if idx == -1:
+            continue
+        snippet_start = max(0, idx - 60)
+        snippet = combined[snippet_start : idx + len(q_norm) + 60].strip().replace("\n", " ")
+        results.append(
+            {
+                "citekey": md.stem,
+                "title": fm.get("title") or md.stem,
+                "folder": md.parent.name,
+                "path": str(md.relative_to(VAULT)),
+                "snippet": snippet,
+            }
+        )
+        if len(results) >= limit:
+            break
+    return {"results": results, "query": q}
+
+
+# ── Citation graph (Semantic Scholar, best-effort) + AI-adjacent suggestions ──
+# "Citation" edges are real references between papers already in your vault
+# (via Semantic Scholar's public API — no key required). "Suggested" edges use
+# the same local embeddings the indexer already builds for /api/ask — nearest-
+# neighbor by content similarity — so this never calls an external LLM and
+# never auto-writes anything; both are purely additional edges for the Graph
+# view, layered on top of your own [[wikilinks]].
+
+@app.get("/api/graph/citations")
+async def graph_citations():
+    papers = all_papers()
+    arxiv_to_citekey: dict[str, str] = {}
+    for p in papers:
+        aid = str(p["frontmatter"].get("arxiv", "")).strip()
+        if aid:
+            arxiv_to_citekey[aid.split("v")[0]] = p["citekey"]
+
+    edges = []
+    if not arxiv_to_citekey:
+        return {"edges": edges}
+
+    async with httpx.AsyncClient() as client:
+        for aid, citekey in arxiv_to_citekey.items():
+            try:
+                resp = await client.get(
+                    f"https://api.semanticscholar.org/graph/v1/paper/arXiv:{aid}",
+                    params={"fields": "references.externalIds"},
+                    timeout=8.0,
+                )
+                if resp.status_code != 200:
+                    continue
+                data = resp.json()
+                for ref in data.get("references") or []:
+                    ref_arxiv = str((ref.get("externalIds") or {}).get("ArXiv", "")).split("v")[0]
+                    if ref_arxiv and ref_arxiv in arxiv_to_citekey and ref_arxiv != aid:
+                        edges.append({"source": citekey, "target": arxiv_to_citekey[ref_arxiv], "type": "citation"})
+            except httpx.HTTPError:
+                continue  # Semantic Scholar is best-effort — one failure shouldn't block the rest
+    return {"edges": edges}
+
+
+@app.get("/api/graph/suggested")
+async def graph_suggested(limit_per_paper: int = 3):
+    table = get_table()
+    if table is None:
+        return {"edges": [], "warning": "Index not ready yet"}
+    try:
+        rows = table.to_pandas()
+    except Exception:
+        return {"edges": [], "warning": "Index not ready yet"}
+    if rows.empty:
+        return {"edges": []}
+
+    reps = rows.drop_duplicates(subset="citekey", keep="first")
+    edges = []
+    seen_pairs = set()
+    for _, row in reps.iterrows():
+        citekey = row["citekey"]
+        try:
+            neighbors = (
+                table.search(row["embedding"])
+                .limit(limit_per_paper + 5)
+                .select(["citekey"])
+                .to_list()
+            )
+        except Exception:
+            continue
+        added = 0
+        for n in neighbors:
+            other = n["citekey"]
+            if other == citekey or added >= limit_per_paper:
+                continue
+            pair = tuple(sorted((citekey, other)))
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            edges.append({"source": citekey, "target": other, "type": "suggested"})
+            added += 1
+    return {"edges": edges}
+
+
+# ── Bulk Zotero sync check ─────────────────────────────────────────────────────
+
+@app.get("/api/zotero/audit")
+async def zotero_audit():
+    """Which papers in 10-Papers/ aren't in Zotero yet — checked all at once
+    instead of one at a time. Uses the same search_zotero() as everywhere else,
+    so it inherits the Better-BibTeX-then-Web-API fallback."""
+    papers = all_papers()
+    missing = []
+    found = []
+    for p in papers:
+        fm = p["frontmatter"]
+        query = str(fm.get("arxiv") or fm.get("title") or "").strip()
+        if not query:
+            continue
+        entry = {"citekey": p["citekey"], "title": fm.get("title") or p["citekey"], "arxiv": fm.get("arxiv") or ""}
+        try:
+            result = search_zotero(query)
+        except Exception:
+            result = None
+        (found if result else missing).append(entry)
+    return {"missing": missing, "found": found, "total": len(papers)}
 
 
 # ── Serve React frontend ──────────────────────────────────────────────────────

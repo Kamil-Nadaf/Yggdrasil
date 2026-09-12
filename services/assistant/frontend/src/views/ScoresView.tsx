@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, Fragment, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, Fragment, type CSSProperties, type MouseEvent } from "react";
 import {
   Group as PanelGroup,
   Panel,
@@ -20,7 +20,7 @@ const PHD_END_KEY = "yggdrasil:phd-end";
 const DASH_TOP_LAYOUT_KEY = "yggdrasil:dash-top-layout";
 const DASH_HEIGHTS_KEY = "yggdrasil:dash-heights";
 
-type DashWidget = "today" | "activity" | "lightcurve" | "rules";
+type DashWidget = "today" | "activity" | "rules" | "top";
 
 function loadTopLayout(): Layout {
   try {
@@ -116,7 +116,9 @@ function Lightcurve({
   const innerW = W - pad.l - pad.r;
   const innerH = H - pad.t - pad.b;
   const n = Math.max(days.length, 1);
-  const maxV = Math.max(1, ...values);
+  // 15% headroom above the highest point so the peak's dot/line never sits
+  // flush against the top edge (was reading as visually "cut off").
+  const maxV = Math.max(1, ...values) * 1.15;
   const xAt = (i: number) => pad.l + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
   const yAt = (v: number) => pad.t + innerH - (v / maxV) * innerH;
 
@@ -293,20 +295,61 @@ export default function ScoresView() {
     else localStorage.removeItem(PHD_END_KEY);
   }
 
+  const [exportingDigest, setExportingDigest] = useState(false);
+
+  async function handleExportDigest() {
+    setExportingDigest(true);
+    try {
+      const r = await api.digest("week");
+      const blob = new Blob([r.markdown], { type: "text/markdown" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `reading-digest-${r.start}-to-${r.end}.md`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert("Failed to export digest");
+    } finally {
+      setExportingDigest(false);
+    }
+  }
+
   function saveTopLayout(layout: Layout) {
     setTopLayout(layout);
     localStorage.setItem(DASH_TOP_LAYOUT_KEY, JSON.stringify(layout));
   }
 
-  function persistWidgetHeight(id: DashWidget, el: HTMLElement | null) {
-    if (!el) return;
-    const h = Math.round(el.getBoundingClientRect().height);
+  function persistHeight(id: DashWidget, h: number) {
     if (h < 60) return;
     setHeights((prev) => {
       const next = { ...prev, [id]: h };
       localStorage.setItem(DASH_HEIGHTS_KEY, JSON.stringify(next));
       return next;
     });
+  }
+
+  function persistWidgetHeight(id: DashWidget, el: HTMLElement | null) {
+    if (!el) return;
+    persistHeight(id, Math.round(el.getBoundingClientRect().height));
+  }
+
+  function startTopHeightDrag(e: MouseEvent<HTMLButtonElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    const startY = e.clientY;
+    const startH = heights.top ?? 148;
+    const onMove = (ev: globalThis.MouseEvent) => {
+      persistHeight("top", Math.max(120, Math.min(420, Math.round(startH + ev.clientY - startY))));
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
   }
 
   function widgetStyle(id: DashWidget): CSSProperties | undefined {
@@ -353,22 +396,29 @@ export default function ScoresView() {
     <div className={`dashboard${customizing ? " is-editing" : ""}`}>
       <div className="dashboard-header">
         <h1>Dashboard</h1>
-        <button
-          type="button"
-          className={`btn${customizing ? " btn-primary" : ""}`}
-          onClick={() => setCustomizing((v) => !v)}
-          aria-pressed={customizing}
-        >
-          {customizing ? "Done" : "Edit"}
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button type="button" className="btn" onClick={handleExportDigest} disabled={exportingDigest}>
+            {exportingDigest ? "…" : "Export Digest"}
+          </button>
+          <button
+            type="button"
+            className={`btn${customizing ? " btn-primary" : ""}`}
+            onClick={() => setCustomizing((v) => !v)}
+            aria-pressed={customizing}
+          >
+            {customizing ? "Done" : "Edit"}
+          </button>
+        </div>
       </div>
 
+      <div className="dash-top-bleed">
       <PanelGroup
         id="dash-top"
         orientation="horizontal"
         className="dash-top-row"
         defaultLayout={topLayout}
         disabled={!customizing}
+        style={{ height: heights.top ?? 148 }}
         onLayoutChanged={(layout) => {
           if (customizing) saveTopLayout(layout);
         }}
@@ -393,6 +443,14 @@ export default function ScoresView() {
               />
             </div>
             <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>{pct}% of weekly target</div>
+            {customizing && (
+              <button
+                type="button"
+                className="dash-corner-grip"
+                aria-label="Resize This Week"
+                onMouseDown={startTopHeightDrag}
+              />
+            )}
           </div>
         </Panel>
 
@@ -432,9 +490,18 @@ export default function ScoresView() {
                 </div>
               </>
             )}
+            {customizing && (
+              <button
+                type="button"
+                className="dash-corner-grip"
+                aria-label="Resize Days Remaining"
+                onMouseDown={startTopHeightDrag}
+              />
+            )}
           </div>
         </Panel>
       </PanelGroup>
+      </div>
 
       <div
         className="card dash-widget"
@@ -546,11 +613,9 @@ export default function ScoresView() {
         </div>
       </div>
 
-      <div
-        className="card lightcurve-card dash-widget"
-        style={{ marginBottom: 20, ...widgetStyle("lightcurve") }}
-        onMouseUp={(e) => customizing && persistWidgetHeight("lightcurve", e.currentTarget)}
-      >
+      {/* Not a resizable dash-widget: the chart's height must always follow its
+          own aspect ratio, so a stale drag-resized fixed height can't clip it. */}
+      <div className="card lightcurve-card" style={{ marginBottom: 20 }}>
         <div className="heatmap-toolbar">
           <h2 style={{ margin: 0 }}>My Lightcurve</h2>
           <span className="muted mono" style={{ fontSize: 11 }}>

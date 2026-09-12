@@ -15,9 +15,11 @@ interface Props {
   current: View;
   onNavigate: (v: View) => void;
   onSettingsOpen?: () => void;
+  onPageEdit?: () => void;
+  pageEditOpen?: boolean;
 }
 
-export default function Nav({ current, onNavigate, onSettingsOpen }: Props) {
+export default function Nav({ current, onNavigate, onSettingsOpen, onPageEdit, pageEditOpen }: Props) {
   return (
     <nav className="app-nav">
       <div className="nav-brand">
@@ -35,6 +37,13 @@ export default function Nav({ current, onNavigate, onSettingsOpen }: Props) {
           </button>
         ))}
       </div>
+      <button
+        type="button"
+        className={`nav-page-edit${pageEditOpen ? " active" : ""}`}
+        onClick={onPageEdit}
+      >
+        Edit page
+      </button>
       <button
         type="button"
         className="nav-settings-btn"

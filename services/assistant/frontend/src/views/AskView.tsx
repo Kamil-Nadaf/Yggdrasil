@@ -5,6 +5,39 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { api } from "../api/client";
 import { getActiveProviderPayload } from "../lib/aiProvider";
+import { THEME_EVENT, readCssVar } from "../lib/theme";
+
+function feynmanTermTheme() {
+  const bg = readCssVar("--bg", "#0D1117");
+  const fg = readCssVar("--text", "#CDD9E5");
+  const accent = readCssVar("--page-accent", readCssVar("--accent", "#4FC3F7"));
+  const muted = readCssVar("--muted", "#6B7280");
+  const ok = readCssVar("--ok", "#34D399");
+  const crit = readCssVar("--crit", "#F87171");
+  const gate = readCssVar("--gate", "#F59E0B");
+  return {
+    background: bg,
+    foreground: fg,
+    cursor: accent,
+    selectionBackground: accent,
+    black: bg,
+    red: crit,
+    green: ok,
+    yellow: gate,
+    blue: accent,
+    magenta: "#C084FC",
+    cyan: accent,
+    white: fg,
+    brightBlack: muted,
+    brightRed: crit,
+    brightGreen: ok,
+    brightYellow: gate,
+    brightBlue: accent,
+    brightMagenta: "#D8B4FE",
+    brightCyan: accent,
+    brightWhite: fg,
+  };
+}
 
 interface Source {
   citekey: string;
@@ -25,12 +58,22 @@ interface FeynmanStatus {
   mode?: string;
 }
 
+interface SearchResult {
+  citekey: string;
+  title: string;
+  folder: string;
+  path: string;
+  snippet: string;
+}
+
 function NotesPanel() {
+  const [mode, setMode] = useState<"ai" | "search">("ai");
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [answer, setAnswer] = useState<string | null>(null);
   const [sources, setSources] = useState<Source[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
 
   async function handleAsk() {
     if (!question.trim()) return;
@@ -49,11 +92,48 @@ function NotesPanel() {
     }
   }
 
+  async function handleSearch() {
+    if (!question.trim()) return;
+    setLoading(true);
+    setError(null);
+    setSearchResults(null);
+    try {
+      const r = await api.search(question);
+      setSearchResults(r.results);
+    } catch (e: unknown) {
+      setError((e as Error).message || "Search failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function submit() {
+    mode === "ai" ? handleAsk() : handleSearch();
+  }
+
   return (
     <div className="ask-panel">
-      <p className="muted" style={{ marginBottom: 20 }}>
-        Searches your vault and answers from your own notes only. Uses the AI provider configured in Settings
-        (keys stay in this browser).
+      <div className="ask-mode-toggle" role="tablist" aria-label="Ask mode">
+        <button
+          type="button"
+          className={`btn${mode === "ai" ? " btn-primary" : ""}`}
+          onClick={() => setMode("ai")}
+        >
+          Ask (AI)
+        </button>
+        <button
+          type="button"
+          className={`btn${mode === "search" ? " btn-primary" : ""}`}
+          onClick={() => setMode("search")}
+        >
+          Search (exact match)
+        </button>
+      </div>
+
+      <p className="muted" style={{ margin: "10px 0 20px" }}>
+        {mode === "ai"
+          ? "Searches your vault and answers from your own notes only. Uses the AI provider configured in Settings (keys stay in this browser)."
+          : "Plain full-text search across every note's title, tags, CERIC slots, and body — no AI, no embeddings, just exact substring matches."}
       </p>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
@@ -61,25 +141,25 @@ function NotesPanel() {
           type="text"
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && !loading && handleAsk()}
-          placeholder="What mechanisms explain GRB prompt emission variability?"
+          onKeyDown={(e) => e.key === "Enter" && !loading && submit()}
+          placeholder={mode === "ai" ? "What mechanisms explain GRB prompt emission variability?" : "e.g. Lorentz factor, Mrk 501, internal shock"}
           style={{ flex: 1 }}
         />
-        <button className="btn btn-primary" onClick={handleAsk} disabled={loading || !question.trim()}>
-          {loading ? "Thinking…" : "Ask"}
+        <button className="btn btn-primary" onClick={submit} disabled={loading || !question.trim()}>
+          {loading ? "…" : mode === "ai" ? "Ask" : "Search"}
         </button>
       </div>
 
       {error && <div className="crit" style={{ marginBottom: 12 }}>{error}</div>}
 
-      {answer && (
+      {mode === "ai" && answer && (
         <div className="card" style={{ marginBottom: 16 }}>
           <h2>Answer</h2>
           <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.7 }}>{answer}</div>
         </div>
       )}
 
-      {sources.length > 0 && (
+      {mode === "ai" && sources.length > 0 && (
         <div>
           <h2 style={{ marginBottom: 8 }}>Sources</h2>
           {sources.map((s, i) => (
@@ -92,6 +172,27 @@ function NotesPanel() {
           ))}
         </div>
       )}
+
+      {mode === "search" && searchResults && (
+        <div>
+          <div className="muted mono" style={{ fontSize: 12, marginBottom: 8 }}>
+            {searchResults.length} match{searchResults.length === 1 ? "" : "es"}
+          </div>
+          {searchResults.length === 0 ? (
+            <div className="muted">No matches.</div>
+          ) : (
+            searchResults.map((r) => (
+              <div key={r.path} className="card" style={{ marginBottom: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                  <strong>{r.title}</strong>
+                  <span className="muted mono" style={{ fontSize: 11 }}>{r.folder}</span>
+                </div>
+                <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>…{r.snippet}…</div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -101,7 +202,7 @@ function defaultWsUrl() {
   return `${proto}://${window.location.hostname}:6174/ws`;
 }
 
-function FeynmanTerminal({ wsUrl, onExit }: { wsUrl: string; onExit?: () => void }) {
+function FeynmanTerminal({ wsUrl }: { wsUrl: string }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -117,28 +218,7 @@ function FeynmanTerminal({ wsUrl, onExit }: { wsUrl: string; onExit?: () => void
       cursorBlink: true,
       fontSize: 13,
       fontFamily: "IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, monospace",
-      theme: {
-        background: "#0D1117",
-        foreground: "#CDD9E5",
-        cursor: "#4FC3F7",
-        selectionBackground: "rgba(79,195,247,0.35)",
-        black: "#0D1117",
-        red: "#F87171",
-        green: "#34D399",
-        yellow: "#F59E0B",
-        blue: "#4FC3F7",
-        magenta: "#C084FC",
-        cyan: "#22D3EE",
-        white: "#CDD9E5",
-        brightBlack: "#6B7280",
-        brightRed: "#FCA5A5",
-        brightGreen: "#6EE7B7",
-        brightYellow: "#FBBF24",
-        brightBlue: "#7DD3FC",
-        brightMagenta: "#D8B4FE",
-        brightCyan: "#67E8F9",
-        brightWhite: "#F8FAFC",
-      },
+      theme: feynmanTermTheme(),
       convertEol: true,
       scrollback: 5000,
     });
@@ -165,15 +245,28 @@ function FeynmanTerminal({ wsUrl, onExit }: { wsUrl: string; onExit?: () => void
       }
     };
 
+    let gotFirstByte = false;
+    const slowStartTimer = setTimeout(() => {
+      if (!disposed && !gotFirstByte) {
+        term.writeln(
+          "\x1b[2mStill starting — the Feynman CLI itself is booting inside the container. " +
+            "This can take 10-20s on a cold container; it isn't stuck.\x1b[0m"
+        );
+      }
+    }, 6000);
+
     ws.onopen = () => {
       if (disposed) return;
       setConnected(true);
       setErr(null);
+      term.writeln("Shell connected — waiting for the Feynman CLI to start…\r\n");
       sendResize();
       term.focus();
     };
 
     ws.onmessage = (ev) => {
+      gotFirstByte = true;
+      clearTimeout(slowStartTimer);
       if (typeof ev.data === "string") {
         term.write(ev.data);
         return;
@@ -188,8 +281,7 @@ function FeynmanTerminal({ wsUrl, onExit }: { wsUrl: string; onExit?: () => void
     ws.onclose = () => {
       setConnected(false);
       if (!disposed) {
-        term.writeln("\r\n\x1b[33m[session closed]\x1b[0m");
-        onExit?.();
+        term.writeln("\r\n\x1b[33m[session closed — click New session to reopen]\x1b[0m");
       }
     };
 
@@ -198,13 +290,19 @@ function FeynmanTerminal({ wsUrl, onExit }: { wsUrl: string; onExit?: () => void
     });
 
     const onWinResize = () => sendResize();
+    const onTheme = () => {
+      term.options.theme = feynmanTermTheme();
+    };
     window.addEventListener("resize", onWinResize);
+    window.addEventListener(THEME_EVENT, onTheme);
     const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => sendResize()) : null;
     ro?.observe(host);
 
     return () => {
       disposed = true;
+      clearTimeout(slowStartTimer);
       window.removeEventListener("resize", onWinResize);
+      window.removeEventListener(THEME_EVENT, onTheme);
       ro?.disconnect();
       dataSub.dispose();
       try {
@@ -217,7 +315,7 @@ function FeynmanTerminal({ wsUrl, onExit }: { wsUrl: string; onExit?: () => void
       fitRef.current = null;
       wsRef.current = null;
     };
-  }, [wsUrl, onExit]);
+  }, [wsUrl]);
 
   return (
     <div className="ask-feynman-term-wrap">
@@ -306,7 +404,7 @@ function FeynmanPanel() {
       </div>
 
       {reachable ? (
-        <FeynmanTerminal key={session} wsUrl={wsUrl} onExit={refresh} />
+        <FeynmanTerminal key={session} wsUrl={wsUrl} />
       ) : (
         <div className="card ask-feynman-install">
           <h2 style={{ marginTop: 0 }}>Start Feynman terminal</h2>

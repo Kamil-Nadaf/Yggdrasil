@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Group, Panel, Separator, useDefaultLayout, type LayoutStorage } from "react-resizable-panels";
 import { api, type ArxivPaper } from "../api/client";
 import { SlotIndicator, CericSelectionToolbar, useCericAppend } from "../components/CericToolbar";
+import AbstractText from "../components/AbstractText";
 
 const SHORTLIST_KEY = "yggdrasil:shortlist";
 const MY_LIST_KEY = "yggdrasil:my-list";
@@ -190,7 +191,7 @@ export default function ArxivSearch() {
                   >
                     {expandedIds.has(p.id) ? "▾ hide abstract" : "▸ show abstract"}
                   </button>
-                  {expandedIds.has(p.id) && <div className="arxiv-row-abstract">{p.abstract}</div>}
+                  {expandedIds.has(p.id) && <AbstractText text={p.abstract} className="arxiv-row-abstract" />}
                   <div className="arxiv-row-actions">
                     <button className="btn btn-primary" onClick={(e) => { e.stopPropagation(); addToShortlist(p); }}>
                       ➕ Shortlist
@@ -275,7 +276,7 @@ export default function ArxivSearch() {
                 />
               )}
 
-              <div className={`arxiv-reading-abstract${flashId === activePaper.id ? " flash" : ""}`}>{activePaper.abstract}</div>
+              <AbstractText text={activePaper.abstract} className={`arxiv-reading-abstract${flashId === activePaper.id ? " flash" : ""}`} />
               <div className="arxiv-reading-actions">
                 <button className="btn" onClick={() => window.open(activePaper.pdf_url, "_blank", "noopener,noreferrer")}>
                   ↗ Open PDF

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api, type ArxivPaper, type ArxivSearchField } from "../api/client";
 import { SlotIndicator, CericSelectionToolbar, useCericAppend } from "../components/CericToolbar";
+import AbstractText from "../components/AbstractText";
 
 interface ToastMsg { text: string; ok: boolean }
 
@@ -169,7 +170,7 @@ export default function ArxivBrowser() {
                   )}
                 </div>
                 {!expandedIds.has(p.id) && (
-                  <div className="browser-card-abstract-preview">{p.abstract}</div>
+                  <AbstractText text={p.abstract} className="browser-card-abstract-preview" />
                 )}
                 <button
                   className="arxiv-row-abstract-toggle"
@@ -178,7 +179,7 @@ export default function ArxivBrowser() {
                   {expandedIds.has(p.id) ? "▾ hide abstract" : "▸ show full abstract"}
                 </button>
                 {expandedIds.has(p.id) && (
-                  <div className={`browser-card-abstract${flashId === p.id ? " flash" : ""}`}>{p.abstract}</div>
+                  <AbstractText text={p.abstract} className={`browser-card-abstract${flashId === p.id ? " flash" : ""}`} />
                 )}
                 {selectedText && selectionPaperId === p.id && (
                   <CericSelectionToolbar

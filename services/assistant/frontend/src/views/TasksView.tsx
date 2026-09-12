@@ -11,15 +11,10 @@ import {
 } from "@dnd-kit/core";
 import { useDraggable } from "@dnd-kit/core";
 import { api, type Task } from "../api/client";
+import { THEME_EVENT, loadTaskStatuses, type TaskStatusDef } from "../lib/theme";
 
-type Status = Task["status"];
+type Status = string;
 type Mode = "list" | "kanban";
-
-const COLUMNS: { id: Status; label: string }[] = [
-  { id: "todo", label: "To Do" },
-  { id: "in_progress", label: "In Progress" },
-  { id: "done", label: "Done" },
-];
 
 function KanbanCard({ task }: { task: Task }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: task.id });
@@ -40,12 +35,15 @@ function KanbanCard({ task }: { task: Task }) {
   );
 }
 
-function KanbanColumn({ id, label, tasks }: { id: Status; label: string; tasks: Task[] }) {
+function KanbanColumn({ id, label, color, tasks }: { id: Status; label: string; color: string; tasks: Task[] }) {
   const { setNodeRef, isOver } = useDroppable({ id });
   return (
-    <div ref={setNodeRef} className={`task-kanban-col${isOver ? " over" : ""}`}>
+    <div ref={setNodeRef} className={`task-kanban-col${isOver ? " over" : ""}`} style={{ borderTopColor: color }}>
       <div className="task-kanban-col-head">
-        <span>{label}</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span className="status-editor-dot" style={{ background: color }} />
+          {label}
+        </span>
         <span className="muted mono">{tasks.length}</span>
       </div>
       <div className="task-kanban-col-body">
@@ -66,6 +64,23 @@ export default function TasksView() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [activeId, setActiveId] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [statuses, setStatuses] = useState<TaskStatusDef[]>(() => loadTaskStatuses());
+
+  useEffect(() => {
+    const sync = () => setStatuses(loadTaskStatuses());
+    window.addEventListener(THEME_EVENT, sync);
+    return () => window.removeEventListener(THEME_EVENT, sync);
+  }, []);
+
+  const columns = useMemo(() => {
+    const known = new Set(statuses.map((s) => s.id));
+    const extra = tasks
+      .map((t) => t.status)
+      .filter((id) => id && !known.has(id))
+      .filter((id, i, arr) => arr.indexOf(id) === i)
+      .map((id) => ({ id, label: id, color: "#6B7280" }));
+    return [...statuses, ...extra];
+  }, [statuses, tasks]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
@@ -144,7 +159,7 @@ export default function TasksView() {
     const over = e.over?.id;
     if (!over) return;
     const status = String(over) as Status;
-    if (!COLUMNS.some((c) => c.id === status)) return;
+    if (!columns.some((c) => c.id === status)) return;
     const id = String(e.active.id);
     const task = tasks.find((t) => t.id === id);
     if (!task || task.status === status) return;
@@ -220,6 +235,7 @@ export default function TasksView() {
                   onDue={(d) => updateDue(parent.id, d)}
                   onRecurring={() => toggleRecurring(parent)}
                   onDelete={() => handleDelete(parent.id)}
+                  statuses={columns}
                 />
                 {isOpen && kids.map((child) => (
                   <TaskRow
@@ -235,6 +251,7 @@ export default function TasksView() {
                     onDue={(d) => updateDue(child.id, d)}
                     onRecurring={() => toggleRecurring(child)}
                     onDelete={() => handleDelete(child.id)}
+                    statuses={columns}
                   />
                 ))}
               </div>
@@ -255,17 +272,19 @@ export default function TasksView() {
               onDue={(d) => updateDue(orphan.id, d)}
               onRecurring={() => toggleRecurring(orphan)}
               onDelete={() => handleDelete(orphan.id)}
+              statuses={columns}
             />
           ))}
         </div>
       ) : (
         <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
           <div className="task-kanban">
-            {COLUMNS.map((col) => (
+            {columns.map((col) => (
               <KanbanColumn
                 key={col.id}
                 id={col.id}
                 label={col.label}
+                color={col.color}
                 tasks={tasks.filter((t) => t.status === col.id)}
               />
             ))}
@@ -295,6 +314,7 @@ function TaskRow({
   onDue,
   onRecurring,
   onDelete,
+  statuses,
 }: {
   task: Task;
   depth: number;
@@ -307,7 +327,10 @@ function TaskRow({
   onDue: (d: string) => void;
   onRecurring: () => void;
   onDelete: () => void;
+  statuses: TaskStatusDef[];
 }) {
+  const statusDef = statuses.find((s) => s.id === task.status);
+  const statusColor = statusDef?.color || "var(--muted)";
   return (
     <div className={`task-row${task.status === "done" ? " done" : ""}`} style={{ paddingLeft: 12 + depth * 20 }}>
       <div className="task-row-name">
@@ -316,7 +339,13 @@ function TaskRow({
         ) : (
           <span className="task-expand spacer" />
         )}
-        <button type="button" className={`task-check${task.status === "done" ? " checked" : ""}`} onClick={onToggleDone} title="Toggle done">
+        <button
+          type="button"
+          className={`task-check${task.status === "done" ? " checked" : ""}`}
+          onClick={onToggleDone}
+          title="Toggle done"
+          style={{ color: statusColor }}
+        >
           {task.status === "done" ? "●" : "○"}
         </button>
         <span className="task-title">{task.title}</span>
@@ -334,10 +363,13 @@ function TaskRow({
         />
       </div>
       <div>
-        <select value={task.status} onChange={(e) => onStatus(e.target.value as Status)}>
-          <option value="todo">To Do</option>
-          <option value="in_progress">In Progress</option>
-          <option value="done">Done</option>
+        <select value={task.status} onChange={(e) => onStatus(e.target.value)}>
+          {statuses.map((s) => (
+            <option key={s.id} value={s.id}>{s.label}</option>
+          ))}
+          {!statuses.some((s) => s.id === task.status) && (
+            <option value={task.status}>{task.status}</option>
+          )}
         </select>
       </div>
       <div>

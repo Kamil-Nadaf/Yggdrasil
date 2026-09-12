@@ -101,9 +101,16 @@ async def terminal_ws(ws: WebSocket):
         "physics / astrophysics (high-energy astrophysics, GRBs, compact objects)",
     )
 
+    # bash keeps the PTY alive while `feynman` does its slow first-run boot
+    # (~30–45s). A bare `feynman` spawn looks like “nothing opened”.
     try:
         proc = await asyncio.create_subprocess_exec(
-            FEYNMAN_BIN,
+            "/bin/bash",
+            "-lc",
+            (
+                "echo 'Starting Feynman CLI (first launch can take ~40s)…'; "
+                f"exec {FEYNMAN_BIN}"
+            ),
             stdin=slave,
             stdout=slave,
             stderr=slave,

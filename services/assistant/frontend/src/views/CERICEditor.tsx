@@ -61,6 +61,8 @@ function CollectionTab({
   const [status, setStatus] = useState<"all" | "draft" | "complete">("all");
   const [copyMsg, setCopyMsg] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [zoteroMissing, setZoteroMissing] = useState<Set<string> | null>(null);
+  const [zoteroChecking, setZoteroChecking] = useState(false);
 
   useEffect(() => {
     api.papers.list()
@@ -79,6 +81,19 @@ function CollectionTab({
       flashCopyMsg((await copyToClipboard(r.raw)) ? `Copied ${citekey}.md` : "Copy failed — clipboard unavailable");
     } catch {
       flashCopyMsg("Copy failed");
+    }
+  }
+
+  async function handleZoteroAudit() {
+    setZoteroChecking(true);
+    try {
+      const r = await api.zoteroAudit();
+      setZoteroMissing(new Set(r.missing.map((m) => m.citekey)));
+      flashCopyMsg(`Zotero check: ${r.missing.length} of ${r.total} not in Zotero`);
+    } catch (e) {
+      flashCopyMsg(e instanceof Error ? e.message : "Zotero check failed");
+    } finally {
+      setZoteroChecking(false);
     }
   }
 
@@ -138,6 +153,9 @@ function CollectionTab({
           <option value="draft">Draft</option>
           <option value="complete">Complete</option>
         </select>
+        <button className="btn" onClick={handleZoteroAudit} disabled={zoteroChecking}>
+          {zoteroChecking ? "Checking…" : "Check Zotero"}
+        </button>
         {copyMsg && <span className="ok mono" style={{ fontSize: 12 }}>{copyMsg}</span>}
       </div>
 
@@ -157,6 +175,11 @@ function CollectionTab({
                     </div>
                     <div className="muted mono" style={{ fontSize: 11 }}>
                       {fm.arxiv ? `arXiv:${fm.arxiv}` : p.citekey}{fm.read ? ` · ${fm.read}` : ""}
+                      {zoteroMissing && (
+                        zoteroMissing.has(p.citekey)
+                          ? <span className="crit" style={{ marginLeft: 8 }}>○ not in Zotero</span>
+                          : <span className="ok" style={{ marginLeft: 8 }}>● in Zotero</span>
+                      )}
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: 6, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
@@ -176,7 +199,7 @@ function CollectionTab({
                     style={{
                       height: "100%",
                       width: `${(filled / 5) * 100}%`,
-                      background: filled === 5 ? "var(--ok)" : "var(--accent)",
+                      background: filled === 5 ? "var(--ok)" : "var(--page-accent)",
                       transition: "width 0.3s",
                     }}
                   />
@@ -201,6 +224,21 @@ export default function CERICEditor({ citekey, onBack, onSelectPaper, onPaperDel
   const [examineResult, setExamineResult] = useState<string | null>(null);
   const [examineError, setExamineError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [expandedSlots, setExpandedSlots] = useState<Set<string>>(new Set());
+  const [combinedMsg, setCombinedMsg] = useState<string | null>(null);
+
+  function toggleSlot(key: string) {
+    setExpandedSlots((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
+
+  function flashCombinedMsg(text: string) {
+    setCombinedMsg(text);
+    setTimeout(() => setCombinedMsg(null), 2500);
+  }
 
   useEffect(() => {
     if (!citekey) return;
@@ -337,22 +375,71 @@ export default function CERICEditor({ citekey, onBack, onSelectPaper, onPaperDel
 
       <GateIndicator gate={gate} />
 
-      {/* ── CERIC Slots ─────────────────────────────────────────────────── */}
+      {/* ── CERIC Slots — collapsed by default, click the header to expand ── */}
       {SLOTS.map((slot) => {
         const val = (fm[slot.key] as string) || "";
         const filled = val.trim().length > 0;
+        const open = expandedSlots.has(slot.key);
         return (
-          <div key={slot.key} style={{ marginBottom: 16 }}>
-            <div className="slot-label">{slot.label}</div>
-            <textarea
-              className={`slot-textarea${filled ? " filled" : ""}`}
-              placeholder={slot.hint}
-              value={val}
-              onChange={(e) => setField(slot.key, e.target.value)}
-            />
+          <div key={slot.key} className={`slot-block${open ? " open" : ""}`} style={{ marginBottom: 10 }}>
+            <button
+              type="button"
+              className="slot-label slot-collapse-toggle"
+              onClick={() => toggleSlot(slot.key)}
+              aria-expanded={open}
+            >
+              <span className={`slot-collapse-caret${open ? " open" : ""}`}>▸</span>
+              {slot.label}
+              {filled && <span className="slot-collapse-dot" title="filled" />}
+            </button>
+            {open && (
+              <textarea
+                className={`slot-textarea${filled ? " filled" : ""}`}
+                placeholder={slot.hint}
+                value={val}
+                onChange={(e) => setField(slot.key, e.target.value)}
+                autoFocus
+              />
+            )}
           </div>
         );
       })}
+
+      {/* ── Combined — auto-merges all five slots for a quick copy/export ─── */}
+      <div className="slot-block combined-block" style={{ marginBottom: 16 }}>
+        <div className="slot-label">Combined</div>
+        <div className="combined-preview mono">
+          {SLOTS.map((s) => ((fm[s.key] as string) || "").trim())
+            .filter(Boolean)
+            .join("\n\n") || <span className="muted">Fill in slots above to see the combined text here.</span>}
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
+          <button
+            className="btn"
+            onClick={async () => {
+              const combined = SLOTS.map((s) => `${s.label}: ${((fm[s.key] as string) || "").trim()}`)
+                .filter((line) => !line.endsWith(": "))
+                .join("\n\n");
+              flashCombinedMsg((await copyToClipboard(combined)) ? "Copied combined CERIC text" : "Copy failed — clipboard unavailable");
+            }}
+          >
+            Copy
+          </button>
+          <button
+            className="btn"
+            onClick={async () => {
+              flashCombinedMsg(
+                (await copyToClipboard(buildLatexSnippet(fm)))
+                  ? "Copied LaTeX snippet — paste into any .tex file"
+                  : "Copy failed — clipboard unavailable"
+              );
+            }}
+          >
+            Add to LaTeX
+          </button>
+          {combinedMsg && <span className="ok mono" style={{ fontSize: 12 }}>{combinedMsg}</span>}
+        </div>
+      </div>
 
       {/* ── Adversarial Question ─────────────────────────────────────────── */}
       <div style={{ marginBottom: 16 }}>

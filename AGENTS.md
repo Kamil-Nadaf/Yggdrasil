@@ -673,6 +673,69 @@ indexes all existing files if LanceDB is empty; delete removes all chunks for th
 
 ---
 
+## Recently added: search, digest, citation graph, sync automation
+
+```
+GET  /api/search?q=&limit=30
+  → { results: [{citekey, title, folder, path, snippet}], query }
+  Plain substring search (case-insensitive) across title/tags/authors/CERIC
+  slots/body of every .md in the vault. Not vector search — that's /api/locate
+  and /api/ask. Surfaced in AskView.tsx as a "Search (exact match)" mode
+  alongside the existing AI "Ask Your Notes" mode.
+
+GET  /api/digest?period=week|month
+  → { markdown, count, start, end }
+  Builds a Markdown reading digest from every 10-Papers/ note whose `read`
+  date falls in the period (title, meta, all 5 CERIC slots, AQ). Reused by
+  both the Dashboard's "Export Digest" button (browser download) and the
+  weekly webhook message below — see _build_digest_markdown() in main.py.
+
+GET  /api/graph/citations
+  → { edges: [{source, target, type: "citation"}] }
+  Real citation links via Semantic Scholar's public API, but ONLY between
+  papers already in your vault (matched by arXiv id) — never creates new
+  external nodes. Best-effort: a Semantic Scholar failure for one paper
+  doesn't block the others.
+
+GET  /api/graph/suggested?limit_per_paper=3
+  → { edges: [{source, target, type: "suggested"}], warning? }
+  "Papers that might be related" via nearest-neighbor search over the SAME
+  LanceDB embeddings the indexer already builds for /api/ask — local content
+  similarity, not an LLM call. Purely a suggestion layer for the Graph view;
+  never writes a wikilink or any vault content. Returns a warning if the
+  indexer hasn't embedded anything yet.
+  GraphView.tsx merges wikilink + citation + suggested edges, styled
+  differently (solid / dashed-blue / dotted-purple), with a checkbox to hide
+  suggested edges.
+
+GET  /api/zotero/audit
+  → { missing: [...], found: [...], total }
+  Checks every paper in 10-Papers/ against Zotero in one pass instead of one
+  at a time. Surfaced as a "Check Zotero" button in the Notes → Collection
+  tab, with a ● in Zotero / ○ not in Zotero badge per row.
+
+GET/POST /api/vault/autosync/status|config
+  Runs the existing git/webdav sync automatically on a timer (off by
+  default). Config: {enabled, interval_minutes, target: git|webdav|both},
+  stored at vault/.ygg-config/autosync.json. A background asyncio loop
+  (started in the `startup` event) checks every 5 minutes whether the
+  configured interval has elapsed.
+
+GET/POST /api/webhook/status|config, POST /api/webhook/test
+  Posts a weekly score + reading digest to a Slack/Discord-compatible
+  incoming webhook URL. Config stored at vault/.ygg-config/webhook.json
+  (day_of_week, hour, enabled). A second background asyncio loop checks
+  hourly and sends once per calendar day when the scheduled day/hour hits,
+  guarded by `last_sent` so it can't double-send.
+```
+
+Both `.ygg-config/*.json` files (webdav, autosync, webhook) are auto-added to
+`vault/.gitignore` by `_webdav_ensure_gitignore()` the first time any of them
+is written, so none of them — including the WebDAV password — end up in the
+git-sync feature's commit history.
+
+---
+
 ## Hard constraints — do not violate
 
 1. **Never write into any CERIC slot** from server or AI code, *except* the explicit,

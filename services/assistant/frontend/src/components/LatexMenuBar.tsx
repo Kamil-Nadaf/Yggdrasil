@@ -425,7 +425,19 @@ export function LatexMenuBar({
             title="Enter to save rename, Esc to cancel"
           />
         ) : (
-          <span className="latex-filename-label mono" title={displayName}>
+          <span
+            className="latex-filename-label mono"
+            title="Click to rename"
+            role="button"
+            tabIndex={0}
+            onClick={onStartRename}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onStartRename();
+              }
+            }}
+          >
             {displayName}
             {dirty ? " *" : ""}
           </span>

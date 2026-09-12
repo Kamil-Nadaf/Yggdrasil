@@ -55,7 +55,7 @@ export interface Paper {
 
 export interface GraphData {
   nodes: { id: string; label: string; folder: string; path: string }[];
-  edges: { source: string; target: string }[];
+  edges: { source: string; target: string; type?: string }[];
 }
 
 export interface ScoreDay {
@@ -115,7 +115,7 @@ export interface ZoteroAddResult {
 export interface Task {
   id: string;
   title: string;
-  status: "todo" | "in_progress" | "done";
+  status: string;
   tags: string[];
   parent: string | null;
   due: string;
@@ -163,6 +163,26 @@ export const api = {
 
   locate: (query: string, limit = 5) =>
     req<{ results: { citekey: string; chunk: string }[] }>("POST", "/api/locate", { query, limit }),
+
+  search: (q: string, limit = 30) =>
+    req<{ results: { citekey: string; title: string; folder: string; path: string; snippet: string }[]; query: string }>(
+      "GET",
+      `/api/search?q=${encodeURIComponent(q)}&limit=${limit}`
+    ),
+
+  digest: (period: "week" | "month" = "week") =>
+    req<{ markdown: string; count: number; start: string; end: string }>("GET", `/api/digest?period=${period}`),
+
+  zoteroAudit: () =>
+    req<{
+      missing: { citekey: string; title: string; arxiv: string }[];
+      found: { citekey: string; title: string; arxiv: string }[];
+      total: number;
+    }>("GET", "/api/zotero/audit"),
+
+  graphCitations: () => req<{ edges: { source: string; target: string; type: string }[] }>("GET", "/api/graph/citations"),
+  graphSuggested: () =>
+    req<{ edges: { source: string; target: string; type: string }[]; warning?: string }>("GET", "/api/graph/suggested"),
 
   ask: (question: string, limit = 6, provider?: AiProviderConfig) =>
     req<{ answer: string; sources: { citekey: string; excerpt: string }[] }>("POST", "/api/ask", {
@@ -281,5 +301,24 @@ export const api = {
     webdavConfig: (url: string, username: string, password: string, remote_dir: string) =>
       req<{ ok: boolean; message: string }>("POST", "/api/vault/webdav/config", { url, username, password, remote_dir }),
     webdavSync: () => req<{ ok: boolean; message: string; pushed?: number }>("POST", "/api/vault/webdav/sync"),
+
+    autosyncStatus: () =>
+      req<{ enabled: boolean; interval_minutes: number; target: string; last_run?: string | null }>(
+        "GET",
+        "/api/vault/autosync/status"
+      ),
+    autosyncConfig: (enabled: boolean, interval_minutes: number, target: string) =>
+      req<{ ok: boolean; message: string }>("POST", "/api/vault/autosync/config", { enabled, interval_minutes, target }),
+  },
+
+  webhook: {
+    status: () =>
+      req<{ configured: boolean; url?: string; enabled?: boolean; day_of_week?: number; hour?: number; last_sent?: string | null }>(
+        "GET",
+        "/api/webhook/status"
+      ),
+    config: (url: string, enabled: boolean, day_of_week: number, hour: number) =>
+      req<{ ok: boolean; message: string }>("POST", "/api/webhook/config", { url, enabled, day_of_week, hour }),
+    test: () => req<{ ok: boolean; message: string }>("POST", "/api/webhook/test"),
   },
 };

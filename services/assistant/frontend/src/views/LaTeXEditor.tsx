@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { EditorView, basicSetup } from "codemirror";
 import { keymap } from "@codemirror/view";
 import { EditorState, Prec, Transaction } from "@codemirror/state";
-import { StreamLanguage } from "@codemirror/language";
+import { StreamLanguage, HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { tags as t } from "@lezer/highlight";
 import { stex } from "@codemirror/legacy-modes/mode/stex";
 import { undo, redo, historyKeymap } from "@codemirror/commands";
 import {
@@ -68,16 +69,31 @@ function renameDestination(src: string, typed: string, kind: "file" | "folder" |
 const editorTheme = EditorView.theme(
   {
     "&": { height: "100%", fontSize: "13px", backgroundColor: "var(--bg)", color: "var(--text)" },
-    ".cm-content": { fontFamily: "var(--font-mono)", caretColor: "var(--accent)" },
+    ".cm-content": { fontFamily: "var(--font-mono)", caretColor: "var(--page-accent)" },
     ".cm-gutters": { backgroundColor: "var(--surface)", color: "var(--muted)", border: "none" },
-    ".cm-activeLine": { backgroundColor: "rgba(79,195,247,0.06)" },
-    ".cm-activeLineGutter": { backgroundColor: "rgba(79,195,247,0.08)" },
+    ".cm-activeLine": { backgroundColor: "color-mix(in srgb, var(--page-accent) 10%, transparent)" },
+    ".cm-activeLineGutter": { backgroundColor: "color-mix(in srgb, var(--page-accent) 12%, transparent)" },
     "&.cm-focused": { outline: "none" },
-    ".cm-selectionBackground, ::selection": { backgroundColor: "rgba(79,195,247,0.25) !important" },
+    ".cm-selectionBackground, ::selection": { backgroundColor: "color-mix(in srgb, var(--page-accent) 28%, transparent) !important" },
     ".cm-scroller": { overflow: "auto" },
   },
   { dark: true }
 );
+
+// Theme-aware syntax colors — CodeMirror's default highlight style uses a
+// fixed palette (a saturated blue for strings/brackets) that's hard to read
+// against this app's darker themes. Drive it off the same CSS variables the
+// rest of the UI uses so it adapts to whichever theme is active.
+const latexHighlightStyle = HighlightStyle.define([
+  { tag: t.comment, color: "var(--latex-comment)", fontStyle: "italic" },
+  { tag: [t.keyword, t.controlKeyword, t.moduleKeyword], color: "var(--latex-keyword)", fontWeight: "600" },
+  { tag: [t.string, t.special(t.string)], color: "var(--latex-string)" },
+  { tag: [t.bracket, t.squareBracket, t.paren, t.brace], color: "var(--latex-bracket)" },
+  { tag: [t.variableName, t.propertyName, t.className], color: "var(--text)" },
+  { tag: [t.number, t.atom, t.bool], color: "var(--latex-number)" },
+  { tag: t.operator, color: "var(--text)" },
+  { tag: t.invalid, color: "var(--crit)" },
+]);
 
 const TEXT_UPLOAD_EXTS = [".tex", ".bib", ".txt", ".sty", ".cls", ".bst", ".csv", ".dat"];
 const BINARY_UPLOAD_EXTS = [".png", ".jpg", ".jpeg", ".pdf", ".eps", ".svg"];
@@ -308,6 +324,7 @@ function FileTree({
   onUploadFiles,
   onUploadFolder,
   onDropFiles,
+  onMoveIntoFolder,
   searchTerm,
   onSearchChange,
   onCollapse,
@@ -328,11 +345,14 @@ function FileTree({
   onUploadFiles: () => void;
   onUploadFolder: () => void;
   onDropFiles: (dataTransfer: DataTransfer) => void;
+  onMoveIntoFolder: (path: string, folder: string) => void;
   searchTerm: string;
   onSearchChange: (value: string) => void;
   onCollapse: () => void;
 }) {
   const [ctx, setCtx] = useState<{ x: number; y: number; path: string; kind: "file" | "folder" | "asset" } | null>(null);
+  const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
+  const DRAG_MIME = "application/x-yggdrasil-latex-path";
 
   function displayName(full: string) {
     if (!currentFolder) return full;
@@ -444,7 +464,7 @@ function FileTree({
             {folders.map((folder) => (
               <div
                 key={folder}
-                className="latex-tree-folder"
+                className={`latex-tree-folder${dragOverFolder === folder ? " drop-target" : ""}`}
                 onClick={() => onOpenFolder(folder)}
                 onContextMenu={(e) => openCtx(e, folder, "folder")}
                 onClickCapture={(e) => {
@@ -453,6 +473,22 @@ function FileTree({
                     e.stopPropagation();
                     requestRename(folder, "folder");
                   }
+                }}
+                onDragOver={(e) => {
+                  if (!e.dataTransfer.types.includes(DRAG_MIME)) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  e.dataTransfer.dropEffect = "move";
+                  setDragOverFolder(folder);
+                }}
+                onDragLeave={() => setDragOverFolder((f) => (f === folder ? null : f))}
+                onDrop={(e) => {
+                  const path = e.dataTransfer.getData(DRAG_MIME);
+                  setDragOverFolder(null);
+                  if (!path) return; // not an internal drag — let it fall through to onDropFiles (OS upload)
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onMoveIntoFolder(path, folder);
                 }}
               >
                 <div className="latex-tree-folder-icon" aria-hidden>📁</div>
@@ -485,6 +521,11 @@ function FileTree({
               <div
                 key={f.name}
                 className={`latex-tree-item${selected === f.name ? " active" : ""}`}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData(DRAG_MIME, f.name);
+                }}
                 onClick={(e) => {
                   if (e.ctrlKey || e.metaKey) {
                     e.preventDefault();
@@ -515,6 +556,11 @@ function FileTree({
               <div
                 key={a.name}
                 className="latex-tree-item latex-tree-asset"
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData(DRAG_MIME, a.name);
+                }}
                 onClick={(e) => {
                   if (e.ctrlKey || e.metaKey) {
                     e.preventDefault();
@@ -844,6 +890,9 @@ export default function LaTeXEditor() {
   const [currentFolder, setCurrentFolder] = useState("");
   const [selected, setSelected] = useState("");
   const [filename, setFilename] = useState(todayFilename());
+  const [renaming, setRenaming] = useState(false);
+  const renameOriginalRef = useRef<string>("");
+  const renameKindRef = useRef<"file" | "folder" | "asset">("file");
   const [searchTerm, setSearchTerm] = useState("");
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1101,6 +1150,7 @@ export default function LaTeXEditor() {
             ),
             LATEX_LANG,
             editorTheme,
+            syntaxHighlighting(latexHighlightStyle),
             EditorView.updateListener.of((update) => {
               if (update.docChanged) {
                 setDirty(true);
@@ -1367,27 +1417,64 @@ export default function LaTeXEditor() {
       setPrompt({ type: "rename", src: selected, fileKind });
       return;
     }
+    // No tree item selected — this is the currently-open document shown
+    // top-center in the toolbar; edit it inline instead of via a modal.
+    beginInlineRename();
+  }
+
+  /** Inline rename of the top-center filename label — click to edit, Enter to commit. */
+  function beginInlineRename() {
     const stem = filename.trim().replace(/\.tex$/i, "");
+    let src = `${stem || uniqueDraftName()}.tex`;
+    let kind: "file" | "folder" | "asset" = "file";
     const fileMatch = files.find((f) => f.name === stem || f.name === `${stem}.tex`);
     if (fileMatch) {
-      setPrompt({ type: "rename", src: fileMatch.name, fileKind: "file" });
-      return;
+      src = fileMatch.name;
+      kind = "file";
+    } else {
+      const folderMatch = folders.find((f) => f === stem || f === filename);
+      if (folderMatch) {
+        src = folderMatch;
+        kind = "folder";
+      } else {
+        const assetMatch = assets.find((a) => a.name === filename);
+        if (assetMatch) {
+          src = assetMatch.name;
+          kind = "asset";
+        }
+      }
     }
-    const folderMatch = folders.find((f) => f === stem || f === filename);
-    if (folderMatch) {
-      setPrompt({ type: "rename", src: folderMatch, fileKind: "folder" });
-      return;
-    }
-    const assetMatch = assets.find((a) => a.name === filename);
-    if (assetMatch) {
-      setPrompt({ type: "rename", src: assetMatch.name, fileKind: "asset" });
-      return;
-    }
-    setPrompt({ type: "rename", src: `${stem || uniqueDraftName()}.tex`, fileKind: "file" });
+    renameOriginalRef.current = src;
+    renameKindRef.current = kind;
+    setRenaming(true);
+  }
+
+  async function commitInlineRename() {
+    if (!renaming) return;
+    setRenaming(false);
+    const src = renameOriginalRef.current;
+    const dest = renameDestination(src, filename, renameKindRef.current);
+    if (!dest || dest === src) return;
+    await handleRenamePath(src, dest);
+  }
+
+  function cancelInlineRename() {
+    setRenaming(false);
+    setFilename(renameOriginalRef.current.replace(/\.tex$/i, ""));
   }
 
   function requestTreeRename(path: string, fileKind: "file" | "folder" | "asset") {
     setPrompt({ type: "rename", src: path, fileKind });
+  }
+
+  /** Drag a file/asset row onto a folder row to move it there. */
+  async function handleMoveIntoFolder(path: string, folder: string) {
+    const base = path.split("/").pop() || path;
+    const parent = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+    if (parent === folder) return; // already there
+    const dest = `${folder}/${base}`;
+    if (dest === path) return;
+    await handleRenamePath(path, dest);
   }
 
   async function handleRenamePath(src: string, dest: string) {
@@ -1612,11 +1699,11 @@ export default function LaTeXEditor() {
     <div className="latex-shell">
       <LatexMenuBar
         filename={filename}
-        renaming={false}
+        renaming={renaming}
         onStartRename={startRename}
-        onFilenameChange={() => undefined}
-        onCommitRename={() => undefined}
-        onCancelRename={() => undefined}
+        onFilenameChange={setFilename}
+        onCommitRename={commitInlineRename}
+        onCancelRename={cancelInlineRename}
         dirty={dirty}
         saveMsg={saveMsg}
         compiling={compiling}
@@ -1741,6 +1828,7 @@ export default function LaTeXEditor() {
                 onUploadFiles={handleUploadFiles}
                 onUploadFolder={handleUploadFolder}
                 onDropFiles={handleDroppedFiles}
+                onMoveIntoFolder={handleMoveIntoFolder}
                 searchTerm={searchTerm}
                 onSearchChange={setSearchTerm}
                 onCollapse={() => setFilesOpen(false)}

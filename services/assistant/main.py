@@ -10,26 +10,38 @@ Routes:
   POST /api/papers/{citekey}/triage
   POST /api/papers/{citekey}/append-slot
   GET  /api/papers/{citekey}/raw
+  GET  /api/books
+  POST /api/books
+  GET  /api/books/{slug}/sections
+  GET  /api/books/{slug}/sections/{id}
+  PUT  /api/books/{slug}/sections/{id}
+  DELETE /api/books/{slug}/sections/{id}
+  GET  /api/books/{slug}/sections/{id}/raw
   POST /api/locate
   POST /api/ask
   POST /api/examine          ← GATE PROTECTED; AI call (provider from request, not stored)
   GET  /api/habits/range
   GET  /api/habits/{date}
   POST /api/habits/{date}
-  GET  /api/tasks
-  POST /api/tasks
-  GET  /api/tasks/{id}
-  PUT  /api/tasks/{id}
-  DELETE /api/tasks/{id}
+  GET  /api/task-projects
+  POST /api/task-projects
+  DELETE /api/task-projects/{slug}
+  GET  /api/task-projects/{slug}/main-tasks
+  POST /api/task-projects/{slug}/main-tasks
+  PUT  /api/task-projects/{slug}/main-tasks/{id}
+  DELETE /api/task-projects/{slug}/main-tasks/{id}
+  GET  /api/task-projects/{slug}/main-tasks/{id}/subtasks
+  POST /api/task-projects/{slug}/main-tasks/{id}/subtasks
+  PUT  /api/task-projects/{slug}/main-tasks/{id}/subtasks/{sid}
+  DELETE /api/task-projects/{slug}/main-tasks/{id}/subtasks/{sid}
+  GET  /api/tasks/active-summary
+  GET  /api/tasks/completed-by-day
   GET  /api/graph
   GET  /api/zotero/search
   POST /api/zotero/ensure/{arxiv_id}
   POST /api/zotero/add-paper
   GET  /api/arxiv/daily
   GET  /api/arxiv/search
-  GET  /api/scores/today
-  GET  /api/scores/week
-  GET  /api/scores/range
   POST /api/latex/compile    ← proxied to the internal `latex` service
   POST /api/latex/save
   GET  /api/latex/files
@@ -51,6 +63,7 @@ import glob
 import json
 import time
 import uuid
+import shutil
 import asyncio
 import subprocess
 import xml.etree.ElementTree as ET
@@ -63,17 +76,69 @@ import httpx
 import lancedb
 import pyarrow as pa
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from gate import check_gate, GateError
 from zotero import search_zotero, ensure_arxiv_in_zotero, add_paper_to_zotero
+from data_manifest import (
+    APP_VERSION as MANIFEST_APP_VERSION,
+    count_tex_files,
+    ensure_layout_safe,
+    inspect_data_dir,
+    load_manifest,
+    write_manifest,
+)
+from analysis_tags import (
+    DEFAULT_ANALYSIS_TAGS,
+    analysis_keys,
+    load_app_settings,
+    migrate_frontmatter_keys,
+    normalize_analysis_tags,
+    save_app_settings,
+    scan_frontmatter_keys,
+    tag_to_key,
+)
+from task_statuses import (
+    DEFAULT_TASK_STATUSES,
+    normalize_task_statuses,
+    load_task_statuses,
+)
+from arxiv_topics import ARXIV_TOPICS, is_valid_category, normalize_category, search_query_for
+from graph_links import (
+    DEFAULT_SIMILARITY_THRESHOLD,
+    cosine,
+    delete_auto_edges_for,
+    delete_manual_edges_for,
+    embed_text,
+    extract_note_features,
+    get_edges_table,
+    load_features_from_vault,
+    manual_edges_from_wikilinks,
+    neighbors_from_rows,
+    overlap_edges,
+    upsert_edges,
+)
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
 VAULT = Path(os.environ.get("VAULT_PATH", "/vault"))
+DESKTOP_MODE = os.environ.get("YGG_DESKTOP", "").lower() in ("1", "true", "yes")
+CONFIG_PATH = Path(os.environ["YGG_CONFIG_PATH"]) if os.environ.get("YGG_CONFIG_PATH") else None
+VAULT_FOLDERS = (
+    "00-Inbox",
+    "10-Papers",
+    "15-Books",
+    "20-Concepts",
+    "30-Questions",
+    "40-Synthesis",
+    "50-Projects",
+    "60-Meta",
+    "70-LaTeX",
+    "80-Tasks",
+)
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434")
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "nomic-embed-text")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -82,7 +147,60 @@ GATE_CHECK = os.environ.get("GATE_CHECK", "true").lower() != "false"
 LATEX_URL = os.environ.get("LATEX_URL", "http://latex:9000")
 FEYNMAN_URL = os.environ.get("FEYNMAN_URL", "http://feynman:6174").rstrip("/")
 FEYNMAN_HOST_PORT = os.environ.get("FEYNMAN_HOST_PORT", "6174")
-LANCEDB_PATH = "/data/lancedb"
+LANCEDB_PATH = os.environ.get("LANCEDB_PATH", "/data/lancedb")
+APP_VERSION = os.environ.get("YGG_APP_VERSION", MANIFEST_APP_VERSION)
+EXISTING_DATA = os.environ.get("YGG_EXISTING_DATA", "").lower() in ("1", "true", "yes")
+PREVIOUS_APP_VERSION = os.environ.get("YGG_PREVIOUS_VERSION", "")
+
+def _desktop_config() -> dict:
+    if not CONFIG_PATH or not CONFIG_PATH.exists():
+        return {}
+    try:
+        return json.loads(CONFIG_PATH.read_text())
+    except Exception:
+        return {}
+
+
+def _write_desktop_config(data: dict) -> None:
+    if not CONFIG_PATH:
+        return
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.write_text(json.dumps(data, indent=2))
+
+
+def ensure_vault_layout(root: Path) -> None:
+    ensure_layout_safe(root)
+
+
+def set_vault(path: Path) -> Path:
+    """Point the running app at a new notes folder (desktop only)."""
+    global VAULT
+    resolved = path.expanduser().resolve()
+    if not str(resolved) or resolved == Path("/"):
+        raise ValueError("Choose a folder, not the disk root.")
+    ensure_layout_safe(resolved)
+    VAULT = resolved
+    os.environ["VAULT_PATH"] = str(resolved)
+    if DESKTOP_MODE:
+        cfg = _desktop_config()
+        cfg["vault_path"] = str(resolved)
+        cfg["data_path_chosen"] = True
+        _write_desktop_config(cfg)
+        try:
+            write_manifest(resolved)
+        except Exception:
+            pass
+    return VAULT
+
+
+if DESKTOP_MODE:
+    saved = _desktop_config().get("vault_path")
+    if saved:
+        VAULT = Path(saved).expanduser()
+    manifest = load_manifest(VAULT)
+    if manifest and manifest.get("vault_path"):
+        VAULT = Path(manifest["vault_path"]).expanduser()
+    ensure_layout_safe(VAULT)
 
 app = FastAPI(title="CERIC Reading System")
 
@@ -105,15 +223,96 @@ def get_table():
         return None
 
 
-async def embed(text: str) -> list[float]:
+async def embed(text: str, cfg: Optional["ProviderConfig"] = None) -> list[float]:
+    """
+    Embed text for LanceDB search.
+    Prefer Ollama when available; fall back to OpenAI-compatible embeddings
+    (LM Studio /v1/embeddings) so Ask works without Ollama.
+    """
+    errors: list[str] = []
     async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            f"{OLLAMA_URL}/api/embeddings",
-            json={"model": EMBED_MODEL, "prompt": text},
-            timeout=30.0,
-        )
-        resp.raise_for_status()
-        return resp.json()["embedding"]
+        try:
+            resp = await client.post(
+                f"{OLLAMA_URL}/api/embeddings",
+                json={"model": EMBED_MODEL, "prompt": text},
+                timeout=30.0,
+            )
+            if resp.status_code < 400:
+                return resp.json()["embedding"]
+            errors.append(f"ollama:{resp.status_code}")
+        except Exception as e:
+            errors.append(f"ollama:{e}")
+
+        # OpenAI-compatible embeddings (LM Studio, etc.)
+        base = None
+        model = "text-embedding-nomic-embed-text-v1.5"
+        api_key = "lm-studio"
+        if cfg and cfg.provider in ("lmstudio", "ollama") and cfg.base_url:
+            base = cfg.base_url
+            api_key = cfg.api_key or api_key
+        elif cfg and cfg.base_url and "1234" in (cfg.base_url or ""):
+            base = cfg.base_url
+            api_key = cfg.api_key or api_key
+        if not base:
+            # Common local LM Studio default when Ollama is down
+            base = os.environ.get("LMSTUDIO_URL", "http://127.0.0.1:1234")
+        base = _resolve_llm_base_url(base).rstrip("/")
+        try:
+            resp = await client.post(
+                f"{base}/v1/embeddings",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={"model": model, "input": text[:8000]},
+                timeout=60.0,
+            )
+            resp.raise_for_status()
+            data = resp.json().get("data") or []
+            if data and data[0].get("embedding"):
+                return list(data[0]["embedding"])
+            errors.append("openai-embed:empty")
+        except Exception as e:
+            errors.append(f"openai-embed:{e}")
+
+    raise HTTPException(
+        status_code=503,
+        detail="Embedding failed (need Ollama or LM Studio embeddings). " + "; ".join(errors[:2]),
+    )
+
+
+def _resolve_llm_base_url(url: str) -> str:
+    """From Docker, localhost is the container — rewrite to the host gateway."""
+    u = (url or "").strip().rstrip("/")
+    if not u:
+        return u
+    if DESKTOP_MODE:
+        return u
+    # Docker Desktop (Mac/Windows) + compose on Linux with extra_hosts
+    gateway = os.environ.get("HOST_LLM_GATEWAY", "host.docker.internal")
+    for loopback in ("127.0.0.1", "localhost"):
+        if f"://{loopback}" in u or u.startswith(loopback):
+            return u.replace(loopback, gateway, 1)
+    return u
+
+
+def _message_text(msg: dict) -> str:
+    """OpenAI-compatible message → text (handles reasoning-only models)."""
+    content = msg.get("content")
+    if isinstance(content, str) and content.strip():
+        return content.strip()
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(str(block.get("text") or ""))
+            elif isinstance(block, str):
+                parts.append(block)
+        joined = "\n".join(p for p in parts if p).strip()
+        if joined:
+            return joined
+    for key in ("reasoning_content", "reasoning"):
+        val = msg.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    return ""
 
 
 # ── Vault helpers ─────────────────────────────────────────────────────────────
@@ -138,13 +337,25 @@ def all_papers() -> list[dict]:
     return papers
 
 
+def current_analysis_tags() -> list[str]:
+    return list(load_app_settings(VAULT).get("analysis_tags") or DEFAULT_ANALYSIS_TAGS)
+
+
+def current_analysis_keys() -> list[str]:
+    return analysis_keys(current_analysis_tags())
+
+
+def current_task_statuses() -> list[dict]:
+    return load_task_statuses(load_app_settings(VAULT))
+
+
 def gate_status(citekey: str) -> dict:
     """Return gate pass/fail and which slots are missing."""
     path = paper_path(citekey)
     if not path.exists():
         return {"passed": False, "missing": ["note does not exist"]}
     try:
-        check_gate(path)
+        check_gate(path, slots=current_analysis_keys())
         return {"passed": True, "missing": []}
     except GateError as e:
         return {
@@ -152,6 +363,75 @@ def gate_status(citekey: str) -> dict:
             "missing": e.missing_slots,
             "aq_missing": e.aq_missing,
         }
+
+
+def _gate_passed(path: Path) -> bool:
+    try:
+        check_gate(path, slots=current_analysis_keys())
+        return True
+    except (GateError, FileNotFoundError, OSError):
+        return False
+
+
+async def _refresh_graph_edges_for(citekey: str, fm: dict, body: str = "") -> None:
+    """Recompute manual + auto edges for one note. Never mutates note content."""
+    try:
+        table = get_edges_table(LANCEDB_PATH)
+    except Exception:
+        return
+    keys = current_analysis_keys()
+    delete_manual_edges_for(table, citekey)
+    delete_auto_edges_for(table, citekey)
+    wiki_text = (body or "") + "\n" + " ".join(str(fm.get(k) or "") for k in keys)
+    upsert_edges(table, manual_edges_from_wikilinks(citekey, wiki_text))
+
+    source = extract_note_features(citekey, fm, body or "", analysis_keys=keys)
+    # Representative embedding from claim + title (local Ollama only)
+    claim_key = keys[0] if keys else "claim"
+    seed = f"{fm.get('title', '')}\n{fm.get(claim_key, '')}\n{body or ''}"
+    try:
+        src_vec = await embed_text(OLLAMA_URL, EMBED_MODEL, seed)
+    except Exception:
+        src_vec = None
+
+    others = load_features_from_vault(VAULT, analysis_keys=keys)
+    notes_table = get_table()
+    auto: list[dict] = []
+    for other_key, other_feat in others.items():
+        if other_key == citekey:
+            continue
+        sim = None
+        if src_vec is not None and notes_table is not None:
+            try:
+                hits = (
+                    notes_table.search(src_vec)
+                    .where(f"citekey = '{other_key}'", prefilter=True)
+                    .limit(1)
+                    .select(["citekey", "embedding"])
+                    .to_list()
+                )
+                if hits and hits[0].get("embedding"):
+                    sim = cosine(src_vec, list(hits[0]["embedding"]))
+                else:
+                    # Fall back: search then filter
+                    neigh = notes_table.search(src_vec).limit(40).select(["citekey", "embedding"]).to_list()
+                    for n in neigh:
+                        if n.get("citekey") == other_key and n.get("embedding"):
+                            sim = cosine(src_vec, list(n["embedding"]))
+                            break
+            except Exception:
+                sim = None
+        if sim is None:
+            # Without an embedding match, still allow hard overlaps at high confidence
+            sim = 0.8 if (
+                set(source["methods"]) & set(other_feat["methods"])
+                or set(source["entities"]) & set(other_feat["entities"])
+                or set(source["citations"]) & set(other_feat["citations"])
+            ) else 0.0
+        auto.extend(
+            overlap_edges(source, other_feat, similarity=sim, threshold=DEFAULT_SIMILARITY_THRESHOLD)
+        )
+    upsert_edges(table, auto)
 
 
 # ── Brief ─────────────────────────────────────────────────────────────────────
@@ -212,6 +492,12 @@ async def update_paper(citekey: str, payload: PaperUpdate):
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(frontmatter.dumps(post))
+
+    try:
+        await _refresh_graph_edges_for(citekey, dict(post.metadata), post.content or "")
+    except Exception:
+        pass
+
     return {"ok": True, "citekey": citekey}
 
 
@@ -247,12 +533,18 @@ async def triage_paper(citekey: str, payload: TriagePayload):
     post = frontmatter.load(str(path))
     post.metadata["verdict"] = payload.verdict
     if payload.claim:
-        post.metadata["claim"] = payload.claim
+        first_key = (_slot_keys() or ["claim"])[0]
+        post.metadata[first_key] = payload.claim
     path.write_text(frontmatter.dumps(post))
     return {"ok": True}
 
 
 CERIC_SLOT_KEYS = ["claim", "evidence", "reasoning", "implications", "context"]
+
+
+def _slot_keys() -> list[str]:
+    """Configured analysis frontmatter keys (defaults to classic CERIC)."""
+    return current_analysis_keys() or list(CERIC_SLOT_KEYS)
 
 
 def _ensure_paper_skeleton(citekey: str, meta: dict) -> "frontmatter.Post":
@@ -280,11 +572,6 @@ def _ensure_paper_skeleton(citekey: str, meta: dict) -> "frontmatter.Post":
             "tier": 0,
             "confidence": 0,
             "rating": 0,
-            "claim": "",
-            "evidence": "",
-            "reasoning": "",
-            "implications": "",
-            "context": "",
             "aq_written": False,
             "adversarial_question": "",
             "verdict": "",
@@ -295,6 +582,8 @@ def _ensure_paper_skeleton(citekey: str, meta: dict) -> "frontmatter.Post":
             "tags": [],
         }
     )
+    for key in _slot_keys():
+        post.metadata.setdefault(key, "")
     return post
 
 
@@ -310,12 +599,12 @@ class AppendSlotPayload(BaseModel):
 @app.post("/api/papers/{citekey}/append-slot")
 async def append_slot(citekey: str, payload: AppendSlotPayload):
     """
-    Append text to one CERIC slot, creating a skeleton note first if this paper
+    Append text to one analysis slot, creating a skeleton note first if this paper
     has no note yet. Never overwrites existing slot content — always appends
     with a newline separator; the user reviews/edits the result afterward in
     the CERIC Editor. Uses python-frontmatter for the write, never hand-rolled YAML.
     """
-    if payload.slot not in CERIC_SLOT_KEYS:
+    if payload.slot not in _slot_keys():
         raise HTTPException(status_code=400, detail=f"Invalid slot: {payload.slot}")
 
     text = payload.text.strip()
@@ -334,6 +623,11 @@ async def append_slot(citekey: str, payload: AppendSlotPayload):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(frontmatter.dumps(post))
 
+    try:
+        await _refresh_graph_edges_for(citekey, dict(post.metadata), post.content or "")
+    except Exception:
+        pass
+
     return {"ok": True, "citekey": citekey, "slot": payload.slot, "value": post.metadata[payload.slot]}
 
 
@@ -345,6 +639,319 @@ async def get_paper_raw(citekey: str):
         raise HTTPException(status_code=404, detail=f"Paper not found: {citekey}")
     post = frontmatter.load(str(path))
     return {"raw": frontmatter.dumps(post)}
+
+
+# ── Books (15-Books/{slug}/) ──────────────────────────────────────────────────
+
+BOOK_SLUG_RE = re.compile(r"^[a-z0-9-]+$")
+BOOK_SECTION_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+BOOK_SECTION_BODY = """## Preview
+<!-- 2–3 sentences: what question does this section answer? -->
+
+## Explain Cold
+<!-- Book closed. Explain this in your own words to a smart undergrad. -->
+
+## Sanity Check
+<!-- Plug in a real number. Does the order of magnitude make sense? -->
+
+## Confusions
+<!-- List what you don't understand yet. Chase one; leave the rest here. -->
+"""
+
+
+def books_root() -> Path:
+    return VAULT / "15-Books"
+
+
+def _validate_book_slug(slug: str) -> str:
+    if not slug or not BOOK_SLUG_RE.fullmatch(slug):
+        raise HTTPException(status_code=400, detail="Invalid book slug")
+    return slug
+
+
+def _validate_section_id(section_id: str) -> str:
+    if not section_id or section_id.startswith("_") or not BOOK_SECTION_ID_RE.fullmatch(section_id):
+        raise HTTPException(status_code=400, detail="Invalid section id")
+    return section_id
+
+
+def book_dir(slug: str) -> Path:
+    slug = _validate_book_slug(slug)
+    root = books_root().resolve()
+    path = (root / slug).resolve()
+    if path.parent != root:
+        raise HTTPException(status_code=400, detail="Invalid book slug")
+    return path
+
+
+def book_md_path(slug: str) -> Path:
+    return book_dir(slug) / "_book.md"
+
+
+def section_path(slug: str, section_id: str) -> Path:
+    section_id = _validate_section_id(section_id)
+    folder = book_dir(slug)
+    path = (folder / f"{section_id}.md").resolve()
+    if path.parent != folder.resolve():
+        raise HTTPException(status_code=400, detail="Invalid section id")
+    return path
+
+
+def _ensure_book_section_skeleton(slug: str, section_id: str, meta: dict) -> "frontmatter.Post":
+    """Load an existing section note, or build the standard book-section skeleton."""
+    path = section_path(slug, section_id)
+    if path.exists():
+        return frontmatter.load(str(path))
+    post = frontmatter.Post(BOOK_SECTION_BODY)
+    post.metadata.update(
+        {
+            "type": "book-section",
+            "book": slug,
+            "chapter": meta.get("chapter") if meta.get("chapter") is not None else 0,
+            "section": meta.get("section") if meta.get("section") is not None else "",
+            "title": meta.get("title") or "",
+            "track": meta.get("track"),
+            "read": meta.get("read") or date.today().strftime("%Y-%m-%d"),
+            "tier": meta.get("tier") if meta.get("tier") is not None else 0,
+            "confidence": meta.get("confidence") if meta.get("confidence") is not None else 0,
+            "concepts": meta.get("concepts") or [],
+            "tags": meta.get("tags") or [],
+            "explain_cold": meta.get("explain_cold") or "",
+            "sanity_check": meta.get("sanity_check") or "",
+            "confusions": meta.get("confusions") or "",
+        }
+    )
+    return post
+
+
+class BookCreate(BaseModel):
+    slug: str
+    title: str
+    authors: list[str] = []
+    year: Optional[int] = None
+    has_tracks: bool = False
+
+
+class BookSectionUpdate(BaseModel):
+    frontmatter: dict[str, Any]
+    body: Optional[str] = None
+
+
+@app.get("/api/books")
+async def list_books():
+    root = books_root()
+    books = []
+    if not root.exists():
+        return {"books": books}
+    for d in sorted(p for p in root.iterdir() if p.is_dir()):
+        md = d / "_book.md"
+        if not md.is_file():
+            continue
+        post = frontmatter.load(str(md))
+        fm = dict(post.metadata)
+        section_count = sum(1 for p in d.glob("*.md") if p.name != "_book.md")
+        books.append(
+            {
+                "slug": fm.get("slug") or d.name,
+                "title": fm.get("title") or d.name,
+                "authors": fm.get("authors") or [],
+                "year": fm.get("year"),
+                "has_tracks": bool(fm.get("has_tracks")),
+                "started": fm.get("started"),
+                "section_count": section_count,
+            }
+        )
+    return {"books": books}
+
+
+@app.post("/api/books")
+async def create_book(payload: BookCreate):
+    slug = _validate_book_slug(payload.slug)
+    path = book_md_path(slug)
+    if path.exists():
+        raise HTTPException(status_code=409, detail="Book already exists")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    post = frontmatter.Post("")
+    post.metadata.update(
+        {
+            "type": "book",
+            "slug": slug,
+            "title": payload.title,
+            "authors": payload.authors or [],
+            "year": payload.year,
+            "has_tracks": bool(payload.has_tracks),
+            "total_sections": None,
+            "started": date.today().strftime("%Y-%m-%d"),
+        }
+    )
+    path.write_text(frontmatter.dumps(post))
+    return {"ok": True, "slug": slug}
+
+
+@app.get("/api/books/{slug}/sections")
+async def list_book_sections(slug: str):
+    path = book_md_path(slug)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Book not found")
+    post = frontmatter.load(str(path))
+    sections = []
+    for p in sorted(path.parent.glob("*.md")):
+        if p.name == "_book.md":
+            continue
+        sp = frontmatter.load(str(p))
+        sections.append({"id": p.stem, "frontmatter": dict(sp.metadata)})
+    return {"book": dict(post.metadata), "sections": sections}
+
+
+@app.get("/api/books/{slug}/sections/{id}/raw")
+async def get_book_section_raw(slug: str, id: str):
+    path = section_path(slug, id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Section not found")
+    post = frontmatter.load(str(path))
+    return {"raw": frontmatter.dumps(post)}
+
+
+@app.get("/api/books/{slug}/sections/{id}")
+async def get_book_section(slug: str, id: str):
+    path = section_path(slug, id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Section not found")
+    post = frontmatter.load(str(path))
+    return {"id": id, "frontmatter": dict(post.metadata), "body": post.content}
+
+
+@app.put("/api/books/{slug}/sections/{id}")
+async def update_book_section(slug: str, id: str, payload: BookSectionUpdate):
+    if not book_md_path(slug).exists():
+        raise HTTPException(status_code=404, detail="Book not found")
+    path = section_path(slug, id)
+    created = not path.exists()
+    post = _ensure_book_section_skeleton(slug, id, payload.frontmatter)
+    for k, v in payload.frontmatter.items():
+        post.metadata[k] = v
+    post.metadata["type"] = "book-section"
+    post.metadata["book"] = slug
+    if payload.body is not None:
+        post.content = payload.body
+    elif created:
+        post.content = BOOK_SECTION_BODY
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(frontmatter.dumps(post))
+    try:
+        await _refresh_graph_edges_for(f"{slug}/{id}", dict(post.metadata), post.content or "")
+    except Exception:
+        pass
+    return {"ok": True, "id": id}
+
+
+@app.delete("/api/books/{slug}/sections/{id}")
+async def delete_book_section(slug: str, id: str):
+    path = section_path(slug, id)
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Section not found")
+    path.unlink()
+    return {"ok": True}
+
+
+LATEX_TARGET_RE = re.compile(r"^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$")
+
+
+def _valid_latex_target(target: str) -> bool:
+    if not target or any(part in ("", ".", "..") for part in target.split("/")):
+        return False
+    return bool(LATEX_TARGET_RE.fullmatch(target))
+
+
+def _parse_md_heading_sections(body: str) -> dict[str, str]:
+    headings = ("Preview", "Explain Cold", "Sanity Check", "Confusions")
+    out = {h: "" for h in headings}
+    matches = list(re.finditer(r"^## (Preview|Explain Cold|Sanity Check|Confusions)\s*$", body or "", re.M))
+    for i, match in enumerate(matches):
+        heading = match.group(1)
+        start = match.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(body or "")
+        text = re.sub(r"<!--.*?-->", "", (body or "")[start:end], flags=re.S).strip()
+        out[heading] = text
+    return out
+
+
+def _latex_escape(text: str) -> str:
+    return re.sub(r"([%$&#_{}])", r"\\\1", text)
+
+
+def _build_book_latex_snippet(book_title: str, slug: str, fm: dict, body: str) -> str:
+    parsed = _parse_md_heading_sections(body)
+    def field(heading: str, key: str) -> str:
+        return (parsed.get(heading) or str(fm.get(key) or "")).strip()
+
+    preview = field("Preview", "preview")
+    explain = field("Explain Cold", "explain_cold")
+    sanity = field("Sanity Check", "sanity_check")
+    confusions = field("Confusions", "confusions")
+    chapter = fm.get("chapter", "")
+    section = fm.get("section", "")
+    title = str(fm.get("title") or "")
+    rule = "─" * 33
+    lines = [
+        f"% ── {_latex_escape(str(book_title))} · Ch.{chapter} §{section} {rule}",
+        f"\\subsection*{{{_latex_escape(title)}}}",
+        f"\\label{{sec:{slug}-ch{chapter}-s{section}}}",
+        "",
+    ]
+    for heading, text in (
+        ("Preview", preview),
+        ("Explain Cold", explain),
+        ("Sanity Check", sanity),
+        ("Confusions", confusions),
+    ):
+        if text:
+            lines.append(f"\\paragraph{{{heading}}}")
+            lines.append(_latex_escape(text))
+            lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+class LatexExportPayload(BaseModel):
+    target_file: str
+    mode: str  # append | create
+
+
+@app.post("/api/books/{slug}/sections/{id}/export-latex")
+async def export_book_section_latex(slug: str, id: str, payload: LatexExportPayload):
+    target = (payload.target_file or "").strip()
+    if not _valid_latex_target(target):
+        raise HTTPException(status_code=400, detail="Invalid target_file")
+    if payload.mode not in ("append", "create"):
+        raise HTTPException(status_code=400, detail="mode must be append or create")
+    path = section_path(slug, id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Section not found")
+    post = frontmatter.load(str(path))
+    book_title = slug
+    book_path = book_md_path(slug)
+    if book_path.exists():
+        book_title = frontmatter.load(str(book_path)).metadata.get("title") or slug
+    snippet = _build_book_latex_snippet(str(book_title), slug, dict(post.metadata), post.content or "")
+    filename = target if target.endswith(".tex") else f"{target}.tex"
+
+    if payload.mode == "create":
+        status, _body = await _latex_json("GET", f"/files/{filename}")
+        if status == 200:
+            raise HTTPException(status_code=409, detail="File already exists")
+        status, body = await _latex_json("POST", "/save", json={"filename": filename, "source": snippet})
+    else:
+        status, body = await _latex_json("GET", f"/files/{filename}")
+        if status != 200:
+            raise HTTPException(status_code=status if status >= 400 else 404, detail=body.get("detail") or "File not found")
+        existing = str(body.get("source") or "")
+        if existing and not existing.endswith("\n"):
+            existing += "\n"
+        status, body = await _latex_json("POST", "/save", json={"filename": filename, "source": existing + snippet})
+
+    if status >= 400:
+        raise HTTPException(status_code=status, detail=body.get("detail") or "LaTeX save failed")
+    return {"ok": True, "path": f"70-LaTeX/{filename}"}
 
 
 # ── Locate (vector search, returns excerpts) ──────────────────────────────────
@@ -392,8 +999,30 @@ async def _llm_generate(prompt: str, cfg: Optional[ProviderConfig]) -> str:
     api_key = (cfg.api_key if cfg else None) or ""
     base_url = (cfg.base_url if cfg and cfg.base_url else None)
 
-    if provider in ("ollama", "lmstudio"):
-        url = (base_url or OLLAMA_URL).rstrip("/")
+    if provider == "lmstudio":
+        url = _resolve_llm_base_url(base_url or "http://127.0.0.1:1234")
+        gen_model = model or "spark-x2.5-4b"
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{url}/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key or 'lm-studio'}"},
+                json={
+                    "model": gen_model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.2,
+                    "max_tokens": 2048,
+                },
+                timeout=120.0,
+            )
+            resp.raise_for_status()
+            msg = (resp.json().get("choices") or [{}])[0].get("message") or {}
+            text = _message_text(msg)
+            if not text:
+                raise HTTPException(status_code=502, detail="LM Studio returned an empty response")
+            return text
+
+    if provider == "ollama":
+        url = _resolve_llm_base_url(base_url or OLLAMA_URL)
         gen_model = model or "llama3.2"
         async with httpx.AsyncClient() as client:
             resp = await client.post(
@@ -404,15 +1033,17 @@ async def _llm_generate(prompt: str, cfg: Optional[ProviderConfig]) -> str:
             if resp.status_code >= 400:
                 resp = await client.post(
                     f"{url}/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {api_key or 'lm-studio'}"},
+                    headers={"Authorization": f"Bearer {api_key or 'ollama'}"},
                     json={
                         "model": gen_model,
                         "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": 2048,
                     },
                     timeout=90.0,
                 )
                 resp.raise_for_status()
-                return resp.json()["choices"][0]["message"]["content"]
+                msg = (resp.json().get("choices") or [{}])[0].get("message") or {}
+                return _message_text(msg) or ""
             resp.raise_for_status()
             return resp.json().get("response", "")
 
@@ -444,7 +1075,7 @@ async def _llm_generate(prompt: str, cfg: Optional[ProviderConfig]) -> str:
         "huggingface": ("https://router.huggingface.co/v1", "meta-llama/Meta-Llama-3-8B-Instruct"),
     }
     default_base, default_model = defaults.get(provider, ("", "gpt-4o-mini"))
-    url = (base_url or default_base).rstrip("/")
+    url = _resolve_llm_base_url(base_url or default_base)
     if not url:
         raise HTTPException(status_code=400, detail=f"base_url required for provider {provider}")
     if not api_key:
@@ -456,11 +1087,13 @@ async def _llm_generate(prompt: str, cfg: Optional[ProviderConfig]) -> str:
             json={
                 "model": model or default_model,
                 "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 2048,
             },
             timeout=90.0,
         )
         resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+        msg = (resp.json().get("choices") or [{}])[0].get("message") or {}
+        return _message_text(msg) or resp.json()["choices"][0]["message"]["content"]
 
 
 @app.post("/api/ask")
@@ -470,19 +1103,49 @@ async def ask(payload: AskQuery):
     Provider/API key come from the request (browser localStorage) — never stored server-side.
     """
     table = get_table()
-    if table is None:
-        return {"answer": "Index not ready.", "sources": []}
+    results: list[dict] = []
+    if table is not None:
+        try:
+            vec = await embed(payload.question, payload.provider)
+            results = (
+                table.search(vec)
+                .limit(payload.limit)
+                .select(["citekey", "chunk"])
+                .to_list()
+            )
+        except HTTPException:
+            raise
+        except Exception:
+            results = []
 
-    vec = await embed(payload.question)
-    results = (
-        table.search(vec)
-        .limit(payload.limit)
-        .select(["citekey", "chunk"])
-        .to_list()
-    )
-
+    # Fallback when index/embeddings unavailable: plain substring over vault notes
     if not results:
-        return {"answer": "No relevant notes found.", "sources": []}
+        q_norm = payload.question.strip().lower()
+        hits = []
+        for md in sorted((VAULT / "10-Papers").glob("*.md"))[:80]:
+            try:
+                post = frontmatter.load(str(md))
+            except Exception:
+                continue
+            fm = post.metadata
+            blob = " ".join(
+                [
+                    str(fm.get("title", "")),
+                    *[str(fm.get(k, "")) for k in current_analysis_keys()],
+                    post.content or "",
+                ]
+            )
+            if q_norm and q_norm in blob.lower():
+                hits.append({"citekey": md.stem, "chunk": blob[:500]})
+            elif not q_norm:
+                hits.append({"citekey": md.stem, "chunk": blob[:500]})
+            if len(hits) >= payload.limit:
+                break
+        if not hits:
+            # Still call the model with an honest empty context so API-key testing works
+            results = [{"citekey": "(none)", "chunk": "No notes indexed yet."}]
+        else:
+            results = hits
 
     context = "\n\n---\n\n".join(
         f"[{r['citekey']}]: {r['chunk']}" for r in results
@@ -503,8 +1166,53 @@ async def ask(payload: AskQuery):
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM request failed: {e}") from e
 
-    sources = [{"citekey": r["citekey"], "excerpt": r["chunk"][:200]} for r in results]
+    sources = [{"citekey": r["citekey"], "excerpt": r["chunk"][:200]} for r in results if r["citekey"] != "(none)"]
     return {"answer": answer, "sources": sources}
+
+
+class LokiKeywordQuery(BaseModel):
+    query: str = ""
+    limit: int = 40
+
+
+@app.post("/api/loki/keywords")
+async def loki_keywords(payload: LokiKeywordQuery):
+    """List tags / objects / instruments / methods from notes. No LLM."""
+    needle = payload.query.strip().lower()
+    counts: dict[str, dict] = {}
+    fields = ("tags", "concepts", "objects", "instruments", "methods")
+    for paper in all_papers():
+        fm = paper["frontmatter"]
+        slot_bits = [str(fm.get(k, "")) for k in current_analysis_keys()]
+        hay = " ".join(
+            [
+                str(fm.get("title", "")),
+                " ".join(str(x) for x in (fm.get("authors") or [])),
+                " ".join(str(x) for x in (fm.get("tags") or [])),
+                " ".join(str(x) for x in (fm.get("concepts") or [])),
+                " ".join(str(x) for x in (fm.get("objects") or [])),
+                " ".join(str(x) for x in (fm.get("instruments") or [])),
+                " ".join(str(x) for x in (fm.get("methods") or [])),
+                *slot_bits,
+            ]
+        ).lower()
+        if needle and needle not in hay:
+            continue
+        for field in fields:
+            values = fm.get(field) or []
+            if isinstance(values, str):
+                values = [values]
+            for raw in values:
+                term = str(raw).strip().strip("[]")
+                if not term:
+                    continue
+                key = term.lower()
+                slot = counts.setdefault(key, {"term": term, "count": 0, "citekeys": []})
+                slot["count"] += 1
+                if paper["citekey"] not in slot["citekeys"]:
+                    slot["citekeys"].append(paper["citekey"])
+    ranked = sorted(counts.values(), key=lambda row: (-row["count"], row["term"].lower()))
+    return {"keywords": ranked[: payload.limit], "query": payload.query}
 
 
 # ── Examine (GATE PROTECTED) ───────────────────────────────────────────────────
@@ -525,9 +1233,11 @@ async def examine(payload: ExaminePayload):
     if not path.exists():
         raise HTTPException(status_code=404, detail="Paper not found")
 
+    tags = current_analysis_tags()
+    keys = current_analysis_keys()
     if GATE_CHECK:
         try:
-            check_gate(path)
+            check_gate(path, slots=keys)
         except GateError as e:
             return JSONResponse(
                 status_code=423,
@@ -542,7 +1252,11 @@ async def examine(payload: ExaminePayload):
     post = frontmatter.load(str(path))
     fm = post.metadata
 
-    vec = await embed(fm.get("claim", "") + " " + fm.get("adversarial_question", ""))
+    seed_key = keys[0] if keys else "claim"
+    vec = await embed(
+        str(fm.get(seed_key, "")) + " " + str(fm.get("adversarial_question", "")),
+        payload.provider,
+    )
     table = get_table()
     context_chunks = []
     if table is not None:
@@ -556,18 +1270,18 @@ async def examine(payload: ExaminePayload):
 
     context_str = "\n\n".join(context_chunks) if context_chunks else "No prior notes indexed yet."
 
+    slot_lines = "\n".join(
+        f"- {label}: {fm.get(key, '')}" for label, key in zip(tags, keys)
+    )
+
     user_prompt = f"""You are reviewing a GRB astrophysics paper based on a researcher's active reading notes.
 
 Paper: {fm.get('title', '')} ({fm.get('year', '')})
 Authors: {', '.join(fm.get('authors', []))}
 ArXiv: {fm.get('arxiv', '')}
 
-CERIC Notes (written by the researcher):
-- Claim: {fm.get('claim', '')}
-- Evidence: {fm.get('evidence', '')}
-- Reasoning: {fm.get('reasoning', '')}
-- Implications: {fm.get('implications', '')}
-- Context: {fm.get('context', '')}
+Analysis notes (written by the researcher):
+{slot_lines}
 
 Adversarial Question posed: {fm.get('adversarial_question', '')}
 
@@ -575,13 +1289,13 @@ Relevant excerpts from the researcher's prior notes:
 {context_str}
 
 Your task:
-1. Evaluate whether the CERIC slots are internally consistent.
+1. Evaluate whether the analysis slots are internally consistent.
 2. Address the adversarial question directly — steelman the best counter-argument.
 3. Identify 2-3 concepts in the researcher's existing notes that connect to this paper.
 4. Suggest 1-2 follow-up questions for the 30-Questions vault.
 5. Be concise and precise — this is a physics researcher, not a general audience.
 
-Do NOT summarize the paper. Do NOT restate the CERIC slots. Add value beyond what the researcher wrote."""
+Do NOT summarize the paper. Do NOT restate the analysis slots. Add value beyond what the researcher wrote."""
 
     try:
         cfg = payload.provider or ProviderConfig(
@@ -606,30 +1320,161 @@ Do NOT summarize the paper. Do NOT restate the CERIC slots. Add value beyond wha
 
 # ── Graph ─────────────────────────────────────────────────────────────────────
 
+def _graph_node_for(md: Path) -> Optional[dict]:
+    """Identify a graph node. Book sections live under 15-Books/{slug}/."""
+    try:
+        rel = md.relative_to(VAULT)
+    except ValueError:
+        return None
+    if not rel.parts:
+        return None
+    top = rel.parts[0]
+    if top == "15-Books":
+        if md.name.startswith("_"):
+            return None
+        slug = rel.parts[1] if len(rel.parts) > 2 else ""
+        node_id = f"{slug}/{md.stem}" if slug else md.stem
+        return {"id": node_id, "label": md.stem, "folder": "15-Books", "path": str(rel)}
+    return {"id": md.stem, "label": md.stem, "folder": top, "path": str(rel)}
+
+
 @app.get("/api/graph")
 async def graph():
-    """Return nodes and edges derived from [[wikilinks]] across all .md files."""
+    """Nodes from vault .md + edges from [[wikilinks]] and LanceDB graph_edges."""
     nodes: dict[str, dict] = {}
     edges: list[dict] = []
+    seen_pairs: set[tuple[str, str, str]] = set()
     wikilink_re = re.compile(r"\[\[([^\]|#]+)(?:[|\#][^\]]*)?\]\]")
 
     all_md = list(VAULT.rglob("*.md"))
     for md in all_md:
-        stem = md.stem
-        folder = md.parent.name
-        nodes[stem] = {"id": stem, "label": stem, "folder": folder, "path": str(md.relative_to(VAULT))}
+        node = _graph_node_for(md)
+        if node:
+            nodes[node["id"]] = node
 
     for md in all_md:
-        src = md.stem
+        node = _graph_node_for(md)
+        if not node:
+            continue
+        src = node["id"]
         text = md.read_text(errors="replace")
         for m in wikilink_re.finditer(text):
             target = m.group(1).strip()
             if target and target != src:
                 if target not in nodes:
                     nodes[target] = {"id": target, "label": target, "folder": "external", "path": ""}
-                edges.append({"source": src, "target": target})
+                key = (src, target, "manual_link")
+                if key not in seen_pairs:
+                    seen_pairs.add(key)
+                    edges.append(
+                        {
+                            "source": src,
+                            "target": target,
+                            "type": "manual_link",
+                            "reason_text": f"manual [[wikilink]] → {target}",
+                            "confidence_score": 1.0,
+                        }
+                    )
+
+    # Persisted typed edges (manual + auto) from LanceDB
+    try:
+        et = get_edges_table(LANCEDB_PATH)
+        rows = et.to_pandas().to_dict(orient="records") if et is not None else []
+    except Exception:
+        rows = []
+    for row in rows:
+        src = str(row.get("source_note") or "")
+        tgt = str(row.get("target_note") or "")
+        etype = str(row.get("type") or "manual_link")
+        if not src or not tgt:
+            continue
+        for nid in (src, tgt):
+            if nid not in nodes:
+                nodes[nid] = {"id": nid, "label": nid, "folder": "external", "path": ""}
+        key = (src, tgt, etype)
+        rev = (tgt, src, etype)
+        if key in seen_pairs or rev in seen_pairs:
+            continue
+        seen_pairs.add(key)
+        edges.append(
+            {
+                "source": src,
+                "target": tgt,
+                "type": etype,
+                "reason_text": str(row.get("reason_text") or ""),
+                "confidence_score": float(row.get("confidence_score") or 0),
+            }
+        )
 
     return {"nodes": list(nodes.values()), "edges": edges}
+
+
+class GraphNeighborsPayload(BaseModel):
+    note: str
+    limit: int = 20
+
+
+@app.post("/api/graph/neighbors")
+async def graph_neighbors(payload: GraphNeighborsPayload):
+    """Ranked neighbors with reason_text — for Graph local view + Loki."""
+    note = (payload.note or "").strip()
+    if not note:
+        return {"neighbors": [], "note": note}
+    try:
+        et = get_edges_table(LANCEDB_PATH)
+        rows = et.to_pandas().to_dict(orient="records")
+    except Exception:
+        rows = []
+    # Also include live wikilink scan for the note if edges table is empty
+    if not rows:
+        path = paper_path(note)
+        if path.exists():
+            post = frontmatter.load(str(path))
+            wiki = manual_edges_from_wikilinks(note, post.content or "")
+            rows = [
+                {
+                    "source_note": e["source_note"],
+                    "target_note": e["target_note"],
+                    "type": e["type"],
+                    "reason_text": e["reason_text"],
+                    "confidence_score": e["confidence_score"],
+                }
+                for e in wiki
+            ]
+    neighbors = neighbors_from_rows(rows, note, limit=max(1, min(payload.limit, 100)))
+    return {"note": note, "neighbors": neighbors}
+
+
+@app.post("/api/graph/rebuild")
+async def graph_rebuild():
+    """Recompute all typed edges from vault features. Best-effort; can be slow."""
+    keys = current_analysis_keys()
+    features = load_features_from_vault(VAULT, analysis_keys=keys)
+    try:
+        et = get_edges_table(LANCEDB_PATH)
+    except Exception as exc:
+        return {"ok": False, "message": f"LanceDB unavailable: {exc}", "count": 0}
+    count = 0
+    citekeys = list(features.keys())
+    for i, ck in enumerate(citekeys):
+        feat = features[ck]
+        delete_manual_edges_for(et, ck)
+        delete_auto_edges_for(et, ck)
+        wiki_text = str(feat.get("_wikilink_text") or "")
+        count += upsert_edges(et, manual_edges_from_wikilinks(ck, wiki_text))
+        # Pairwise with later notes only to avoid double work
+        for other_ck in citekeys[i + 1 :]:
+            other = features[other_ck]
+            sim = 0.8 if (
+                set(feat["methods"]) & set(other["methods"])
+                or set(feat["entities"]) & set(other["entities"])
+                or set(feat["citations"]) & set(other["citations"])
+            ) else 0.0
+            count += upsert_edges(
+                et,
+                overlap_edges(feat, other, similarity=sim, threshold=DEFAULT_SIMILARITY_THRESHOLD),
+            )
+    return {"ok": True, "notes": len(citekeys), "edges_written": count}
 
 
 # ── Zotero ────────────────────────────────────────────────────────────────────
@@ -736,56 +1581,248 @@ def _parse_arxiv_atom(xml_text: str) -> tuple[list[dict], int]:
     return papers, total
 
 
-async def _fetch_arxiv(params: dict) -> tuple[list[dict], int]:
-    """
-    arXiv's public API rate-limits aggressively (429) if hit more than ~1x/3s.
-    Retry with backoff before giving up, since a single 429 shouldn't surface
-    as "no results" to the user.
-    """
-    last_exc: Exception | None = None
+DC_NS = {"dc": "http://purl.org/dc/elements/1.1/"}
+ARXIV_RSS_NS = {"arxiv": "http://arxiv.org/schemas/atom"}
+
+
+def _clean_arxiv_abstract(raw: str) -> str:
+    text = re.sub(r"\s+", " ", raw or "").strip()
+    text = re.sub(r"^arXiv:[^\s]+\s+Announce Type:\s*\w+\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"^Abstract:\s*", "", text, flags=re.IGNORECASE)
+    return text.strip()
+
+
+def _paper_from_ids(arxiv_id: str, title: str, authors: list[str], abstract: str, categories: list[str], submitted: str) -> dict:
+    aid = (arxiv_id or "").split("v")[0] if arxiv_id else ""
+    # keep version in id if present — frontend uses paper.id as citekey
+    full_id = arxiv_id or aid
+    return {
+        "id": full_id,
+        "title": re.sub(r"\s+", " ", title or "").strip(),
+        "authors": [a for a in authors if a],
+        "abstract": _clean_arxiv_abstract(abstract),
+        "arxiv_url": f"https://arxiv.org/abs/{full_id}" if full_id else "",
+        "pdf_url": f"https://arxiv.org/pdf/{full_id}" if full_id else "",
+        "categories": categories,
+        "submitted": submitted or "",
+    }
+
+
+def _parse_arxiv_rss(xml_text: str) -> list[dict]:
+    """Parse arXiv RSS 2.0 or Atom listing feeds (not the query API)."""
+    root = ET.fromstring(xml_text)
+    papers: list[dict] = []
+    tag = root.tag.lower()
+    if tag.endswith("rss") or root.find("channel") is not None:
+        channel = root.find("channel")
+        items = channel.findall("item") if channel is not None else []
+        for item in items:
+            link = (item.findtext("link") or "").strip()
+            guid = (item.findtext("guid") or "").strip()
+            arxiv_id = _arxiv_id_from_atom_url(link) or _arxiv_id_from_atom_url(guid)
+            if not arxiv_id and guid.startswith("oai:arXiv.org:"):
+                arxiv_id = guid.split(":", 2)[-1]
+            creator = item.findtext("dc:creator", default="", namespaces=DC_NS) or ""
+            authors = [a.strip() for a in creator.split(",") if a.strip()]
+            cat_el = item.find("category")
+            categories = [cat_el.text.strip()] if cat_el is not None and cat_el.text else []
+            papers.append(
+                _paper_from_ids(
+                    arxiv_id,
+                    item.findtext("title") or "",
+                    authors,
+                    item.findtext("description") or "",
+                    categories,
+                    item.findtext("pubDate") or "",
+                )
+            )
+        return papers
+
+    # Atom feed (rss.arxiv.org/atom/...)
+    for entry in root.findall("{http://www.w3.org/2005/Atom}entry"):
+        link_el = entry.find("{http://www.w3.org/2005/Atom}link")
+        href = link_el.get("href", "") if link_el is not None else ""
+        eid = (entry.findtext("{http://www.w3.org/2005/Atom}id") or "").strip()
+        arxiv_id = _arxiv_id_from_atom_url(href)
+        if not arxiv_id and "arXiv.org:" in eid:
+            arxiv_id = eid.split("arXiv.org:")[-1]
+        authors = []
+        creator = entry.findtext("{http://purl.org/dc/elements/1.1/}creator") or ""
+        if creator:
+            authors = [a.strip() for a in creator.split(",") if a.strip()]
+        cat_el = entry.find("{http://www.w3.org/2005/Atom}category")
+        categories = [cat_el.get("term", "")] if cat_el is not None else []
+        papers.append(
+            _paper_from_ids(
+                arxiv_id,
+                entry.findtext("{http://www.w3.org/2005/Atom}title") or "",
+                authors,
+                entry.findtext("{http://www.w3.org/2005/Atom}summary") or "",
+                [c for c in categories if c],
+                entry.findtext("{http://www.w3.org/2005/Atom}updated") or "",
+            )
+        )
+    return papers
+
+
+ALL_FIELD_FEEDS = (
+    "physics",
+    "math",
+    "cs",
+    "astro-ph",
+    "cond-mat",
+    "q-bio",
+    "q-fin",
+    "stat",
+    "eess",
+    "econ",
+    "hep-th",
+    "hep-ph",
+    "quant-ph",
+    "gr-qc",
+)
+
+
+async def _fetch_arxiv_rss(cat: str) -> list[dict]:
+    """Today's listings via rss.arxiv.org — not rate-limited like the query API."""
+    urls = [
+        f"https://rss.arxiv.org/rss/{cat}",
+        f"https://rss.arxiv.org/atom/{cat}",
+    ]
     async with httpx.AsyncClient(follow_redirects=True) as client:
-        for attempt in range(2):
+        for url in urls:
             try:
-                resp = await client.get("https://export.arxiv.org/api/query", params=params, timeout=12.0)
-                if resp.status_code == 429:
-                    last_exc = httpx.HTTPStatusError("429", request=resp.request, response=resp)
-                    if attempt == 0:
-                        await asyncio.sleep(3.0)
+                resp = await client.get(url, timeout=25.0)
+                if resp.status_code >= 400:
                     continue
-                resp.raise_for_status()
-                return _parse_arxiv_atom(resp.text)
-            except httpx.HTTPStatusError as e:
-                last_exc = e
-                if getattr(e.response, "status_code", None) != 429:
-                    break
-            except httpx.HTTPError as e:
-                last_exc = e
-                if attempt == 0:
-                    await asyncio.sleep(2.0)
-    raise HTTPException(status_code=503, detail="arXiv is rate-limiting requests right now — wait ~30s and try again.") from last_exc
+                body = resp.text.lstrip("\ufeff").strip()
+                if "<item>" not in body and "<entry>" not in body:
+                    continue
+                papers = _parse_arxiv_rss(body)
+                if papers:
+                    return papers
+            except httpx.HTTPError:
+                continue
+    return []
 
 
-_DAILY_CACHE: dict[int, tuple[float, list[dict]]] = {}
-_DAILY_CACHE_TTL = 180.0
+async def _fetch_daily_papers(category: str, max_results: int) -> list[dict]:
+    if category == "all":
+        chunks = await asyncio.gather(*[_fetch_arxiv_rss(c) for c in ALL_FIELD_FEEDS], return_exceptions=True)
+        merged: list[dict] = []
+        seen: set[str] = set()
+        for chunk in chunks:
+            if isinstance(chunk, Exception) or not chunk:
+                continue
+            for p in chunk:
+                pid = p.get("id") or ""
+                if not pid or pid in seen:
+                    continue
+                seen.add(pid)
+                merged.append(p)
+        return merged[:max_results]
 
-
-@app.get("/api/arxiv/daily")
-async def arxiv_daily(max: int = 200):
-    """Latest astro-ph.HE papers straight from the public arXiv API — no key needed."""
-    max_results = min(max, 2000)
-    cached = _DAILY_CACHE.get(max_results)
-    if cached and (time.time() - cached[0]) < _DAILY_CACHE_TTL:
-        return cached[1]
+    papers = await _fetch_arxiv_rss(category)
+    if papers:
+        return papers[:max_results]
+    # Fallback: query API (can 429)
     papers, _total = await _fetch_arxiv(
         {
-            "search_query": "cat:astro-ph.HE",
+            "search_query": search_query_for(category),
             "sortBy": "submittedDate",
             "sortOrder": "descending",
             "max_results": max_results,
         }
     )
-    _DAILY_CACHE[max_results] = (time.time(), papers)
     return papers
+
+
+async def _fetch_arxiv(params: dict) -> tuple[list[dict], int]:
+    """
+    arXiv's public API is often slow and 429s if hit more than ~1x/3s.
+    Retry with backoff; distinguish timeout vs rate-limit vs other errors.
+    """
+    last_exc: Exception | None = None
+    last_kind = "network"
+    async with httpx.AsyncClient(follow_redirects=True) as client:
+        for attempt in range(3):
+            try:
+                resp = await client.get(
+                    "https://export.arxiv.org/api/query",
+                    params=params,
+                    timeout=30.0,
+                )
+                if resp.status_code == 429:
+                    last_kind = "rate_limit"
+                    last_exc = httpx.HTTPStatusError("429", request=resp.request, response=resp)
+                    await asyncio.sleep(4.0 * (attempt + 1))
+                    continue
+                resp.raise_for_status()
+                return _parse_arxiv_atom(resp.text)
+            except httpx.TimeoutException as e:
+                last_kind = "timeout"
+                last_exc = e
+                await asyncio.sleep(2.0)
+            except httpx.HTTPStatusError as e:
+                last_exc = e
+                code = getattr(e.response, "status_code", None)
+                if code == 429:
+                    last_kind = "rate_limit"
+                    await asyncio.sleep(4.0 * (attempt + 1))
+                    continue
+                last_kind = "http"
+                break
+            except httpx.HTTPError as e:
+                last_kind = "network"
+                last_exc = e
+                await asyncio.sleep(2.0)
+    if last_kind == "rate_limit":
+        msg = "arXiv is rate-limiting requests right now — wait ~30s and try Update from web again."
+    elif last_kind == "timeout":
+        msg = "arXiv took too long to respond. Try Update from web again in a moment."
+    else:
+        msg = "Could not reach arXiv. Check your internet connection and try again."
+    raise HTTPException(status_code=503, detail=msg) from last_exc
+
+
+_DAILY_CACHE: dict[str, tuple[float, list[dict]]] = {}
+_DAILY_CACHE_TTL = 180.0
+
+
+@app.get("/api/arxiv/topics")
+async def arxiv_topics():
+    return {"topics": ARXIV_TOPICS}
+
+
+@app.get("/api/arxiv/daily")
+async def arxiv_daily(max: int = 200, cat: str = "astro-ph.HE", refresh: bool = False):
+    """
+    Latest papers for an arXiv category (or all fields).
+    `refresh=true` bypasses the short in-memory cache (Update from web).
+    If a live refresh fails but we have a recent cache, return that with a warning
+    instead of an empty list.
+    """
+    max_results = min(max, 200)
+    category = normalize_category(cat)
+    if not is_valid_category(category):
+        raise HTTPException(status_code=400, detail=f"Invalid arXiv category: {cat}")
+    cache_key = f"{category}:{max_results}"
+    cached = _DAILY_CACHE.get(cache_key)
+    if not refresh and cached and (time.time() - cached[0]) < _DAILY_CACHE_TTL:
+        return {"papers": cached[1], "cat": category, "cached": True, "warning": None}
+    try:
+        papers = await _fetch_daily_papers(category, max_results)
+    except HTTPException as exc:
+        if cached:
+            return {
+                "papers": cached[1],
+                "cat": category,
+                "cached": True,
+                "warning": str(exc.detail),
+            }
+        raise
+    _DAILY_CACHE[cache_key] = (time.time(), papers)
+    return {"papers": papers, "cat": category, "cached": False, "warning": None}
 
 
 # New-style (Apr 2007+): 0704.0001 / 1501.00001 / 2401.12345v2
@@ -862,6 +1899,11 @@ class LatexSaveRequest(BaseModel):
 
 
 async def _proxy_latex(method: str, path: str, *, json: Optional[dict] = None, timeout: float = 15.0):
+    status, payload = await _latex_json(method, path, json=json, timeout=timeout)
+    return JSONResponse(status_code=status, content=payload)
+
+
+async def _latex_json(method: str, path: str, json: Optional[dict] = None, timeout: float = 15.0) -> tuple[int, dict]:
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.request(method, f"{LATEX_URL}{path}", json=json, timeout=timeout)
@@ -872,8 +1914,9 @@ async def _proxy_latex(method: str, path: str, *, json: Optional[dict] = None, t
         payload = resp.json()
     except Exception:
         payload = {"detail": resp.text or f"Unexpected LaTeX service response ({resp.status_code})"}
-
-    return JSONResponse(status_code=resp.status_code, content=payload)
+    if not isinstance(payload, dict):
+        payload = {"detail": payload}
+    return resp.status_code, payload
 
 
 @app.post("/api/latex/compile")
@@ -929,6 +1972,159 @@ async def latex_zip(rel: str):
 @app.post("/api/latex/rename")
 async def latex_rename(payload: dict):
     return await _proxy_latex("POST", "/rename", json=payload)
+
+
+# ── Notes workspace (user-authored Markdown pages) ──────────────────────────
+
+NOTES_WORKSPACE = "60-Meta/Notes"
+NOTES_NAME_RE = re.compile(r"^[A-Za-z0-9._ -]+$")
+
+
+def notes_rel_path(value: str, *, extension: bool = False) -> str:
+    name = (value or "").strip().strip("/")
+    if not name or name in (".", ".."):
+        raise HTTPException(status_code=400, detail="Invalid Notes path")
+    parts = name.split("/")
+    if any(part in ("", ".", "..") or not NOTES_NAME_RE.fullmatch(part) for part in parts):
+        raise HTTPException(status_code=400, detail="Invalid Notes path")
+    if extension and not name.lower().endswith(".md"):
+        name += ".md"
+    return name
+
+
+def notes_root() -> Path:
+    root = VAULT / NOTES_WORKSPACE
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def notes_path(value: str, *, extension: bool = False) -> Path:
+    rel = notes_rel_path(value, extension=extension)
+    path = (notes_root() / rel).resolve()
+    if notes_root().resolve() not in path.parents:
+        raise HTTPException(status_code=400, detail="Invalid Notes path")
+    return path
+
+
+@app.get("/api/notes/files")
+async def notes_list_files():
+    root = notes_root()
+    folders = [
+        str(p.relative_to(root)).replace("\\", "/")
+        for p in sorted(root.rglob("*"))
+        if p.is_dir() and not any(part.startswith(".") for part in p.relative_to(root).parts)
+    ]
+    files = []
+    for path in sorted(root.rglob("*.md")):
+        if any(part.startswith(".") for part in path.relative_to(root).parts):
+            continue
+        stat = path.stat()
+        files.append({
+            "name": str(path.relative_to(root)).replace("\\", "/"),
+            "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            "size": stat.st_size,
+        })
+    return {"root": NOTES_WORKSPACE, "folders": folders, "files": files}
+
+
+class NotesFilePayload(BaseModel):
+    filename: str
+    source: str = ""
+
+
+@app.get("/api/notes/files/{filename:path}")
+async def notes_get_file(filename: str):
+    path = notes_path(filename, extension=True)
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Note not found")
+    return {"name": str(path.relative_to(notes_root())).replace("\\", "/"), "source": path.read_text()}
+
+
+@app.post("/api/notes/files")
+async def notes_save_file(payload: NotesFilePayload):
+    path = notes_path(payload.filename, extension=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    source = payload.source
+    if not source.lstrip().startswith("---"):
+        source = frontmatter.dumps(frontmatter.Post(source))
+    else:
+        source = frontmatter.dumps(frontmatter.loads(source))
+    path.write_text(source)
+    return {"ok": True, "name": str(path.relative_to(notes_root())).replace("\\", "/")}
+
+
+@app.post("/api/notes/folders")
+async def notes_create_folder(payload: dict):
+    path = notes_path(str(payload.get("path", "")))
+    path.mkdir(parents=True, exist_ok=True)
+    return {"ok": True, "path": str(path.relative_to(notes_root())).replace("\\", "/")}
+
+
+@app.delete("/api/notes/folders/{folder_path:path}")
+async def notes_delete_folder(folder_path: str):
+    path = notes_path(folder_path)
+    if not path.exists() or not path.is_dir():
+        raise HTTPException(status_code=404, detail="Folder not found")
+    shutil.rmtree(path)
+    return {"ok": True}
+
+
+@app.delete("/api/notes/files/{filename:path}")
+async def notes_delete_file(filename: str):
+    path = notes_path(filename, extension=True)
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Note not found")
+    path.unlink()
+    return {"ok": True}
+
+
+class NotesRenamePayload(BaseModel):
+    src: str
+    dest: str
+
+
+@app.post("/api/notes/rename")
+async def notes_rename(payload: NotesRenamePayload):
+    src = notes_path(payload.src)
+    dest = notes_path(payload.dest)
+    if not src.exists():
+        raise HTTPException(status_code=404, detail="Source not found")
+    if dest.exists():
+        raise HTTPException(status_code=409, detail="Destination already exists")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    src.rename(dest)
+    return {"ok": True}
+
+
+NOTES_ASSET_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".pdf", ".csv", ".txt"}
+
+
+class NotesAssetPayload(BaseModel):
+    path: str
+    content_b64: str
+
+
+@app.post("/api/notes/assets")
+async def notes_upload_asset(payload: NotesAssetPayload):
+    path = notes_path(payload.path)
+    if path.suffix.lower() not in NOTES_ASSET_EXTS:
+        raise HTTPException(status_code=400, detail="Unsupported Notes asset type")
+    try:
+        import base64
+        content = base64.b64decode(payload.content_b64, validate=True)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid asset data: {exc}") from exc
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+    return {"ok": True, "path": str(path.relative_to(notes_root())).replace("\\", "/")}
+
+
+@app.get("/api/notes/assets/{asset_path:path}")
+async def notes_get_asset(asset_path: str):
+    path = notes_path(asset_path)
+    if not path.exists() or not path.is_file() or path.suffix.lower() not in NOTES_ASSET_EXTS:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return FileResponse(path)
 
 
 # ── Habits (60-Meta/Daily-YYYY-MM-DD.md) ───────────────────────────────────────
@@ -1017,9 +2213,10 @@ async def post_habits(day: str, payload: HabitsPayload):
     return {"ok": True, **_write_habits(day, payload.habits)}
 
 
-# ── Tasks (80-Tasks/{id}.md) ──────────────────────────────────────────────────
+# ── Tasks: project → main task → subtask (80-Tasks/{project-slug}/*.md) ───────
 
-TASK_STATUS_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
+TASK_NAME_RE = re.compile(r"^[A-Za-z0-9._ -]+$")
+PINNED_PROJECT_SLUG = "_daily-habits"
 
 
 def tasks_dir() -> Path:
@@ -1028,245 +2225,358 @@ def tasks_dir() -> Path:
     return d
 
 
-def task_path(task_id: str) -> Path:
-    if not task_id or "/" in task_id or "\\" in task_id or ".." in task_id:
-        raise HTTPException(status_code=400, detail="Invalid task id")
-    return tasks_dir() / f"{task_id}.md"
+def _slugify_project_name(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
+    return slug or "project"
 
 
-def _task_from_post(task_id: str, post) -> dict:
-    fm = dict(post.metadata)
+def project_dir(slug: str) -> Path:
+    if not slug or "/" in slug or "\\" in slug or slug in (".", ".."):
+        raise HTTPException(status_code=400, detail="Invalid project")
+    return tasks_dir() / slug
+
+
+def _ensure_pinned_project() -> None:
+    d = project_dir(PINNED_PROJECT_SLUG)
+    meta = d / "_project.md"
+    if meta.exists():
+        return
+    d.mkdir(parents=True, exist_ok=True)
+    post = frontmatter.Post("")
+    post.metadata.update({"type": "project", "name": "Daily Habits", "created_at": _now_iso()})
+    meta.write_text(frontmatter.dumps(post))
+
+
+def _now_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def _project_from_dir(d: Path) -> Optional[dict]:
+    meta = d / "_project.md"
+    if not meta.exists():
+        return None
+    post = frontmatter.load(str(meta))
+    main_tasks = list(d.glob("mt-*.md"))
     return {
-        "id": task_id,
-        "title": fm.get("title") or task_id,
-        "status": fm.get("status") or "todo",
-        "tags": fm.get("tags") if isinstance(fm.get("tags"), list) else [],
-        "parent": fm.get("parent"),
-        "due": fm.get("due") or "",
-        "completed_date": fm.get("completed_date") or "",
-        "recurring": bool(fm.get("recurring")),
-        "body": post.content or "",
+        "slug": d.name,
+        "name": post.metadata.get("name") or d.name,
+        "pinned": d.name == PINNED_PROJECT_SLUG,
+        "created_at": post.metadata.get("created_at") or "",
+        "main_task_count": len(main_tasks),
     }
 
 
-def _maybe_reset_recurring(task: dict, post, path: Path) -> dict:
-    """If recurring and completed on a previous local calendar day, reset to todo."""
-    if not task.get("recurring") or task.get("status") != "done":
-        return task
-    completed = task.get("completed_date") or ""
-    today = date.today().strftime("%Y-%m-%d")
-    if completed and completed < today:
-        post.metadata["status"] = "todo"
-        post.metadata["completed_date"] = ""
-        path.write_text(frontmatter.dumps(post))
-        task["status"] = "todo"
-        task["completed_date"] = ""
-    return task
+def _status_id_of(fm: dict) -> str:
+    """Read `status_id`, falling back to the pre-customization `status` key
+    (same literal ids as the seeded defaults, so old notes need no migration)."""
+    return str(fm.get("status_id") or fm.get("status") or "")
 
 
-@app.get("/api/tasks")
-async def list_tasks():
-    out = []
-    for p in sorted(tasks_dir().glob("*.md")):
+def _normalize_status_id(value: object, statuses: Optional[list[dict]] = None) -> str:
+    statuses = statuses if statuses is not None else current_task_statuses()
+    valid_ids = {s["id"] for s in statuses}
+    v = str(value or "")
+    if v in valid_ids:
+        return v
+    return statuses[0]["id"] if statuses else "todo"
+
+
+def _subtask_counts(d: Path, main_task_id: str) -> tuple[int, int]:
+    total = 0
+    done = 0
+    for p in d.glob(f"st-*.md"):
         post = frontmatter.load(str(p))
-        task = _task_from_post(p.stem, post)
-        task = _maybe_reset_recurring(task, post, p)
-        out.append(task)
-    return {"tasks": out}
+        if post.metadata.get("main_task_id") != main_task_id:
+            continue
+        total += 1
+        if _status_id_of(post.metadata) == "done":
+            done += 1
+    return done, total
 
 
-class TaskCreate(BaseModel):
-    title: str
-    status: str = "todo"
-    tags: list[str] = []
-    parent: Optional[str] = None
-    due: Optional[str] = None
-    recurring: bool = False
-    body: Optional[str] = ""
+def _main_task_from_post(d: Path, task_id: str, post) -> dict:
+    fm = post.metadata
+    done, total = _subtask_counts(d, task_id)
+    return {
+        "id": task_id,
+        "project_slug": d.name,
+        "name": fm.get("name") or task_id,
+        "deadline": fm.get("deadline") or None,
+        "is_active": bool(fm.get("is_active")),
+        "status_id": _normalize_status_id(_status_id_of(fm)),
+        "created_at": fm.get("created_at") or "",
+        "subtask_done": done,
+        "subtask_total": total,
+    }
 
 
-@app.post("/api/tasks")
-async def create_task(payload: TaskCreate):
-    status = payload.status.strip().lower() if payload.status and TASK_STATUS_RE.fullmatch(payload.status.strip().lower()) else "todo"
-    task_id = "t" + uuid.uuid4().hex[:12]
-    path = task_path(task_id)
-    post = frontmatter.Post(payload.body or "")
+def _subtask_from_post(d: Path, subtask_id: str, post) -> dict:
+    fm = post.metadata
+    status_id = _normalize_status_id(_status_id_of(fm))
+    return {
+        "id": subtask_id,
+        "main_task_id": fm.get("main_task_id"),
+        "project_slug": d.name,
+        "name": fm.get("name") or subtask_id,
+        "deadline": fm.get("deadline") or None,
+        "status_id": status_id,
+        "done": status_id == "done",
+        "completed_at": fm.get("completed_at") or None,
+        "created_at": fm.get("created_at") or "",
+    }
+
+
+def _main_task_path(slug: str, task_id: str) -> Path:
+    if not task_id or not re.fullmatch(r"mt-[a-f0-9]{12}", task_id):
+        raise HTTPException(status_code=400, detail="Invalid main task id")
+    return project_dir(slug) / f"{task_id}.md"
+
+
+def _subtask_path(slug: str, subtask_id: str) -> Path:
+    if not subtask_id or not re.fullmatch(r"st-[a-f0-9]{12}", subtask_id):
+        raise HTTPException(status_code=400, detail="Invalid subtask id")
+    return project_dir(slug) / f"{subtask_id}.md"
+
+
+@app.get("/api/task-projects")
+async def list_task_projects():
+    _ensure_pinned_project()
+    root = tasks_dir()
+    out = []
+    for d in sorted(root.iterdir()):
+        if not d.is_dir():
+            continue
+        project = _project_from_dir(d)
+        if project:
+            out.append(project)
+    out.sort(key=lambda p: (not p["pinned"], p["name"].lower()))
+    return {"projects": out}
+
+
+class ProjectCreate(BaseModel):
+    name: str
+
+
+@app.post("/api/task-projects")
+async def create_task_project(payload: ProjectCreate):
+    name = payload.name.strip()
+    if not name or not TASK_NAME_RE.fullmatch(name):
+        raise HTTPException(status_code=400, detail="Invalid project name")
+    slug = _slugify_project_name(name)
+    d = project_dir(slug)
+    if (d / "_project.md").exists():
+        raise HTTPException(status_code=409, detail="A project with this name already exists")
+    d.mkdir(parents=True, exist_ok=True)
+    post = frontmatter.Post("")
+    post.metadata.update({"type": "project", "name": name, "created_at": _now_iso()})
+    (d / "_project.md").write_text(frontmatter.dumps(post))
+    return {"ok": True, "project": _project_from_dir(d)}
+
+
+@app.delete("/api/task-projects/{slug}")
+async def delete_task_project(slug: str):
+    if slug == PINNED_PROJECT_SLUG:
+        raise HTTPException(status_code=400, detail="Daily Habits can't be deleted")
+    d = project_dir(slug)
+    if not (d / "_project.md").exists():
+        raise HTTPException(status_code=404, detail="Project not found")
+    shutil.rmtree(d)
+    return {"ok": True, "slug": slug}
+
+
+@app.get("/api/task-projects/{slug}/main-tasks")
+async def list_main_tasks(slug: str):
+    d = project_dir(slug)
+    if not (d / "_project.md").exists():
+        raise HTTPException(status_code=404, detail="Project not found")
+    out = []
+    for p in sorted(d.glob("mt-*.md")):
+        post = frontmatter.load(str(p))
+        out.append(_main_task_from_post(d, p.stem, post))
+    return {"main_tasks": out}
+
+
+class MainTaskCreate(BaseModel):
+    name: str
+    deadline: Optional[str] = None
+    status_id: Optional[str] = None
+
+
+@app.post("/api/task-projects/{slug}/main-tasks")
+async def create_main_task(slug: str, payload: MainTaskCreate):
+    d = project_dir(slug)
+    if not (d / "_project.md").exists():
+        raise HTTPException(status_code=404, detail="Project not found")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required")
+    task_id = "mt-" + uuid.uuid4().hex[:12]
+    post = frontmatter.Post("")
     post.metadata.update(
         {
-            "title": payload.title.strip() or "Untitled",
-            "status": status,
-            "tags": payload.tags or [],
-            "parent": payload.parent,
-            "due": payload.due or "",
-            "completed_date": date.today().strftime("%Y-%m-%d") if status == "done" else "",
-            "recurring": bool(payload.recurring),
+            "type": "main_task",
+            "name": name,
+            "deadline": payload.deadline or None,
+            "is_active": False,
+            "status_id": _normalize_status_id(payload.status_id),
+            "created_at": _now_iso(),
         }
     )
-    path.write_text(frontmatter.dumps(post))
-    return {"ok": True, "task": _task_from_post(task_id, post)}
+    (d / f"{task_id}.md").write_text(frontmatter.dumps(post))
+    return {"ok": True, "main_task": _main_task_from_post(d, task_id, post)}
 
 
-@app.get("/api/tasks/{task_id}")
-async def get_task(task_id: str):
-    path = task_path(task_id)
+class MainTaskUpdate(BaseModel):
+    name: Optional[str] = None
+    deadline: Optional[str] = None
+    is_active: Optional[bool] = None
+    status_id: Optional[str] = None
+
+
+@app.put("/api/task-projects/{slug}/main-tasks/{task_id}")
+async def update_main_task(slug: str, task_id: str, payload: MainTaskUpdate):
+    path = _main_task_path(slug, task_id)
     if not path.exists():
-        raise HTTPException(status_code=404, detail="Task not found")
-    post = frontmatter.load(str(path))
-    task = _maybe_reset_recurring(_task_from_post(task_id, post), post, path)
-    return task
-
-
-class TaskUpdate(BaseModel):
-    title: Optional[str] = None
-    status: Optional[str] = None
-    tags: Optional[list[str]] = None
-    parent: Optional[str] = None
-    due: Optional[str] = None
-    recurring: Optional[bool] = None
-    body: Optional[str] = None
-    completed_date: Optional[str] = None
-
-
-@app.put("/api/tasks/{task_id}")
-async def update_task(task_id: str, payload: TaskUpdate):
-    path = task_path(task_id)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise HTTPException(status_code=404, detail="Main task not found")
     post = frontmatter.load(str(path))
     data = payload.model_dump(exclude_unset=True)
-    if "status" in data:
-        raw = (data["status"] or "").strip().lower()
-        if not TASK_STATUS_RE.fullmatch(raw):
-            raise HTTPException(status_code=400, detail=f"Invalid status: {data['status']}")
-        data["status"] = raw
-    if "status" in data:
-        if data["status"] == "done" and not data.get("completed_date"):
-            data["completed_date"] = date.today().strftime("%Y-%m-%d")
-        if data["status"] != "done":
-            data["completed_date"] = ""
+    if "status_id" in data:
+        data["status_id"] = _normalize_status_id(data["status_id"])
     for k, v in data.items():
-        if k == "body":
-            post.content = v if v is not None else ""
-        else:
-            post.metadata[k] = v
+        post.metadata[k] = v
     path.write_text(frontmatter.dumps(post))
-    return {"ok": True, "task": _task_from_post(task_id, post)}
+    return {"ok": True, "main_task": _main_task_from_post(project_dir(slug), task_id, post)}
 
 
-@app.delete("/api/tasks/{task_id}")
-async def delete_task(task_id: str):
-    path = task_path(task_id)
+@app.delete("/api/task-projects/{slug}/main-tasks/{task_id}")
+async def delete_main_task(slug: str, task_id: str):
+    path = _main_task_path(slug, task_id)
     if not path.exists():
-        raise HTTPException(status_code=404, detail="Task not found")
-    # Also clear parent pointers? Leave orphans as top-level by nulling parent refs.
-    for p in tasks_dir().glob("*.md"):
-        if p.stem == task_id:
-            continue
+        raise HTTPException(status_code=404, detail="Main task not found")
+    d = project_dir(slug)
+    for p in d.glob("st-*.md"):
         post = frontmatter.load(str(p))
-        if post.metadata.get("parent") == task_id:
-            post.metadata["parent"] = None
-            p.write_text(frontmatter.dumps(post))
+        if post.metadata.get("main_task_id") == task_id:
+            p.unlink()
     path.unlink()
     return {"ok": True, "id": task_id}
 
 
-# ── Scores ────────────────────────────────────────────────────────────────────
-
-def compute_scores_for_day(target_date: date) -> dict:
-    """Compute scoring points for a given day."""
-    date_str = target_date.strftime("%Y-%m-%d")
-    points = 0
-    detail = []
-
-    papers = []
-    for p in (VAULT / "10-Papers").glob("*.md"):
+@app.get("/api/task-projects/{slug}/main-tasks/{task_id}/subtasks")
+async def list_subtasks(slug: str, task_id: str):
+    d = project_dir(slug)
+    if not (d / f"{task_id}.md").exists():
+        raise HTTPException(status_code=404, detail="Main task not found")
+    out = []
+    for p in sorted(d.glob("st-*.md")):
         post = frontmatter.load(str(p))
-        fm = post.metadata
-        if fm.get("read") == date_str:
-            papers.append((p.stem, fm))
+        if post.metadata.get("main_task_id") != task_id:
+            continue
+        out.append(_subtask_from_post(d, p.stem, post))
+    return {"subtasks": out}
 
-    triage_count = 0
-    for citekey, fm in papers:
-        verdict = fm.get("verdict", "")
-        tier = fm.get("tier", 0)
 
-        # Triage: 1pt each, cap 10/day
-        if verdict in ("read", "skip", "later") and triage_count < 10:
-            points += 1
-            triage_count += 1
-            detail.append({"action": "triage", "citekey": citekey, "pts": 1})
+class SubtaskCreate(BaseModel):
+    name: str
+    deadline: Optional[str] = None
+    status_id: Optional[str] = None
 
-        # T1 full CERIC: 5pt
-        if tier == 1:
-            slots_ok = all(fm.get(s, "").strip() for s in ["claim", "evidence", "reasoning", "implications", "context"])
-            if slots_ok:
-                points += 5
-                detail.append({"action": "t1_complete", "citekey": citekey, "pts": 5})
 
-        # AQ written: 2pt
-        if fm.get("aq_written"):
-            points += 2
-            detail.append({"action": "aq_written", "citekey": citekey, "pts": 2})
+@app.post("/api/task-projects/{slug}/main-tasks/{task_id}/subtasks")
+async def create_subtask(slug: str, task_id: str, payload: SubtaskCreate):
+    d = project_dir(slug)
+    if not (d / f"{task_id}.md").exists():
+        raise HTTPException(status_code=404, detail="Main task not found")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required")
+    subtask_id = "st-" + uuid.uuid4().hex[:12]
+    status_id = _normalize_status_id(payload.status_id)
+    post = frontmatter.Post("")
+    post.metadata.update(
+        {
+            "type": "subtask",
+            "main_task_id": task_id,
+            "name": name,
+            "deadline": payload.deadline or None,
+            "status_id": status_id,
+            "completed_at": _now_iso() if status_id == "done" else None,
+            "created_at": _now_iso(),
+        }
+    )
+    (d / f"{subtask_id}.md").write_text(frontmatter.dumps(post))
+    return {"ok": True, "subtask": _subtask_from_post(d, subtask_id, post)}
 
-    # Concept note updated today
-    for p in (VAULT / "20-Concepts").glob("*.md"):
-        post = frontmatter.load(str(p))
-        if post.metadata.get("updated") == date_str:
-            points += 4
-            detail.append({"action": "concept_updated", "note": p.stem, "pts": 4})
 
-    # Synthesis written today (cap 1)
-    synth_written = False
-    for p in (VAULT / "50-Syntheses").glob("*.md"):
-        post = frontmatter.load(str(p))
-        if post.metadata.get("created") == date_str and not synth_written:
-            points += 10
-            detail.append({"action": "weekly_synthesis", "note": p.stem, "pts": 10})
-            synth_written = True
+class SubtaskUpdate(BaseModel):
+    name: Optional[str] = None
+    deadline: Optional[str] = None
+    status_id: Optional[str] = None
 
-    # Tasks completed today: 2 pts each, cap 15/day
-    tasks_dir_path = VAULT / "80-Tasks"
-    if tasks_dir_path.exists():
-        task_pts = 0
-        for p in tasks_dir_path.glob("*.md"):
-            if task_pts >= 15:
-                break
+
+@app.put("/api/task-projects/{slug}/main-tasks/{task_id}/subtasks/{subtask_id}")
+async def update_subtask(slug: str, task_id: str, subtask_id: str, payload: SubtaskUpdate):
+    path = _subtask_path(slug, subtask_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Subtask not found")
+    post = frontmatter.load(str(path))
+    data = payload.model_dump(exclude_unset=True)
+    if "status_id" in data:
+        data["status_id"] = _normalize_status_id(data["status_id"])
+        was_done = _status_id_of(post.metadata) == "done"
+        now_done = data["status_id"] == "done"
+        if now_done and not was_done:
+            post.metadata["completed_at"] = _now_iso()
+        elif not now_done and was_done:
+            post.metadata["completed_at"] = None
+    for k, v in data.items():
+        post.metadata[k] = v
+    path.write_text(frontmatter.dumps(post))
+    return {"ok": True, "subtask": _subtask_from_post(project_dir(slug), subtask_id, post)}
+
+
+@app.delete("/api/task-projects/{slug}/main-tasks/{task_id}/subtasks/{subtask_id}")
+async def delete_subtask(slug: str, task_id: str, subtask_id: str):
+    path = _subtask_path(slug, subtask_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Subtask not found")
+    path.unlink()
+    return {"ok": True, "id": subtask_id}
+
+
+@app.get("/api/tasks/active-summary")
+async def tasks_active_summary():
+    """Active (is_active) main tasks across every project — feeds the Dashboard progress bars."""
+    _ensure_pinned_project()
+    out = []
+    for d in sorted(tasks_dir().iterdir()):
+        if not d.is_dir():
+            continue
+        project = _project_from_dir(d)
+        if not project:
+            continue
+        for p in sorted(d.glob("mt-*.md")):
             post = frontmatter.load(str(p))
-            fm = post.metadata
-            if fm.get("status") == "done" and fm.get("completed_date") == date_str:
-                points += 2
-                task_pts += 2
-                detail.append({"action": "task_done", "citekey": p.stem, "pts": 2})
-
-    # Habits checked today: 1 pt each (dynamic keys)
-    habit_file = VAULT / "60-Meta" / f"Daily-{date_str}.md"
-    if habit_file.exists():
-        post = frontmatter.load(str(habit_file))
-        habits = post.metadata.get("habits") if isinstance(post.metadata.get("habits"), dict) else {}
-        for key, val in habits.items():
-            if val is True or val == 1:
-                points += 1
-                detail.append({"action": f"habit:{key}", "pts": 1})
-
-    return {"date": date_str, "points": points, "detail": detail}
+            if not bool(post.metadata.get("is_active")):
+                continue
+            mt = _main_task_from_post(d, p.stem, post)
+            out.append(
+                {
+                    "project_slug": project["slug"],
+                    "project_name": project["name"],
+                    "main_task_id": mt["id"],
+                    "main_task_name": mt["name"],
+                    "deadline": mt["deadline"],
+                    "subtask_done": mt["subtask_done"],
+                    "subtask_total": mt["subtask_total"],
+                }
+            )
+    return {"active": out}
 
 
-@app.get("/api/scores/today")
-async def scores_today():
-    return compute_scores_for_day(date.today())
-
-
-@app.get("/api/scores/week")
-async def scores_week():
-    today = date.today()
-    days = [compute_scores_for_day(today - timedelta(days=i)) for i in range(6, -1, -1)]
-    total = sum(d["points"] for d in days)
-    return {"days": days, "week_total": total, "week_target": 55}
-
-
-@app.get("/api/scores/range")
-async def scores_range(start: str, end: str):
-    """Daily points from start..end inclusive — feeds the Dashboard lightcurve."""
+@app.get("/api/tasks/completed-by-day")
+async def tasks_completed_by_day(start: str, end: str):
+    """Subtask-completion counts per day, from `completed_at` — feeds the Dashboard heatmap's Tasks row."""
     try:
         start_d = date.fromisoformat(start)
         end_d = date.fromisoformat(end)
@@ -1276,12 +2586,67 @@ async def scores_range(start: str, end: str):
         raise HTTPException(status_code=400, detail="end must be >= start")
     if (end_d - start_d).days > 400:
         raise HTTPException(status_code=400, detail="range too large (max 400 days)")
-    days = []
-    cur = start_d
-    while cur <= end_d:
-        days.append(compute_scores_for_day(cur))
-        cur += timedelta(days=1)
-    return {"days": days}
+    counts: dict[str, int] = {}
+    for d in tasks_dir().iterdir():
+        if not d.is_dir():
+            continue
+        for p in d.glob("st-*.md"):
+            post = frontmatter.load(str(p))
+            completed_at = post.metadata.get("completed_at")
+            if not completed_at:
+                continue
+            day = str(completed_at)[:10]
+            counts[day] = counts.get(day, 0) + 1
+    return {"days": [{"date": d.isoformat(), "count": counts.get(d.isoformat(), 0)}
+                      for d in (start_d + timedelta(days=i) for i in range((end_d - start_d).days + 1))]}
+
+
+# ── Concepts & weekly synthesis (ledger triggers) ─────────────────────────────
+
+NOTE_SLUG_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def _vault_note_path(folder: str, slug: str) -> Path:
+    if not NOTE_SLUG_RE.fullmatch(slug or ""):
+        raise HTTPException(status_code=400, detail="Invalid slug")
+    root = (VAULT / folder).resolve()
+    path = (root / f"{slug}.md").resolve()
+    if path.parent != root:
+        raise HTTPException(status_code=400, detail="Invalid slug")
+    return path
+
+
+class NoteUpdate(BaseModel):
+    frontmatter: dict[str, Any]
+    body: Optional[str] = None
+
+
+@app.put("/api/concepts/{slug}")
+async def update_concept(slug: str, payload: NoteUpdate):
+    path = _vault_note_path("20-Concepts", slug)
+    post = frontmatter.load(str(path)) if path.exists() else frontmatter.Post("")
+    for k, v in payload.frontmatter.items():
+        post.metadata[k] = v
+    if payload.body is not None:
+        post.content = payload.body
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(frontmatter.dumps(post))
+    return {"ok": True, "slug": slug}
+
+
+@app.put("/api/synthesis/{slug}")
+async def update_synthesis(slug: str, payload: NoteUpdate):
+    path = _vault_note_path("40-Synthesis", slug)
+    post = frontmatter.load(str(path)) if path.exists() else frontmatter.Post("")
+    for k, v in payload.frontmatter.items():
+        post.metadata[k] = v
+    if payload.body is not None:
+        post.content = payload.body
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(frontmatter.dumps(post))
+    return {"ok": True, "slug": slug}
+
+
 
 
 # ── Feynman (CLI terminal — https://www.feynman.is) ────────────────────────────
@@ -1334,8 +2699,6 @@ async def feynman_status(request: Request):
 @app.get("/api/info")
 async def system_info():
     """Return system information (TeX version, vault path, mounted directories, disk usage)."""
-    import shutil
-    import subprocess
 
     tex_version = ""
     try:
@@ -1345,20 +2708,70 @@ async def system_info():
     except Exception:
         pass
 
+    if not VAULT.exists():
+        VAULT.mkdir(parents=True, exist_ok=True)
     disk_stat = shutil.disk_usage(VAULT)
 
     available_paths = []
-    if VAULT.exists():
+    # Desktop uses a real folder picker. Walking the vault here would list
+    # every notes subdirectory as if it were a mount point.
+    if not DESKTOP_MODE and VAULT.exists():
         for p in sorted(VAULT.rglob("*")):
             if p.is_dir() and not p.name.startswith("."):
                 available_paths.append(str(p))
 
+    manifest = load_manifest(VAULT) if DESKTOP_MODE else None
+    previous = PREVIOUS_APP_VERSION or (str(manifest.get("app_version") or "") if manifest else "")
+    recovered = DESKTOP_MODE and (EXISTING_DATA or bool(manifest))
+    latex_path = (manifest or {}).get("latex_path") or str(VAULT / "70-LaTeX")
+    notes_path = (manifest or {}).get("notes_path") or str(VAULT / "10-Papers")
+    chosen = True
+    if DESKTOP_MODE:
+        chosen = bool(_desktop_config().get("data_path_chosen") or manifest)
+
     return {
         "texVersion": tex_version,
         "vaultPath": str(VAULT),
+        "latexPath": latex_path,
+        "notesPath": notes_path,
+        "indexPath": str(Path(LANCEDB_PATH)),
         "diskFree": disk_stat.free,
         "availablePaths": available_paths,
+        "desktop": DESKTOP_MODE,
+        "dataPathChosen": chosen,
+        "appVersion": APP_VERSION,
+        "previousAppVersion": previous or None,
+        "existingData": recovered,
+        "manifestPresent": bool(manifest),
+        "latexFileCount": count_tex_files(Path(latex_path)),
+        "reinstall": (
+            {"from": previous or "unknown", "to": APP_VERSION}
+            if recovered
+            else None
+        ),
+        "owner": "Kamil Nadaf",
+        "license": "MIT License",
+        "copyright": "© 2026 Kamil Nadaf",
     }
+
+
+class DataProbePayload(BaseModel):
+    path: str
+
+
+@app.post("/api/data/probe")
+async def probe_data_dir(payload: DataProbePayload):
+    """Read-only look at a folder. Does not change the active vault."""
+    if not DESKTOP_MODE:
+        return {"ok": False, "desktop": False, "message": "Data probe is desktop-only."}
+    raw = (payload.path or "").strip()
+    if not raw:
+        return {"ok": False, "desktop": True, "existingData": False, "message": "Choose a folder."}
+    try:
+        info = inspect_data_dir(Path(raw))
+    except Exception as exc:
+        return {"ok": False, "desktop": True, "existingData": False, "message": str(exc)}
+    return {"ok": True, "desktop": True, **info}
 
 
 class SettingsPayload(BaseModel):
@@ -1368,10 +2781,199 @@ class SettingsPayload(BaseModel):
 
 @app.post("/api/settings")
 async def update_settings(payload: SettingsPayload):
-    """Update user settings (currently just stores them; could persist to config file)."""
-    # In a production system, you'd write these to a config file or database
-    # For now, we just acknowledge the request
-    return {"ok": True, "message": "Settings received (not persisted yet)"}
+    """Persist account prefs. On the desktop app, latexDir is the notes folder."""
+    if DESKTOP_MODE and payload.latexDir is not None:
+        chosen = payload.latexDir.strip()
+        if not chosen:
+            return {"ok": False, "message": "Choose a folder for your notes.", "vaultPath": str(VAULT)}
+        try:
+            set_vault(Path(chosen))
+        except Exception as exc:
+            return {"ok": False, "message": str(exc), "vaultPath": str(VAULT)}
+        return {
+            "ok": True,
+            "message": "Data path saved.",
+            "vaultPath": str(VAULT),
+            "latexPath": str(VAULT / "70-LaTeX"),
+            "notesPath": str(VAULT / "10-Papers"),
+            "desktop": True,
+            "existingData": bool(load_manifest(VAULT)),
+        }
+    return {"ok": True, "message": "Settings received", "desktop": DESKTOP_MODE}
+
+
+@app.get("/api/settings/analysis-tags")
+async def get_analysis_tags():
+    tags = current_analysis_tags()
+    keys = analysis_keys(tags)
+    return {
+        "analysis_tags": tags,
+        "keys": keys,
+        "defaults": list(DEFAULT_ANALYSIS_TAGS),
+        "key_counts": scan_frontmatter_keys(VAULT, keys),
+    }
+
+
+class AnalysisTagsPayload(BaseModel):
+    analysis_tags: list[str]
+    migrate: bool = False
+    dry_run: bool = True
+
+
+@app.post("/api/settings/analysis-tags")
+async def set_analysis_tags(payload: AnalysisTagsPayload):
+    """
+    Save analysis tag labels (≥5, unique keys). Optionally migrate old
+    frontmatter keys → new keys in 10-Papers/.
+    """
+    try:
+        tags = normalize_analysis_tags(payload.analysis_tags)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    old_tags = current_analysis_tags()
+    old_keys = analysis_keys(old_tags)
+    new_keys = analysis_keys(tags)
+    mapping = {o: n for o, n in zip(old_keys, new_keys) if o != n}
+
+    save_app_settings(VAULT, {**load_app_settings(VAULT), "analysis_tags": tags})
+
+    migration = None
+    if mapping:
+        counts = scan_frontmatter_keys(VAULT, list(mapping.keys()))
+        if payload.migrate:
+            migration = migrate_frontmatter_keys(VAULT, mapping, dry_run=payload.dry_run)
+            migration["mapping"] = mapping
+            migration["counts"] = counts
+        else:
+            migration = {
+                "ok": True,
+                "dry_run": True,
+                "mapping": mapping,
+                "counts": counts,
+                "changed": [],
+                "skipped": [],
+                "warning": (
+                    "Tag keys changed. Call again with migrate=true to rename "
+                    "frontmatter keys in batch, or leave notes as-is (Gate will "
+                    "look for the new keys)."
+                ),
+            }
+
+    return {
+        "ok": True,
+        "analysis_tags": tags,
+        "keys": new_keys,
+        "migration": migration,
+    }
+
+
+class MigrateTagsPayload(BaseModel):
+    mapping: dict[str, str]
+    dry_run: bool = False
+
+
+@app.post("/api/settings/analysis-tags/migrate")
+async def migrate_analysis_tags(payload: MigrateTagsPayload):
+    if not payload.mapping:
+        raise HTTPException(status_code=400, detail="mapping required")
+    # Normalize keys
+    mapping = {tag_to_key(k): tag_to_key(v) for k, v in payload.mapping.items()}
+    result = migrate_frontmatter_keys(VAULT, mapping, dry_run=payload.dry_run)
+    result["mapping"] = mapping
+    result["counts"] = scan_frontmatter_keys(VAULT, list(mapping.keys()))
+    return result
+
+
+def _task_status_usage() -> dict[str, int]:
+    """How many main_tasks + subtasks currently reference each status id."""
+    counts: dict[str, int] = {}
+    root = tasks_dir()
+    if not root.exists():
+        return counts
+    for d in root.iterdir():
+        if not d.is_dir():
+            continue
+        for p in list(d.glob("mt-*.md")) + list(d.glob("st-*.md")):
+            try:
+                post = frontmatter.load(str(p))
+            except Exception:
+                continue
+            status_id = _status_id_of(post.metadata)
+            if status_id:
+                counts[status_id] = counts.get(status_id, 0) + 1
+    return counts
+
+
+def _reassign_task_status(old_id: str, new_id: str) -> int:
+    """Rewrite status_id (and completed_at, for subtasks) on every task referencing old_id. Returns count changed."""
+    changed = 0
+    root = tasks_dir()
+    for d in root.iterdir():
+        if not d.is_dir():
+            continue
+        for p in list(d.glob("mt-*.md")) + list(d.glob("st-*.md")):
+            try:
+                post = frontmatter.load(str(p))
+            except Exception:
+                continue
+            if _status_id_of(post.metadata) != old_id:
+                continue
+            post.metadata["status_id"] = new_id
+            post.metadata.pop("status", None)
+            if p.name.startswith("st-"):
+                post.metadata["completed_at"] = _now_iso() if new_id == "done" else None
+            p.write_text(frontmatter.dumps(post))
+            changed += 1
+    return changed
+
+
+@app.get("/api/settings/task-statuses")
+async def get_task_statuses():
+    statuses = current_task_statuses()
+    return {"task_statuses": statuses, "usage": _task_status_usage()}
+
+
+class TaskStatusesPayload(BaseModel):
+    task_statuses: list[dict[str, Any]]
+    reassign: dict[str, str] = {}
+
+
+@app.post("/api/settings/task-statuses")
+async def set_task_statuses(payload: TaskStatusesPayload):
+    try:
+        new_statuses = normalize_task_statuses(payload.task_statuses)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    old_statuses = current_task_statuses()
+    new_ids = {s["id"] for s in new_statuses}
+    usage = _task_status_usage()
+
+    removed_ids = [s["id"] for s in old_statuses if s["id"] not in new_ids]
+    for old_id in removed_ids:
+        count = usage.get(old_id, 0)
+        if count <= 0:
+            continue
+        new_id = payload.reassign.get(old_id)
+        if not new_id or new_id not in new_ids:
+            name = next((s["name"] for s in old_statuses if s["id"] == old_id), old_id)
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": f'{count} task(s) use status "{name}" — reassign to another status before deleting it.',
+                    "status_id": old_id,
+                    "status_name": name,
+                    "count": count,
+                },
+            )
+
+    for old_id, new_id in payload.reassign.items():
+        if old_id in removed_ids and new_id in new_ids:
+            _reassign_task_status(old_id, new_id)
+
+    save_app_settings(VAULT, {**load_app_settings(VAULT), "task_statuses": new_statuses})
+    return {"ok": True, "task_statuses": new_statuses}
 
 
 # ── Vault git sync (version-history backup to a remote, alongside Syncthing) ───
@@ -1486,7 +3088,7 @@ async def vault_git_sync():
 # .git and this config file itself) to that endpoint via plain HTTP PUT/MKCOL.
 
 _WEBDAV_CONFIG_PATH = VAULT / ".ygg-config" / "webdav.json"
-_WEBDAV_SKIP_DIRS = {".git", ".ygg-config"}
+_WEBDAV_SKIP_DIRS = {".git", ".ygg-config", "index"}
 
 
 def _webdav_ensure_gitignore():
@@ -1763,10 +3365,10 @@ def _build_digest_markdown(period: str) -> tuple[str, int, str, str]:
         meta_bits = [f"arXiv:{fm.get('arxiv')}" if fm.get("arxiv") else None, f"read {read_date}"]
         lines.append(f"*{' · '.join(b for b in meta_bits if b)}*")
         lines.append("")
-        for slot in ["claim", "evidence", "reasoning", "implications", "context"]:
+        for label, slot in zip(current_analysis_tags(), current_analysis_keys()):
             val = str(fm.get(slot) or "").strip()
             if val:
-                lines.append(f"**{slot.capitalize()}:** {val}")
+                lines.append(f"**{label}:** {val}")
         aq = str(fm.get("adversarial_question") or "").strip()
         if aq:
             lines.append(f"**Adversarial Question:** {aq}")
@@ -1795,13 +3397,10 @@ async def _send_webhook_message(url: str, text: str) -> tuple[bool, str]:
 
 
 def _weekly_digest_message() -> str:
-    today = date.today()
-    days = [compute_scores_for_day(today - timedelta(days=i)) for i in range(6, -1, -1)]
-    total = sum(d["points"] for d in days)
     digest_md, count, start_str, end_str = _build_digest_markdown("week")
     lines = [
         f"*Yggdrasil weekly digest* — {start_str} to {end_str}",
-        f"Score: {total} / 55 pts · {count} paper(s) completed this week",
+        f"{count} paper(s) completed this week",
     ]
     return "\n".join(lines) + "\n\n" + digest_md
 
@@ -1856,7 +3455,7 @@ async def search_notes(q: str, limit: int = 30):
         return {"results": []}
     results = []
     for md in sorted(VAULT.rglob("*.md")):
-        if md.parent.name == ".ygg-config":
+        if md.parent.name in (".ygg-config", "index"):
             continue
         try:
             post = frontmatter.load(str(md))
@@ -1867,11 +3466,7 @@ async def search_notes(q: str, limit: int = 30):
             str(fm.get("title", "")),
             " ".join(fm.get("tags") or []),
             " ".join(fm.get("authors") or []),
-            str(fm.get("claim", "")),
-            str(fm.get("evidence", "")),
-            str(fm.get("reasoning", "")),
-            str(fm.get("implications", "")),
-            str(fm.get("context", "")),
+            *[str(fm.get(k, "")) for k in current_analysis_keys()],
             post.content,
         ]
         combined = "\n".join(haystack_parts)
@@ -2001,7 +3596,7 @@ async def zotero_audit():
 
 # ── Serve React frontend ──────────────────────────────────────────────────────
 
-FRONTEND_DIST = Path("/app/frontend/dist")
+FRONTEND_DIST = Path(os.environ.get("FRONTEND_DIST", "/app/frontend/dist"))
 if FRONTEND_DIST.exists():
     app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")
 

@@ -16,6 +16,7 @@ echo "→ Initialising vault at: $VAULT"
 mkdir -p \
   "$VAULT/00-Inbox" \
   "$VAULT/10-Papers" \
+  "$VAULT/15-Books" \
   "$VAULT/20-Concepts" \
   "$VAULT/30-Questions" \
   "$VAULT/40-Synthesis" \
@@ -35,6 +36,7 @@ Do **not** hand-edit frontmatter in `10-Papers/` — use the CERIC Editor.
 |--------|---------|
 | `00-Inbox` | Daily Brief files written by arxiv-daily cron |
 | `10-Papers` | One `.md` per paper |
+| `15-Books` | Book folders: `_book.md` + one note per section |
 | `20-Concepts` | Concept notes |
 | `30-Questions` | Open questions |
 | `40-Synthesis` | Weekly synthesis notes |

@@ -13,17 +13,16 @@ import {
 } from "../lib/aiProvider";
 import {
   THEMES,
-  TACTILE_ACCENTS,
+  THEME_ACCENTS,
   DEFAULT_THEME,
   MODE_TOGGLE_THEMES,
-  PAPER_DARK_PRESET,
-  TACTILE_DARK_PRESET,
   applyTheme,
   loadCustomTheme,
   saveCustomTheme,
   customFromPreset,
-  loadTactileAccent,
-  saveTactileAccent,
+  loadThemeAccent,
+  saveThemeAccent,
+  themePreviewTokens,
   loadThemeMode,
   saveThemeMode,
   hexOk,
@@ -37,7 +36,10 @@ import {
   saveAppFonts,
   type AppFonts,
 } from "../lib/fonts";
-import TaskStatusEditor from "./TaskStatusEditor";
+import { APP_COPYRIGHT, APP_LICENSE, APP_OWNER } from "../lib/copyright";
+import { DEFAULT_ANALYSIS_TAGS, setCachedAnalysisTags, tagToKey } from "../lib/analysisTags";
+import { DEFAULT_TASK_STATUSES, setCachedTaskStatuses, STATUS_ICON_GLYPH, STATUS_ICON_CYCLE } from "../lib/taskStatuses";
+import type { TaskStatusDef, StatusIcon } from "../api/client";
 
 interface McpConnection {
   id: string;
@@ -82,13 +84,40 @@ interface SettingsState {
 interface SystemInfo {
   texVersion?: string;
   vaultPath?: string;
+  latexPath?: string;
+  notesPath?: string;
   diskFree?: number;
   availablePaths?: string[];
+  desktop?: boolean;
+  dataPathChosen?: boolean;
+  existingData?: boolean;
+  manifestPresent?: boolean;
+  previousAppVersion?: string | null;
+  appVersion?: string;
+}
+
+interface SettingsSaveResult {
+  ok?: boolean;
+  message?: string;
+  vaultPath?: string;
+  desktop?: boolean;
 }
 
 interface Props {
   open: boolean;
   onClose: () => void;
+  firstRun?: boolean;
+  onDataPathSaved?: () => void;
+}
+
+declare global {
+  interface Window {
+    pywebview?: {
+      api?: {
+        pick_folder?: () => Promise<string>;
+      };
+    };
+  }
 }
 
 function CollapsibleSection({
@@ -115,28 +144,37 @@ function CollapsibleSection({
   );
 }
 
-export default function SettingsDrawer({ open, onClose }: Props) {
+export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSaved }: Props) {
   const [settings, setSettings] = useState<SettingsState>(() => ({
     theme: (() => {
       const raw = localStorage.getItem("theme") || DEFAULT_THEME;
-      return raw === "custom" || raw === "dark" || raw === "paper" || raw === "tactile" ? raw : "custom";
+      return THEMES.some((t) => t.id === raw) ? raw : "custom";
     })(),
     fontSize: parseInt(localStorage.getItem("fontSize") || "13"),
     tabWidth: parseInt(localStorage.getItem("tabWidth") || "2"),
     lineWrap: localStorage.getItem("lineWrap") !== "false",
     autoCompile: localStorage.getItem("autoCompile") === "true",
     userAccount: localStorage.getItem("userAccount") || "",
-    latexDir: localStorage.getItem("latexDir") || "/vault",
+    latexDir: localStorage.getItem("latexDir") || "",
   }));
 
   const [info, setInfo] = useState<SystemInfo>({});
   const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [probe, setProbe] = useState<{
+    existingData?: boolean;
+    hasManifest?: boolean;
+    previousAppVersion?: string;
+    latexFileCount?: number;
+    vaultPath?: string;
+  } | null>(null);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     appearance: true,
-    statuses: false,
     ai: true,
     account: false,
     editor: false,
+    analysisTags: false,
+    taskStatuses: false,
     data: false,
     git: false,
     webdav: false,
@@ -147,10 +185,36 @@ export default function SettingsDrawer({ open, onClose }: Props) {
   });
 
   const [customTheme, setCustomTheme] = useState<CustomTheme>(() => loadCustomTheme());
-  const [tactileAccent, setTactileAccent] = useState<string>(() => loadTactileAccent());
+  const [themeAccent, setThemeAccent] = useState<string>(() => {
+    const raw = localStorage.getItem("theme") || DEFAULT_THEME;
+    return loadThemeAccent(THEMES.some((t) => t.id === raw) ? raw : "custom");
+  });
   const [modeTick, setModeTick] = useState(0);
   const [appFonts, setAppFonts] = useState<AppFonts>(() => loadAppFonts());
   const [mcpConnections, setMcpConnections] = useState<McpConnection[]>(() => loadMcpConnections());
+
+  const [analysisTags, setAnalysisTags] = useState<string[]>([
+    "Claim", "Evidence", "Reasoning", "Implications", "Context",
+  ]);
+  const [analysisDefaults, setAnalysisDefaults] = useState<string[]>([]);
+  const [analysisMsg, setAnalysisMsg] = useState<string | null>(null);
+  const [analysisSaving, setAnalysisSaving] = useState(false);
+  const [pendingMigration, setPendingMigration] = useState<{
+    mapping: Record<string, string>;
+    counts: Record<string, number>;
+    warning?: string;
+  } | null>(null);
+
+  const [taskStatuses, setTaskStatuses] = useState<TaskStatusDef[]>([...DEFAULT_TASK_STATUSES]);
+  const [taskStatusUsage, setTaskStatusUsage] = useState<Record<string, number>>({});
+  const [taskStatusesMsg, setTaskStatusesMsg] = useState<string | null>(null);
+  const [taskStatusesSaving, setTaskStatusesSaving] = useState(false);
+  const [pendingReassign, setPendingReassign] = useState<{
+    statusId: string;
+    statusName: string;
+    count: number;
+    chooseTo: string;
+  } | null>(null);
 
   const [providerStore, setProviderStore] = useState(() => loadProviderStore());
   const [activeProvider, setActiveProvider] = useState<AiProviderId>(() => getActiveProviderId());
@@ -186,14 +250,66 @@ export default function SettingsDrawer({ open, onClose }: Props) {
 
   useEffect(() => {
     if (!open) return;
-    fetch("/api/info").then((r) => r.json()).then(setInfo).catch(() => {});
+    fetch("/api/info")
+      .then((r) => r.json())
+      .then((data: SystemInfo) => {
+        setInfo(data);
+        if (data.vaultPath && (data.desktop || !localStorage.getItem("latexDir") || localStorage.getItem("latexDir") === "/vault")) {
+          setSettings((s) => ({ ...s, latexDir: data.vaultPath || s.latexDir }));
+        }
+      })
+      .catch(() => {});
     refreshGitStatus();
     refreshWebdavStatus();
     refreshAutosyncStatus();
     refreshWebhookStatus();
     setProviderStore(loadProviderStore());
     setActiveProvider(getActiveProviderId());
+    api.analysisTags.get()
+      .then((r) => {
+        setAnalysisTags(r.analysis_tags);
+        setAnalysisDefaults(r.defaults);
+        setCachedAnalysisTags(r.analysis_tags);
+        setPendingMigration(null);
+      })
+      .catch(() => {});
+    api.taskStatuses.get()
+      .then((r) => {
+        setTaskStatuses(r.task_statuses);
+        setTaskStatusUsage(r.usage);
+        setCachedTaskStatuses(r.task_statuses);
+        setPendingReassign(null);
+      })
+      .catch(() => {});
   }, [open]);
+
+  useEffect(() => {
+    if (!open || !firstRun) return;
+    setOpenSections((s) => ({ ...s, appearance: false, ai: false, data: true }));
+  }, [open, firstRun]);
+
+  useEffect(() => {
+    if (!open || !info.desktop || !settings.latexDir.trim()) {
+      setProbe(null);
+      return;
+    }
+    const handle = window.setTimeout(() => {
+      api.data.probe(settings.latexDir.trim()).then((r) => {
+        if (!r.ok || !r.existingData) {
+          setProbe(null);
+          return;
+        }
+        setProbe({
+          existingData: r.existingData,
+          hasManifest: r.hasManifest,
+          previousAppVersion: r.previousAppVersion,
+          latexFileCount: r.latexFileCount,
+          vaultPath: r.manifest?.vault_path,
+        });
+      }).catch(() => setProbe(null));
+    }, 250);
+    return () => window.clearTimeout(handle);
+  }, [open, info.desktop, settings.latexDir]);
 
   function refreshAutosyncStatus() {
     api.vault.autosyncStatus().then((s) => {
@@ -346,12 +462,14 @@ export default function SettingsDrawer({ open, onClose }: Props) {
   const handleThemeChange = (theme: string) => {
     setSettings((s) => ({ ...s, theme }));
     localStorage.setItem("theme", theme);
+    setThemeAccent(loadThemeAccent(theme));
     applyTheme();
   };
 
   const activeThemeMode: ThemeMode = loadThemeMode(settings.theme);
   const pickMode = (mode: ThemeMode) => {
     saveThemeMode(settings.theme, mode);
+    setThemeAccent(loadThemeAccent(settings.theme));
     setModeTick((n) => n + 1);
   };
   void modeTick;
@@ -374,9 +492,16 @@ export default function SettingsDrawer({ open, onClose }: Props) {
     applyTheme();
   }
 
-  function pickTactileAccent(hex: string) {
-    setTactileAccent(hex);
-    saveTactileAccent(hex);
+  function pickThemeAccent(hex: string) {
+    setThemeAccent(hex);
+    if (settings.theme === "custom") {
+      const next = { ...customTheme, accent: hex };
+      setCustomTheme(next);
+      saveCustomTheme(next);
+      applyTheme();
+      return;
+    }
+    saveThemeAccent(settings.theme, hex);
   }
 
   function seedCustomFrom(id: "dark" | "paper" | "tactile") {
@@ -423,20 +548,137 @@ export default function SettingsDrawer({ open, onClose }: Props) {
     setTimeout(() => setAiMsg(null), 4000);
   }
 
+  async function persistServerSettings(path = settings.latexDir): Promise<SettingsSaveResult> {
+    const resp = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ latexDir: path, userAccount: settings.userAccount }),
+    });
+    const data = (await resp.json().catch(() => ({}))) as SettingsSaveResult;
+    if (data.vaultPath) {
+      handleSettingChange("latexDir", data.vaultPath);
+      setInfo((prev) => ({
+        ...prev,
+        vaultPath: data.vaultPath,
+        dataPathChosen: data.ok !== false,
+      }));
+    }
+    if (data.ok !== false && (info.desktop || data.desktop)) {
+      onDataPathSaved?.();
+    }
+    return data;
+  }
+
+  async function pickDataFolder() {
+    const picker = window.pywebview?.api?.pick_folder;
+    if (!picker) {
+      setSaveMsg("Folder picker is only available in the desktop app.");
+      setTimeout(() => setSaveMsg(null), 4000);
+      return;
+    }
+    try {
+      const path = await picker();
+      if (path) handleSettingChange("latexDir", path);
+    } catch (e) {
+      console.error("Folder picker failed", e);
+    }
+  }
+
   const handleSaveLatexDir = async () => {
     setSaving(true);
+    setSaveMsg(null);
     try {
-      await fetch("/api/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ latexDir: settings.latexDir, userAccount: settings.userAccount }),
-      });
+      const data = await persistServerSettings();
+      if (data.ok === false) {
+        setSaveMsg(data.message || "Could not save data path.");
+        return;
+      }
+      setSaveMsg(data.message || "Data path saved.");
+      setTimeout(() => setSaveMsg(null), 4000);
     } catch (e) {
       console.error("Failed to save settings", e);
+      setSaveMsg("Could not save data path.");
     } finally {
       setSaving(false);
     }
   };
+
+  async function saveAllSettings() {
+    setSaving(true);
+    setSaveMsg(null);
+    try {
+      (Object.keys(settings) as (keyof SettingsState)[]).forEach((key) => {
+        localStorage.setItem(key, String(settings[key]));
+      });
+      saveCustomTheme(customTheme);
+      saveAppFonts(appFonts);
+      if (settings.theme === "custom") {
+        saveCustomTheme({ ...customTheme, accent: themeAccent });
+      } else {
+        saveThemeAccent(settings.theme, themeAccent);
+      }
+      saveProviderStore(providerStore);
+      setActiveProviderId(activeProvider);
+      localStorage.setItem(MCP_KEY, JSON.stringify(mcpConnections));
+      applyTheme();
+      try {
+        const data = await persistServerSettings();
+        if (data.ok === false) {
+          setSaveMsg(data.message || "Could not save data path.");
+          return;
+        }
+        setSaveMsg(info.desktop ? (data.message || "Saved.") : "Saved.");
+      } catch {
+        setSaveMsg("Saved in this browser.");
+      }
+      setTimeout(() => setSaveMsg(null), 3000);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function cycleIcon(current: StatusIcon): StatusIcon {
+    const i = STATUS_ICON_CYCLE.indexOf(current);
+    return STATUS_ICON_CYCLE[(i + 1) % STATUS_ICON_CYCLE.length];
+  }
+
+  function moveTaskStatus(index: number, dir: -1 | 1) {
+    const next = [...taskStatuses];
+    const target = index + dir;
+    if (target < 0 || target >= next.length) return;
+    [next[index], next[target]] = [next[target], next[index]];
+    setTaskStatuses(next);
+  }
+
+  async function saveTaskStatuses(reassign?: Record<string, string>) {
+    setTaskStatusesSaving(true);
+    setTaskStatusesMsg(null);
+    try {
+      const r = await api.taskStatuses.set(taskStatuses, reassign);
+      setTaskStatuses(r.task_statuses);
+      setCachedTaskStatuses(r.task_statuses);
+      setPendingReassign(null);
+      setTaskStatusesMsg("Statuses saved.");
+      const usage = await api.taskStatuses.get();
+      setTaskStatusUsage(usage.usage);
+    } catch (e) {
+      const err = e as Error & { status?: number; data?: { detail?: { status_id: string; status_name: string; count: number } } };
+      if (err.status === 409 && err.data?.detail) {
+        const { status_id, status_name, count } = err.data.detail;
+        setPendingReassign({
+          statusId: status_id,
+          statusName: status_name,
+          count,
+          chooseTo: taskStatuses.find((s) => s.id !== status_id)?.id || "",
+        });
+        setTaskStatusesMsg(`${count} task(s) use "${status_name}" — choose where to move them below, then save again.`);
+      } else {
+        setTaskStatusesMsg(e instanceof Error ? e.message : "Save failed");
+      }
+    } finally {
+      setTaskStatusesSaving(false);
+    }
+  }
 
   if (!open) return null;
 
@@ -451,20 +693,14 @@ export default function SettingsDrawer({ open, onClose }: Props) {
           <button className="settings-close" onClick={onClose}>×</button>
         </div>
 
+        <div className="settings-body">
         <CollapsibleSection id="appearance" title="Appearance" open={!!openSections.appearance} onToggle={() => toggle("appearance")}>
           <div className="settings-item">
             <label>Theme</label>
             <div className="theme-picker">
               {THEMES.map((t) => {
                 const isDarkMode = MODE_TOGGLE_THEMES.has(t.id) && loadThemeMode(t.id) === "dark";
-                const swatch =
-                  t.id === "custom"
-                    ? customTheme
-                    : isDarkMode
-                      ? t.id === "paper"
-                        ? PAPER_DARK_PRESET
-                        : TACTILE_DARK_PRESET
-                      : t.swatch;
+                const swatch = t.id === "custom" ? customTheme : themePreviewTokens(t.id);
                 return (
                   <button
                     key={t.id}
@@ -477,13 +713,13 @@ export default function SettingsDrawer({ open, onClose }: Props) {
                       <span className="theme-card-dot" style={{ background: swatch.surface }} />
                       <span
                         className="theme-card-dot"
-                        style={{ background: t.id === "custom" ? customTheme.accent : t.id === "tactile" ? tactileAccent : swatch.accent }}
+                        style={{ background: t.id === settings.theme ? themeAccent : swatch.accent }}
                       />
                       <span className="theme-card-bar" style={{ background: swatch.text }} />
                     </span>
                     <span className="theme-card-label">
                       {t.label}
-                      {isDarkMode ? " (Dark)" : ""}
+                      {isDarkMode ? " (Dark)" : MODE_TOGGLE_THEMES.has(t.id) && loadThemeMode(t.id) === "light" && t.id === "dark" ? " (Light)" : ""}
                     </span>
                   </button>
                 );
@@ -514,8 +750,8 @@ export default function SettingsDrawer({ open, onClose }: Props) {
                 </button>
               </div>
               <div className="settings-info" style={{ marginTop: 8 }}>
-                {THEMES.find((t) => t.id === settings.theme)?.label} remembers its own Light/Dark choice — Dark and
-                Custom are unaffected.
+                {THEMES.find((t) => t.id === settings.theme)?.label} remembers its own Light/Dark choice. Custom uses
+                the colour grid below instead.
               </div>
             </div>
           )}
@@ -571,37 +807,36 @@ export default function SettingsDrawer({ open, onClose }: Props) {
             </div>
           </div>
 
-          {settings.theme === "tactile" && (
-            <div className="settings-item" style={{ marginTop: 14 }}>
-              <label>Tactile accent</label>
-              <div className="settings-info" style={{ marginBottom: 8 }}>
-                Surfaces and shadows stay the same — pick the hue used for buttons, chips, and highlights.
-              </div>
-              <div className="tactile-accent-bar">
-                {TACTILE_ACCENTS.map((a) => (
-                  <button
-                    key={a.id}
-                    type="button"
-                    className={`tactile-accent-swatch${tactileAccent.toLowerCase() === a.hex.toLowerCase() ? " selected" : ""}`}
-                    style={{ background: a.hex }}
-                    title={a.label}
-                    onClick={() => pickTactileAccent(a.hex)}
-                  />
-                ))}
-                <label
-                  className="tactile-accent-swatch tactile-accent-custom"
-                  title="Custom colour"
-                  style={{ backgroundImage: `url(${colorPickerIcon})` }}
-                >
-                  <input
-                    type="color"
-                    value={hexOk(tactileAccent) ? tactileAccent : "#C97B4A"}
-                    onChange={(e) => pickTactileAccent(e.target.value)}
-                  />
-                </label>
-              </div>
+          <div className="settings-item" style={{ marginTop: 14 }}>
+            <label>Colour palette</label>
+            <div className="settings-info" style={{ marginBottom: 8 }}>
+              Surfaces stay the same — pick the hue for buttons, chips, and highlights. Each theme remembers its own
+              colour.
             </div>
-          )}
+            <div className="tactile-accent-bar">
+              {THEME_ACCENTS.map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  className={`tactile-accent-swatch${themeAccent.toLowerCase() === a.hex.toLowerCase() ? " selected" : ""}`}
+                  style={{ background: a.hex }}
+                  title={a.label}
+                  onClick={() => pickThemeAccent(a.hex)}
+                />
+              ))}
+              <label
+                className="tactile-accent-swatch tactile-accent-custom"
+                title="Custom colour"
+                style={{ backgroundImage: `url(${colorPickerIcon})` }}
+              >
+                <input
+                  type="color"
+                  value={hexOk(themeAccent) ? themeAccent : "#C97B4A"}
+                  onChange={(e) => pickThemeAccent(e.target.value)}
+                />
+              </label>
+            </div>
+          </div>
 
           {settings.theme === "custom" && (
             <div className="settings-item" style={{ marginTop: 14 }}>
@@ -641,10 +876,6 @@ export default function SettingsDrawer({ open, onClose }: Props) {
               </div>
             </div>
           )}
-        </CollapsibleSection>
-
-        <CollapsibleSection id="statuses" title="Task statuses" open={!!openSections.statuses} onToggle={() => toggle("statuses")}>
-          <TaskStatusEditor />
         </CollapsibleSection>
 
         <CollapsibleSection id="ai" title="AI Providers" open={!!openSections.ai} onToggle={() => toggle("ai")}>
@@ -758,6 +989,257 @@ export default function SettingsDrawer({ open, onClose }: Props) {
           </div>
         </CollapsibleSection>
 
+        <CollapsibleSection id="analysisTags" title="Analysis Tags" open={!!openSections.analysisTags} onToggle={() => toggle("analysisTags")}>
+          <div className="settings-item">
+            <div className="settings-info" style={{ marginBottom: 10 }}>
+              Rename the five (or more) active-reading slots. Frontmatter keys become lowercase versions
+              of these names. The Gate still requires every slot + aq_written — only the names change.
+            </div>
+            {analysisTags.map((tag, i) => (
+              <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
+                <input
+                  type="text"
+                  value={tag}
+                  onChange={(e) => {
+                    const next = [...analysisTags];
+                    next[i] = e.target.value;
+                    setAnalysisTags(next);
+                  }}
+                  style={{ flex: 1 }}
+                  aria-label={`Analysis tag ${i + 1}`}
+                />
+                <span className="mono muted" style={{ fontSize: 11, minWidth: 72 }}>
+                  {tagToKey(tag)}
+                </span>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    const defaults = analysisDefaults.length ? analysisDefaults : [...DEFAULT_ANALYSIS_TAGS];
+                    const next = [...analysisTags];
+                    next[i] = defaults[i] || defaults[0] || "Claim";
+                    setAnalysisTags(next);
+                  }}
+                >
+                  Reset
+                </button>
+              </div>
+            ))}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setAnalysisTags((t) => [...t, "New Tag"])}
+              >
+                + Add tag
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={analysisTags.length <= 5}
+                onClick={() => setAnalysisTags((t) => (t.length > 5 ? t.slice(0, -1) : t))}
+              >
+                − Remove last
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setAnalysisTags(analysisDefaults.length ? [...analysisDefaults] : [...DEFAULT_ANALYSIS_TAGS])}
+              >
+                Reset all
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={analysisSaving}
+                onClick={async () => {
+                  setAnalysisSaving(true);
+                  setAnalysisMsg(null);
+                  try {
+                    const r = await api.analysisTags.set(analysisTags, false, true);
+                    setAnalysisTags(r.analysis_tags);
+                    setCachedAnalysisTags(r.analysis_tags);
+                    if (r.migration?.mapping && Object.keys(r.migration.mapping).length) {
+                      setPendingMigration({
+                        mapping: r.migration.mapping,
+                        counts: r.migration.counts || {},
+                        warning: r.migration.warning,
+                      });
+                      setAnalysisMsg(r.migration.warning || "Tags saved. Vault keys need migration.");
+                    } else {
+                      setPendingMigration(null);
+                      setAnalysisMsg("Analysis tags saved.");
+                    }
+                  } catch (e) {
+                    setAnalysisMsg(e instanceof Error ? e.message : "Save failed");
+                  } finally {
+                    setAnalysisSaving(false);
+                  }
+                }}
+              >
+                {analysisSaving ? "…" : "Save tags"}
+              </button>
+            </div>
+            {pendingMigration && (
+              <div className="settings-info" style={{ marginTop: 12 }}>
+                <div style={{ marginBottom: 8 }}>
+                  Rename frontmatter keys in batch?
+                  {" "}
+                  {Object.entries(pendingMigration.mapping).map(([o, n]) => (
+                    <span key={o} className="mono" style={{ marginRight: 8 }}>
+                      {o}→{n} ({pendingMigration.counts[o] || 0})
+                    </span>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={analysisSaving}
+                  onClick={async () => {
+                    setAnalysisSaving(true);
+                    try {
+                      const r = await api.analysisTags.migrate(pendingMigration.mapping, false);
+                      setPendingMigration(null);
+                      setAnalysisMsg(`Migrated ${r.changed.length} note(s)${r.skipped.length ? `, skipped ${r.skipped.length}` : ""}.`);
+                    } catch (e) {
+                      setAnalysisMsg(e instanceof Error ? e.message : "Migration failed");
+                    } finally {
+                      setAnalysisSaving(false);
+                    }
+                  }}
+                >
+                  Migrate vault keys
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ marginLeft: 8 }}
+                  onClick={() => setPendingMigration(null)}
+                >
+                  Keep old keys (warn only)
+                </button>
+              </div>
+            )}
+            {analysisMsg && <div className="settings-info" style={{ marginTop: 8 }}>{analysisMsg}</div>}
+          </div>
+        </CollapsibleSection>
+
+        <CollapsibleSection id="taskStatuses" title="Task Statuses" open={!!openSections.taskStatuses} onToggle={() => toggle("taskStatuses")}>
+          <div className="settings-item">
+            <div className="settings-info" style={{ marginBottom: 10 }}>
+              Customize the statuses used by the Tasks List status pill and Kanban columns. The
+              icon/shape always differentiates status — color is a secondary accent only, so
+              everything still reads correctly in grayscale or print.
+            </div>
+            {taskStatuses.map((s, i) => (
+              <div key={s.id || `new-${i}`} className="task-status-edit-row">
+                <button
+                  type="button"
+                  className="btn"
+                  title="Cycle icon/shape"
+                  onClick={() => {
+                    const next = [...taskStatuses];
+                    next[i] = { ...s, icon: cycleIcon(s.icon) };
+                    setTaskStatuses(next);
+                  }}
+                >
+                  {STATUS_ICON_GLYPH[s.icon]}
+                </button>
+                <input
+                  type="text"
+                  value={s.name}
+                  placeholder="Status name"
+                  onChange={(e) => {
+                    const next = [...taskStatuses];
+                    next[i] = { ...s, name: e.target.value };
+                    setTaskStatuses(next);
+                  }}
+                  style={{ flex: 1 }}
+                  aria-label={`Status ${i + 1} name`}
+                />
+                <input
+                  type="color"
+                  value={s.color}
+                  title="Color (secondary accent only)"
+                  onChange={(e) => {
+                    const next = [...taskStatuses];
+                    next[i] = { ...s, color: e.target.value };
+                    setTaskStatuses(next);
+                  }}
+                />
+                <span className="muted mono" style={{ fontSize: 11, minWidth: 60 }}>
+                  {taskStatusUsage[s.id] || 0} task{(taskStatusUsage[s.id] || 0) === 1 ? "" : "s"}
+                </span>
+                <button type="button" className="btn" disabled={i === 0} onClick={() => moveTaskStatus(i, -1)} title="Move up">↑</button>
+                <button type="button" className="btn" disabled={i === taskStatuses.length - 1} onClick={() => moveTaskStatus(i, 1)} title="Move down">↓</button>
+                <button
+                  type="button"
+                  className="btn btn-crit"
+                  disabled={taskStatuses.length <= 1}
+                  onClick={() => setTaskStatuses(taskStatuses.filter((_, j) => j !== i))}
+                >
+                  Delete
+                </button>
+              </div>
+            ))}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() =>
+                  setTaskStatuses((prev) => [
+                    ...prev,
+                    { id: "", name: "New Status", color: "#6B7280", order: prev.length, icon: STATUS_ICON_CYCLE[prev.length % STATUS_ICON_CYCLE.length] },
+                  ])
+                }
+              >
+                + Add Status
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setTaskStatuses([...DEFAULT_TASK_STATUSES])}
+              >
+                Reset to defaults
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={taskStatusesSaving}
+                onClick={() => saveTaskStatuses()}
+              >
+                {taskStatusesSaving ? "…" : "Save statuses"}
+              </button>
+            </div>
+            {pendingReassign && (
+              <div className="settings-info" style={{ marginTop: 12 }}>
+                <div style={{ marginBottom: 8 }}>
+                  {pendingReassign.count} task(s) use "{pendingReassign.statusName}" — reassign to:
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <select
+                    value={pendingReassign.chooseTo}
+                    onChange={(e) => setPendingReassign({ ...pendingReassign, chooseTo: e.target.value })}
+                  >
+                    {taskStatuses.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={taskStatusesSaving}
+                    onClick={() => saveTaskStatuses({ [pendingReassign.statusId]: pendingReassign.chooseTo })}
+                  >
+                    Reassign &amp; delete
+                  </button>
+                </div>
+              </div>
+            )}
+            {taskStatusesMsg && <div className="settings-info" style={{ marginTop: 8 }}>{taskStatusesMsg}</div>}
+          </div>
+        </CollapsibleSection>
+
         <CollapsibleSection id="data" title="Data" open={!!openSections.data} onToggle={() => toggle("data")}>
           <div className="settings-item">
             <label htmlFor="latexDir">Data Path</label>
@@ -767,10 +1249,15 @@ export default function SettingsDrawer({ open, onClose }: Props) {
                 type="text"
                 value={settings.latexDir}
                 onChange={(e) => handleSettingChange("latexDir", e.target.value)}
-                placeholder="/vault"
+                placeholder={info.desktop ? "~/Documents/Yggdrasil" : "/vault"}
                 style={{ flex: 1 }}
               />
-              {info.availablePaths && info.availablePaths.length > 0 && (
+              {info.desktop && (
+                <button type="button" className="btn" onClick={pickDataFolder}>
+                  Choose folder…
+                </button>
+              )}
+              {!info.desktop && info.availablePaths && info.availablePaths.length > 0 && (
                 <select
                   value={settings.latexDir}
                   onChange={(e) => handleSettingChange("latexDir", e.target.value)}
@@ -783,8 +1270,41 @@ export default function SettingsDrawer({ open, onClose }: Props) {
               )}
             </div>
             <div className="settings-info" style={{ marginTop: 8 }}>
-              Prefer in-container paths like <code>/vault</code>. Host paths are not reachable from Docker.
+              {info.desktop
+                ? (firstRun || info.dataPathChosen === false
+                  ? "Choose this first so papers, notes, tasks, and LaTeX files have a home on this Mac. Then click Save."
+                  : "Papers, notes, tasks, and LaTeX files are saved in this folder.")
+                : <>Prefer in-container paths like <code>/vault</code>. Host paths are not reachable from Docker.</>}
             </div>
+            {info.desktop && probe?.existingData && (
+              <div className="settings-info" style={{ marginTop: 10 }}>
+                Existing Yggdrasil data found
+                {probe.previousAppVersion ? ` (v${probe.previousAppVersion})` : ""}.
+                {typeof probe.latexFileCount === "number" ? ` ${probe.latexFileCount} LaTeX file(s) on disk.` : ""}
+                {" "}Nothing will be overwritten.
+                <div style={{ marginTop: 8 }}>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={async () => {
+                      const path = probe.vaultPath || settings.latexDir;
+                      handleSettingChange("latexDir", path);
+                      setSaving(true);
+                      setSaveMsg(null);
+                      try {
+                        const data = await persistServerSettings(path);
+                        setSaveMsg(data.ok === false ? (data.message || "Could not restore.") : (data.message || "Restored existing data."));
+                      } finally {
+                        setSaving(false);
+                      }
+                    }}
+                    disabled={saving}
+                  >
+                    Restore from existing data
+                  </button>
+                </div>
+              </div>
+            )}
             <div style={{ marginTop: 10 }}>
               <button className="btn btn-primary" onClick={handleSaveLatexDir} disabled={saving}>
                 {saving ? "…" : "Save"}
@@ -977,12 +1497,31 @@ export default function SettingsDrawer({ open, onClose }: Props) {
         </CollapsibleSection>
 
         <CollapsibleSection id="about" title="About" open={!!openSections.about} onToggle={() => toggle("about")}>
+          <div className="about-copyright">
+            <div className="about-copyright-title">Yggdrasil</div>
+            <div>{APP_COPYRIGHT}</div>
+            <div>Owner: {APP_OWNER}</div>
+            <div>License: {APP_LICENSE}</div>
+            <p className="about-copyright-legal">
+              Permission is hereby granted, free of charge, to use, copy, modify, and
+              distribute this software, subject to the MIT License. The software is
+              provided “as is”, without warranty of any kind.
+            </p>
+          </div>
           <div className="settings-info">
             {info.vaultPath && <div>📁 Vault: {info.vaultPath}</div>}
             {info.texVersion && <div>🔧 TeX: {info.texVersion}</div>}
             {info.diskFree && <div>💾 Disk Free: {(info.diskFree / 1024 / 1024 / 1024).toFixed(1)} GB</div>}
           </div>
         </CollapsibleSection>
+        </div>
+
+        <div className="settings-footer">
+          <button type="button" className="btn btn-primary" onClick={saveAllSettings} disabled={saving}>
+            {saving ? "Saving…" : "Save settings"}
+          </button>
+          {saveMsg && <span className="ok mono" style={{ fontSize: 12 }}>{saveMsg}</span>}
+        </div>
       </div>
     </div>
   );

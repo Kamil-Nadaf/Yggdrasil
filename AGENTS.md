@@ -44,11 +44,11 @@ A browser-based reading tool with **eight views**, navigated via a horizontal to
 
 | View (nav label) | Internal id | Purpose |
 |---|---|---|
-| **Dashboard** | `scores` | Habit check-in + GitHub-style heatmap + weekly points (default landing view) |
+| **Dashboard** | `scores` | Habit check-in + GitHub-style heatmap + one progress bar per active main task (default landing view) |
 | **Daily ArXiv** | `search` | 3-panel Overleaf-style workflow: Daily Papers → Shortlisted → My List (reading pane), resizable via `react-resizable-panels` |
 | **Search** | `browse` | Direct arXiv search (keyword / author / title / arXiv ID-URL fields, paginated) without leaving the app; supports the same select-text→CERIC toolbar as Daily ArXiv |
 | **Notes** | `editor` | Fill 5 active-reading slots + Adversarial Question for a single paper; has an internal **Collection** tab listing all papers with filters + progress bars |
-| **Tasks** | `tasks` | ClickUp-style List (nested parent/sub-tasks) + Kanban (To Do / In Progress / Done) via `@dnd-kit/core`; vault `80-Tasks/` |
+| **Tasks** | `tasks` | Project → main task → subtask tree, collapsible per project (pinned "Daily Habits" first) + Kanban (To Do / Done, keyed off subtask `done`) via `@dnd-kit/core`; vault `80-Tasks/` |
 | **Graph** | `graph` | D3 force-directed graph of [[wikilink]] connections between notes |
 | **Ask** | `ask` | Search own notes via `/locate` and `/ask`; optional `/examine` after CERIC complete |
 | **LaTeX** | `latex` | Overleaf-style LaTeX editor: write → live PDF preview → save to vault, 3-pane resizable (file tree / editor / preview) |
@@ -145,11 +145,11 @@ vault/
 ├── 50-Projects/     ← project notes (AstroSentinel, thesis-ch1, etc.)
 ├── 60-Meta/
 │   ├── Dashboard.md
-│   ├── Ledger.md
 │   └── Confusions.md
-└── 70-LaTeX/ ← .tex documents written in the LaTeX Editor view
- │   └── _template.tex ← starter template, excluded from the file list UI
- └── 80-Tasks/ ← one note per task: {task-id}.md (title, status, tags, parent, due, recurring)
+├── 70-LaTeX/ ← .tex documents written in the LaTeX Editor view
+│   └── _template.tex ← starter template, excluded from the file list UI
+└── 80-Tasks/ ← task projects, one folder per project (see "Tasks: project →
+    main task → subtask" below); `_daily-habits/` is the permanent pinned project
 
 ---
 
@@ -461,36 +461,79 @@ GET  /api/habits/range?start=&end=
   → { days: [{ date, habits }] }
   Feeds the Dashboard heatmap.
 
-GET  /api/tasks
-  → { tasks: Task[] }
+GET  /api/task-projects
+  → { projects: [{slug, name, pinned, created_at, main_task_count}] }
+  `_daily-habits` is a permanent pinned project, auto-created on first request
+  (see "Tasks: project → main task → subtask" below). Can't be deleted.
 
-POST /api/tasks
-  body: { title, status?, tags?, parent?, due?, recurring?, body? }
-  → { ok, task }
+POST /api/task-projects
+  body: { name }
+  → { ok, project }
+  Slug is derived from name (`_slugify_project_name`); folder created under `80-Tasks/`.
 
-GET / PUT / DELETE /api/tasks/{id}
-  Task frontmatter: title, status (todo|in_progress|done), tags[], parent, due,
-  completed_date, recurring. Files live in `80-Tasks/{id}.md`.
+DELETE /api/task-projects/{slug}
+  → { ok, slug }
+  Rejects `_daily-habits` with 400.
+
+GET  /api/task-projects/{slug}/main-tasks
+  → { main_tasks: [{id, project_slug, name, deadline, is_active, status,
+                     created_at, subtask_done, subtask_total}] }
+  status ∈ {"todo","in_progress","done"} (`TASK_STATUSES`), default "todo".
+  Invalid/missing values normalize to "todo" server-side (`_normalize_status`),
+  never rejected.
+
+POST /api/task-projects/{slug}/main-tasks
+  body: { name, deadline?, status? }
+  → { ok, main_task }
+  id is `mt-{hex12}`.
+
+PUT  /api/task-projects/{slug}/main-tasks/{id}
+  body: { name?, deadline?, is_active?, status? }
+  → { ok, main_task }
+  `is_active: true` pins this main task's progress bar to the Dashboard —
+  independent of `status`, which is the ClickUp-style workflow field driving
+  the status pill (List view) and the Kanban column. Kanban drag-and-drop
+  writes this same field — no separate Kanban-only state.
+
+DELETE /api/task-projects/{slug}/main-tasks/{id}
+  → { ok, id }
+  Cascades: deletes every subtask under this main task too.
+
+GET  /api/task-projects/{slug}/main-tasks/{id}/subtasks
+  → { subtasks: [{id, main_task_id, project_slug, name, deadline, status,
+                   done, completed_at, created_at}] }
+  `done` is derived (`status == "done"`), read-only — not a stored field.
+
+POST /api/task-projects/{slug}/main-tasks/{id}/subtasks
+  body: { name, deadline?, status? }
+  → { ok, subtask }
+  id is `st-{hex12}`.
+
+PUT  /api/task-projects/{slug}/main-tasks/{id}/subtasks/{sid}
+  body: { name?, deadline?, status? }
+  → { ok, subtask }
+  `status` is the only way to write completion state — `done` is not
+  accepted in the request body. Transitioning into/out of "done" stamps/
+  clears `completed_at` server-side (used by the Dashboard heatmap's
+  "Subtasks done" row — see `/api/tasks/completed-by-day`). The frontend's
+  subtask checkbox is a quick-complete shortcut that just calls this with
+  `{status: "done"}` (or back to `"todo"`) — the status pill is the real
+  control, same field either way.
+
+DELETE /api/task-projects/{slug}/main-tasks/{id}/subtasks/{sid}
+  → { ok, id }
+
+GET  /api/tasks/active-summary
+  → { active: [{project_slug, project_name, main_task_id, main_task_name,
+                deadline, subtask_done, subtask_total}] }
+  Every `is_active` main task across every project — feeds the Dashboard's
+  one-progress-bar-per-active-main-task list.
+
+GET  /api/tasks/completed-by-day?start=&end=
+  → { days: [{date, count}] }
+  Subtask-completion counts per day from `completed_at` — feeds the Dashboard
+  heatmap's "Subtasks done" row (max 400-day range).
 ```
-
-### Scores
-
-```
-GET /api/scores/today
-  → { date, points: int, detail: [{action, citekey?, pts}] }
-
-GET /api/scores/week
-  → { days: ScoreDay[], week_total: int, week_target: 55 }
-```
-
-**Scoring rules (read from frontmatter across vault):**
-- triage verdict written: 1 pt (cap 10/day)
-- T1 note complete (all 5 slots filled): 5 pts
-- `aq_written: true`: 2 pts (separate from above)
-- concept note updated (`updated` == today): 4 pts
-- weekly synthesis (`created` == today, cap 1/day in current implementation): 10 pts
-- task completed (`80-Tasks/`, `status=done` and `completed_date` == today): 2 pts each (cap 15 pts/day)
-- habit checked (`60-Meta/Daily-YYYY-MM-DD.md`, each truthy habit key): 1 pt each
 
 ### System info & settings
 
@@ -534,9 +577,42 @@ POST /api/settings
 
 ### Dashboard view (`ScoresView.tsx`, nav id `scores`)
 
-Default landing view. Today strip (pts, streak), weekly progress bar toward the 55pt
-target, daily breakdown tiles, scoring rules legend. Data from `/api/scores/today`
-and `/api/scores/week`.
+Default landing view. No points/targets — everything here is counts and
+percentages. Sections, top to bottom:
+- **Active Tasks** — one fill-weight progress bar per `is_active` main task
+  (from `/api/tasks/active-summary`): "{project} › {main task} — x/y subtasks
+  — due {deadline}". Clicking a bar navigates to the Tasks view with that
+  project and main task expanded (via `App.tsx`'s `taskFocus` state, passed
+  to `TasksView` as `focus`/`onFocusConsumed`).
+- **Today** — habit check-in chips (unchanged from before), plus an optional
+  program/role countdown (e.g. "18 days left in PhD") edited in "Edit" mode.
+- **Activity** — week/month/year habit heatmap; the "Subtasks done" row is
+  sourced from `/api/tasks/completed-by-day`, not from points.
+
+### Tasks view (`TasksView.tsx`, nav id `tasks`)
+
+3-level tree — project → main task → subtask, each project a collapsible
+group (`▸`/`▾`). `_daily-habits` ("Daily Habits") is a permanent pinned
+project, always listed first, can't be deleted. `[+ New Project]` creates
+another. Header also has a status filter (`all` / To Do / In Progress /
+Done) and a "Sort by status" toggle, applied client-side to both main tasks
+and subtasks currently loaded.
+
+Expanding a project lists its main tasks; each main task row shows a `★`/`☆`
+active toggle (controls Dashboard visibility), a `StatusPill`
+(`components/StatusPill.tsx` — ○ To Do / ◐ In Progress / ● Done; click opens
+a dropdown of the other two, ClickUp-style; icon + label only, no hue, per
+the e-ink theme), a live "x/y subtasks" count + fill-weight progress bar, a
+`DeadlinePicker` (plain native date input), and expands to its subtasks
+(checkbox + name + its own `StatusPill` + independent `DeadlinePicker`). The
+subtask checkbox is a quick-complete shortcut (jumps to Done, or back to To
+Do) layered on the same `status` field the pill writes — not separate state.
+
+A List/Kanban toggle switches to a 3-column (To Do / In Progress / Done)
+board of **main task** cards gathered across every project (name, parent
+project name, "x/y subtasks" if any) — drag between columns via
+`@dnd-kit/core`, writing `main_task.status`, the exact field the List
+view's pill reads/writes.
 
 ### Daily ArXiv view (`ArxivSearch.tsx`, nav id `search`)
 
@@ -754,7 +830,10 @@ git-sync feature's commit history.
 5. **vault/ is read-only for indexer.** Only `arxiv-daily` writes to `00-Inbox`. The
    user writes to `10-Papers` via CERIC Editor / append-slot; the `latex` service
    writes only to `70-LaTeX`.
-6. **The Gate check in `gate.py` must not be modified.** Do not add `bypass` parameters.
+6. **The Gate check in `gate.py` must stay hard.** Slot *names* may be
+   configured via `analysis_tags` (passed into `check_gate(..., slots=...)`),
+   but do not add `bypass` parameters or soften the pass condition
+   (all configured slots non-empty + `aq_written`).
 7. **All `.md` writes must use `python-frontmatter`**, never hand-written YAML strings.
    (Client-side "Copy MD"/"Open in LaTeX" clipboard actions in the Collection tab are
    read-only display formatting, not file writes, and don't need to go through this —
@@ -843,3 +922,222 @@ as a separate container/compose stack on the same Docker network (that's why
 - The frontend has no test suite yet. Verify changes with `npx tsc --noEmit`, `npm
   run build`, and a manual `curl` smoke-test of any touched `/api/*` route before
   considering a change done.
+
+
+---
+
+## Books mode — `15-Books/` (added 2026-09-14)
+
+### Vault folder layout
+
+```
+vault/
+└── 15-Books/
+    └── {book-slug}/
+        ├── _book.md          ← book-level metadata
+        └── {id}.md           ← one file per section read (id = ch{N}-s{N})
+```
+
+Created by `scripts/init-vault.sh` alongside the other folders.
+
+### `_book.md` frontmatter schema
+
+```yaml
+---
+type: book
+slug: gravitation-mtw
+title: "Gravitation"
+authors: ["Misner, C.W.", "Thorne, K.S.", "Wheeler, J.A."]
+year: 1973
+has_tracks: true
+total_sections: null
+started: "2026-09-14"
+---
+```
+
+### Section note frontmatter schema
+
+```yaml
+---
+type: book-section
+book: gravitation-mtw
+chapter: 4
+section: "4.2"
+title: "The bending of light"
+track: 1                  # null if has_tracks=false
+read: "2026-09-14"
+tier: 0                   # 0=skimmed, 1=understood, 2=can-teach
+confidence: 0             # 0–100
+concepts: []              # [[wikilink]] strings
+tags: []
+explain_cold: ""          # informational gate: dot turns green when non-empty
+sanity_check: ""
+confusions: ""
+---
+```
+
+Body template (written by `_ensure_book_section_skeleton()` on first create):
+
+```markdown
+## Preview
+## Explain Cold
+## Sanity Check
+## Confusions
+```
+
+### Books API endpoints (all in `services/assistant/main.py`)
+
+```
+GET  /api/books
+POST /api/books                              body: { slug, title, authors, year, has_tracks }
+GET  /api/books/{slug}/sections
+GET  /api/books/{slug}/sections/{id}
+PUT  /api/books/{slug}/sections/{id}         body: { frontmatter, body? }
+DELETE /api/books/{slug}/sections/{id}
+GET  /api/books/{slug}/sections/{id}/raw
+POST /api/books/{slug}/sections/{id}/export-latex
+     body: { target_file: string, mode: "append"|"create" }
+     → { ok: true, path: "70-LaTeX/{target_file}" }
+     Builds a LaTeX snippet from the section's fields and appends to or creates
+     a file in 70-LaTeX/ via the internal latex service. Omits empty fields.
+     target_file validated against [A-Za-z0-9._-]+ (same as latex service).
+```
+
+All writes use `python-frontmatter`. Path traversal rejected. Slug validated
+against `[a-z0-9-]+`.
+
+### Indexer
+
+`services/indexer/main.py` watchdog watches `15-Books/` alongside `10-Papers/`
+and `20-Concepts/`. Chunk id format: `{slug}/{id}`.
+
+### Graph
+
+`15-Books/` folder type: node color `#F59E0B` (amber). Wikilinks from book
+section notes connect to concept nodes as normal.
+
+### Frontend
+
+Books tab added as a **third tab** inside `CERICEditor.tsx` (Notes view), to
+the right of Editor and Collection. Two sub-panels:
+- Left: book selector + section list (tier badge, Explain Cold dot per row).
+- Right: section editor — Preview / Explain Cold / Sanity Check / Confusions
+  textareas, chapter/section/track/tier/confidence/concepts/tags fields,
+  auto-save on blur, Explain Cold indicator dot, Export to LaTeX button.
+
+No new nav item. Do not add one.
+
+### Export to LaTeX button (in Books section editor)
+
+Opens a modal: choose an existing `.tex` file (append) or enter a new filename
+(create). Calls `POST /api/books/{slug}/sections/{id}/export-latex`.
+
+LaTeX snippet format:
+```latex
+% ── {book_title} · Ch.{chapter} §{section} ──
+\subsection*{section_title}
+\label{sec:{book_slug}-ch{chapter}-s{section}}
+\paragraph{Preview} ...
+\paragraph{Explain Cold} ...
+\paragraph{Sanity Check} ...
+\paragraph{Confusions} ...
+```
+Empty fields are omitted. Shared snippet builder lives in
+`src/components/LatexExportUtils.ts` — also used by the paper Collection tab's
+"Open in LaTeX" button (refactored to take `{ title, sections: {heading, body}[] }`).
+
+---
+
+## Tasks: project → main task → subtask (removed points/Ledger, 2026-09-15)
+
+The points/streak-bonus scoring system described in earlier revisions of this
+file (Research/Momentum meters, `Ledger.md`, `scoring-config.json`,
+`/api/scores/*`) has been **removed entirely** — backend ledger/scoring code,
+the Dashboard's points bars, and the scoring rules table are gone. The
+Dashboard now surfaces task progress instead of points (see "Dashboard view"
+above). Habit check-ins and the activity heatmap were kept — they were never
+points-based.
+
+Tasks were restructured from a flat `80-Tasks/{id}.md` (parent-pointer,
+one level of nesting) into a 3-level tree, one folder per project:
+
+```
+vault/80-Tasks/
+  _daily-habits/            ← permanent pinned project, can't be deleted
+    _project.md               type: project, name, created_at
+    mt-{hex12}.md              type: main_task, project_slug, name, deadline,
+                                is_active, status, created_at
+    st-{hex12}.md              type: subtask, project_slug, main_task_id, name,
+                                deadline, status, completed_at, created_at
+  {project-slug}/            ← one folder per user-created project
+    _project.md
+    mt-....md
+    st-....md
+```
+
+- **Project** — a container only, no deadline of its own. Slug derived from
+  name (`_slugify_project_name`); folder created under `80-Tasks/`.
+- **Main task** — belongs to a project, has its own `deadline`, an
+  `is_active` flag (controls Dashboard visibility, independent of `status`),
+  and a `status` (ClickUp-style: "todo"/"in_progress"/"done", default
+  "todo" — drives the List view's status pill and the Kanban column).
+  Progress toward completion is tracked two ways at once, deliberately not
+  conflated: `status` is the main task's own workflow state (set directly,
+  e.g. via the pill or Kanban drag); `subtask_done`/`subtask_total` is a
+  separate, purely aggregate count of its subtasks' statuses (computed live
+  by `_subtask_counts()`, keys off each subtask's `status == "done"`).
+- **Subtask** — belongs to a main task, has its own independent `deadline`
+  and `status`. `done` in API responses is **derived** (`status == "done"`),
+  never stored or accepted in a write — `status` is the single source of
+  truth. `completed_at` is stamped/cleared server-side whenever a `PUT
+  .../subtasks/{sid}` transitions `status` into/out of `"done"` — this is
+  what feeds the Dashboard heatmap's "Subtasks done" row via
+  `/api/tasks/completed-by-day`. The List view's subtask checkbox is a
+  quick-complete shortcut (`status → "done"`, or back to `"todo"`) layered
+  on top of the same field the status pill writes — not separate state.
+
+Kanban (`TasksView.tsx`) shows **main task** cards — not subtasks — one
+column per status, gathered across every project (loop `GET
+/api/task-projects` → `GET .../main-tasks` per project; no dedicated
+board-listing endpoint). Card: main task name, its project's name, and
+`x/y subtasks` if it has any. Dragging a card between columns calls the same
+`PUT .../main-tasks/{id}` with a new `status` that the List view's pill uses
+— one field, two renderings, per the "no separate Kanban-only state"
+constraint.
+
+No migration from the old flat model was implemented — pre-existing
+`80-Tasks/{id}.md` files (no `type` field, not inside a project folder) are
+simply invisible to the new code, not read or written. See the full endpoint
+list under "API endpoints" above.
+---
+
+## Semantic graph edges (2026-09-14)
+
+Typed edges persist in LanceDB table `graph_edges` (shared volume with the
+indexer). Edge types: `manual_link`, `shared_claim`, `shared_method`,
+`shared_citation`, `shared_entity`. Each row: `source_note`, `target_note`,
+`type`, `reason_text`, `confidence_score`, `created_at`.
+
+- Extracted from frontmatter + regex (methods, entities, arXiv/GRB ids) —
+  never LLM summarization; never writes into note bodies.
+- Refreshed on paper/book save (`assistant`) and after indexer upserts.
+- `GET /api/graph` merges vault wikilinks + persisted edges.
+- `POST /api/graph/neighbors` `{ note, limit }` — ranked neighbors with reasons (Loki + Graph local panel).
+- `POST /api/graph/rebuild` — recompute all typed edges (overlap-based).
+- Semantic Scholar citations remain a separate optional layer (`/api/graph/citations`).
+- Graph UI: local 1-hop, edge-type filters, degree-sized nodes, dash/weight
+  styling (e-ink friendly), neighbor reason list.
+
+---
+
+## Custom analysis tags (2026-09-14)
+
+Flexible CERIC replacement. Defaults: Claim, Evidence, Reasoning, Implications, Context.
+
+- Stored in `vault/.ygg-config/settings.json` as `analysis_tags: [...]`.
+- Frontmatter keys = lowercase normalized labels (`tag_to_key`).
+- Gate checks **configured** keys + `aq_written` (no hardcoded slot names, no bypass).
+- Settings drawer → Analysis Tags: rename / Reset / validate ≥5, unique keys.
+- On rename: migration preview + optional batch rename of old FM keys in `10-Papers/`.
+- APIs: `GET/POST /api/settings/analysis-tags`, `POST .../migrate`.
+- Notes editor, CERIC toolbar, examine prompt, digest, search, indexer all use configured keys.

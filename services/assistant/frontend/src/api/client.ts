@@ -8,7 +8,10 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
   });
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ detail: resp.statusText }));
-    const e = new Error(err.detail || "Request failed") as Error & { status: number; data: unknown };
+    const detail = Array.isArray(err.detail)
+      ? err.detail.map((d: { msg?: string } | string) => (typeof d === "string" ? d : d.msg || JSON.stringify(d))).join("; ")
+      : err.detail;
+    const e = new Error(detail || "Request failed") as Error & { status: number; data: unknown };
     e.status = resp.status;
     e.data = err;
     throw e;
@@ -53,15 +56,71 @@ export interface Paper {
   gate?: { passed: boolean; missing: string[]; aq_missing?: boolean };
 }
 
-export interface GraphData {
-  nodes: { id: string; label: string; folder: string; path: string }[];
-  edges: { source: string; target: string; type?: string }[];
+export interface GraphEdge {
+  source: string;
+  target: string;
+  type?: string;
+  reason_text?: string;
+  confidence_score?: number;
 }
 
-export interface ScoreDay {
-  date: string;
-  points: number;
-  detail: { action: string; citekey?: string; pts: number }[];
+export interface GraphData {
+  nodes: { id: string; label: string; folder: string; path: string }[];
+  edges: GraphEdge[];
+}
+
+export interface GraphNeighbor {
+  note: string;
+  type: string;
+  reason_text: string;
+  confidence_score: number;
+  created_at?: string;
+}
+
+export interface BookSummary {
+  slug: string;
+  title: string;
+  authors: string[];
+  year: number | null;
+  has_tracks: boolean;
+  started?: string;
+  section_count: number;
+}
+
+export interface BookFrontmatter {
+  type?: string;
+  slug?: string;
+  title?: string;
+  authors?: string[];
+  year?: number | null;
+  has_tracks?: boolean;
+  total_sections?: number | null;
+  started?: string;
+  [key: string]: unknown;
+}
+
+export interface BookSectionFrontmatter {
+  type?: string;
+  book?: string;
+  chapter?: number | string;
+  section?: string;
+  title?: string;
+  track?: number | null;
+  read?: string;
+  tier?: number;
+  confidence?: number;
+  concepts?: string[];
+  tags?: string[];
+  explain_cold?: string;
+  sanity_check?: string;
+  confusions?: string;
+  [key: string]: unknown;
+}
+
+export interface BookSection {
+  id: string;
+  frontmatter: BookSectionFrontmatter;
+  body?: string;
 }
 
 export interface LatexFile {
@@ -80,6 +139,12 @@ export interface LatexListResponse {
   files: LatexFile[];
   folders?: string[];
   assets?: LatexFile[];
+}
+
+export interface NotesListResponse {
+  root: string;
+  files: LatexFile[];
+  folders: string[];
 }
 
 /** Encode each path segment so nested paths like MyPaper/main survive the URL. */
@@ -112,16 +177,57 @@ export interface ZoteroAddResult {
   item?: unknown;
 }
 
-export interface Task {
+export interface TaskProject {
+  slug: string;
+  name: string;
+  pinned: boolean;
+  created_at: string;
+  main_task_count: number;
+}
+
+/** A user-defined shape token — grayscale-safe status differentiation, color is secondary. */
+export type StatusIcon = "circle-outline" | "half-fill" | "full-fill" | "square" | "triangle";
+
+export interface TaskStatusDef {
   id: string;
-  title: string;
-  status: string;
-  tags: string[];
-  parent: string | null;
-  due: string;
-  completed_date: string;
-  recurring: boolean;
-  body?: string;
+  name: string;
+  color: string;
+  order: number;
+  icon: StatusIcon;
+}
+
+export interface MainTask {
+  id: string;
+  project_slug: string;
+  name: string;
+  deadline: string | null;
+  is_active: boolean;
+  status_id: string;
+  created_at: string;
+  subtask_done: number;
+  subtask_total: number;
+}
+
+export interface Subtask {
+  id: string;
+  main_task_id: string;
+  project_slug: string;
+  name: string;
+  deadline: string | null;
+  status_id: string;
+  done: boolean;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface ActiveMainTask {
+  project_slug: string;
+  project_name: string;
+  main_task_id: string;
+  main_task_name: string;
+  deadline: string | null;
+  subtask_done: number;
+  subtask_total: number;
 }
 
 export type AiProviderConfig = {
@@ -183,6 +289,44 @@ export const api = {
   graphCitations: () => req<{ edges: { source: string; target: string; type: string }[] }>("GET", "/api/graph/citations"),
   graphSuggested: () =>
     req<{ edges: { source: string; target: string; type: string }[]; warning?: string }>("GET", "/api/graph/suggested"),
+  graphNeighbors: (note: string, limit = 20) =>
+    req<{ note: string; neighbors: GraphNeighbor[] }>("POST", "/api/graph/neighbors", { note, limit }),
+  graphRebuild: () =>
+    req<{ ok: boolean; notes?: number; edges_written?: number; message?: string }>("POST", "/api/graph/rebuild"),
+
+  analysisTags: {
+    get: () =>
+      req<{
+        analysis_tags: string[];
+        keys: string[];
+        defaults: string[];
+        key_counts: Record<string, number>;
+      }>("GET", "/api/settings/analysis-tags"),
+    set: (analysis_tags: string[], migrate = false, dry_run = true) =>
+      req<{
+        ok: boolean;
+        analysis_tags: string[];
+        keys: string[];
+        migration?: {
+          ok: boolean;
+          dry_run: boolean;
+          mapping?: Record<string, string>;
+          counts?: Record<string, number>;
+          changed?: string[];
+          skipped?: string[];
+          warning?: string;
+        };
+      }>("POST", "/api/settings/analysis-tags", { analysis_tags, migrate, dry_run }),
+    migrate: (mapping: Record<string, string>, dry_run = false) =>
+      req<{
+        ok: boolean;
+        changed: string[];
+        skipped: string[];
+        dry_run: boolean;
+        mapping: Record<string, string>;
+        counts: Record<string, number>;
+      }>("POST", "/api/settings/analysis-tags/migrate", { mapping, dry_run }),
+  },
 
   ask: (question: string, limit = 6, provider?: AiProviderConfig) =>
     req<{ answer: string; sources: { citekey: string; excerpt: string }[] }>("POST", "/api/ask", {
@@ -190,6 +334,36 @@ export const api = {
       limit,
       provider: provider || undefined,
     }),
+
+  data: {
+    probe: (path: string) =>
+      req<{
+        ok: boolean;
+        desktop?: boolean;
+        exists?: boolean;
+        hasManifest?: boolean;
+        hasVaultLayout?: boolean;
+        existingData?: boolean;
+        previousAppVersion?: string;
+        latexFileCount?: number;
+        message?: string;
+        manifest?: {
+          app_version?: string;
+          vault_path?: string;
+          latex_path?: string;
+          notes_path?: string;
+        } | null;
+      }>("POST", "/api/data/probe", { path }),
+  },
+
+  loki: {
+    keywords: (query: string, limit = 40) =>
+      req<{ keywords: { term: string; count: number; citekeys: string[] }[]; query: string }>(
+        "POST",
+        "/api/loki/keywords",
+        { query, limit }
+      ),
+  },
 
   feynman: {
     status: () =>
@@ -221,14 +395,71 @@ export const api = {
       ),
   },
 
+  taskProjects: {
+    list: () => req<{ projects: TaskProject[] }>("GET", "/api/task-projects"),
+    create: (name: string) => req<{ ok: boolean; project: TaskProject }>("POST", "/api/task-projects", { name }),
+    delete: (slug: string) => req<{ ok: boolean; slug: string }>("DELETE", `/api/task-projects/${encodeURIComponent(slug)}`),
+  },
+
+  mainTasks: {
+    list: (projectSlug: string) =>
+      req<{ main_tasks: MainTask[] }>("GET", `/api/task-projects/${encodeURIComponent(projectSlug)}/main-tasks`),
+    create: (projectSlug: string, body: { name: string; deadline?: string | null; status_id?: string }) =>
+      req<{ ok: boolean; main_task: MainTask }>("POST", `/api/task-projects/${encodeURIComponent(projectSlug)}/main-tasks`, body),
+    update: (projectSlug: string, id: string, body: { name?: string; deadline?: string | null; is_active?: boolean; status_id?: string }) =>
+      req<{ ok: boolean; main_task: MainTask }>(
+        "PUT",
+        `/api/task-projects/${encodeURIComponent(projectSlug)}/main-tasks/${encodeURIComponent(id)}`,
+        body
+      ),
+    delete: (projectSlug: string, id: string) =>
+      req<{ ok: boolean; id: string }>(
+        "DELETE",
+        `/api/task-projects/${encodeURIComponent(projectSlug)}/main-tasks/${encodeURIComponent(id)}`
+      ),
+  },
+
+  subtasks: {
+    list: (projectSlug: string, mainTaskId: string) =>
+      req<{ subtasks: Subtask[] }>(
+        "GET",
+        `/api/task-projects/${encodeURIComponent(projectSlug)}/main-tasks/${encodeURIComponent(mainTaskId)}/subtasks`
+      ),
+    create: (projectSlug: string, mainTaskId: string, body: { name: string; deadline?: string | null; status_id?: string }) =>
+      req<{ ok: boolean; subtask: Subtask }>(
+        "POST",
+        `/api/task-projects/${encodeURIComponent(projectSlug)}/main-tasks/${encodeURIComponent(mainTaskId)}/subtasks`,
+        body
+      ),
+    update: (projectSlug: string, mainTaskId: string, id: string, body: { name?: string; deadline?: string | null; status_id?: string }) =>
+      req<{ ok: boolean; subtask: Subtask }>(
+        "PUT",
+        `/api/task-projects/${encodeURIComponent(projectSlug)}/main-tasks/${encodeURIComponent(mainTaskId)}/subtasks/${encodeURIComponent(id)}`,
+        body
+      ),
+    delete: (projectSlug: string, mainTaskId: string, id: string) =>
+      req<{ ok: boolean; id: string }>(
+        "DELETE",
+        `/api/task-projects/${encodeURIComponent(projectSlug)}/main-tasks/${encodeURIComponent(mainTaskId)}/subtasks/${encodeURIComponent(id)}`
+      ),
+  },
+
   tasks: {
-    list: () => req<{ tasks: Task[] }>("GET", "/api/tasks"),
-    create: (body: Partial<Task> & { title: string }) =>
-      req<{ ok: boolean; task: Task }>("POST", "/api/tasks", body),
-    get: (id: string) => req<Task>("GET", `/api/tasks/${id}`),
-    update: (id: string, body: Partial<Task>) =>
-      req<{ ok: boolean; task: Task }>("PUT", `/api/tasks/${id}`, body),
-    delete: (id: string) => req<{ ok: boolean; id: string }>("DELETE", `/api/tasks/${id}`),
+    activeSummary: () => req<{ active: ActiveMainTask[] }>("GET", "/api/tasks/active-summary"),
+    completedByDay: (start: string, end: string) =>
+      req<{ days: { date: string; count: number }[] }>(
+        "GET",
+        `/api/tasks/completed-by-day?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
+      ),
+  },
+
+  taskStatuses: {
+    get: () => req<{ task_statuses: TaskStatusDef[]; usage: Record<string, number> }>("GET", "/api/settings/task-statuses"),
+    set: (task_statuses: TaskStatusDef[], reassign?: Record<string, string>) =>
+      req<{ ok: boolean; task_statuses: TaskStatusDef[] }>("POST", "/api/settings/task-statuses", {
+        task_statuses,
+        reassign: reassign || {},
+      }),
   },
 
   graph: () => req<GraphData>("GET", "/api/graph"),
@@ -241,7 +472,12 @@ export const api = {
   },
 
   arxiv: {
-    daily: (max = 200) => req<ArxivPaper[]>("GET", `/api/arxiv/daily?max=${max}`),
+    topics: () => req<{ topics: { id: string; label: string; group?: string }[] }>("GET", "/api/arxiv/topics"),
+    daily: (max = 200, cat = "astro-ph.HE", refresh = false) =>
+      req<{ papers: ArxivPaper[]; cat: string; cached: boolean; warning?: string | null }>(
+        "GET",
+        `/api/arxiv/daily?max=${max}&cat=${encodeURIComponent(cat)}&refresh=${refresh ? "true" : "false"}`
+      ),
     search: (q: string, field: ArxivSearchField = "all", start = 0, maxResults = 50) =>
       req<ArxivSearchResult>(
         "GET",
@@ -249,14 +485,32 @@ export const api = {
       ),
   },
 
-  scores: {
-    today: () => req<ScoreDay>("GET", "/api/scores/today"),
-    week: () =>
-      req<{ days: ScoreDay[]; week_total: number; week_target: number }>("GET", "/api/scores/week"),
-    range: (start: string, end: string) =>
-      req<{ days: ScoreDay[] }>(
+  books: {
+    list: () => req<{ books: BookSummary[] }>("GET", "/api/books"),
+    create: (body: { slug: string; title: string; authors: string[]; year: number | null; has_tracks: boolean }) =>
+      req<{ ok: boolean; slug: string }>("POST", "/api/books", body),
+    sections: (slug: string) =>
+      req<{ book: BookFrontmatter; sections: { id: string; frontmatter: BookSectionFrontmatter }[] }>(
         "GET",
-        `/api/scores/range?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
+        `/api/books/${encodeURIComponent(slug)}/sections`
+      ),
+    getSection: (slug: string, id: string) =>
+      req<BookSection>("GET", `/api/books/${encodeURIComponent(slug)}/sections/${encodeURIComponent(id)}`),
+    putSection: (slug: string, id: string, frontmatter: Partial<BookSectionFrontmatter>, body?: string) =>
+      req<{ ok: boolean; id: string }>(
+        "PUT",
+        `/api/books/${encodeURIComponent(slug)}/sections/${encodeURIComponent(id)}`,
+        { frontmatter, body }
+      ),
+    deleteSection: (slug: string, id: string) =>
+      req<{ ok: boolean }>("DELETE", `/api/books/${encodeURIComponent(slug)}/sections/${encodeURIComponent(id)}`),
+    raw: (slug: string, id: string) =>
+      req<{ raw: string }>("GET", `/api/books/${encodeURIComponent(slug)}/sections/${encodeURIComponent(id)}/raw`),
+    exportLatex: (slug: string, id: string, target_file: string, mode: "append" | "create") =>
+      req<{ ok: boolean; path: string }>(
+        "POST",
+        `/api/books/${encodeURIComponent(slug)}/sections/${encodeURIComponent(id)}/export-latex`,
+        { target_file, mode }
       ),
   },
 
@@ -282,6 +536,24 @@ export const api = {
       req<{ filename: string; zip_b64: string }>("GET", `/api/latex/zip/${encodeLatexPath(path)}`),
     rename: (src: string, dest: string) =>
       req<{ ok: boolean; src: string; dest: string }>("POST", "/api/latex/rename", { src, dest }),
+  },
+
+  notes: {
+    listFiles: () => req<NotesListResponse>("GET", "/api/notes/files"),
+    getFile: (name: string) =>
+      req<{ name: string; source: string }>("GET", `/api/notes/files/${encodeLatexPath(name)}`),
+    save: (filename: string, source: string) =>
+      req<{ ok: boolean; name: string }>("POST", "/api/notes/files", { filename, source }),
+    createFolder: (path: string) =>
+      req<{ ok: boolean; path: string }>("POST", "/api/notes/folders", { path }),
+    deleteFolder: (path: string) =>
+      req<{ ok: boolean }>("DELETE", `/api/notes/folders/${encodeLatexPath(path)}`),
+    deleteFile: (name: string) =>
+      req<{ ok: boolean }>("DELETE", `/api/notes/files/${encodeLatexPath(name)}`),
+    rename: (src: string, dest: string) =>
+      req<{ ok: boolean }>("POST", "/api/notes/rename", { src, dest }),
+    uploadAsset: (path: string, content_b64: string) =>
+      req<{ ok: boolean; path: string }>("POST", "/api/notes/assets", { path, content_b64 }),
   },
 
   vault: {

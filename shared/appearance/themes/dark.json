@@ -1,0 +1,21 @@
+{
+  "id": "dark",
+  "label": "Dark",
+  "tokens": {
+    "bg": "#141414",
+    "surface": "#1c1c1c",
+    "border": "#2a2a2a",
+    "text": "#f3f3f3",
+    "muted": "#9a9a9a",
+    "accent": "#3b82f6",
+    "accentForeground": "#141414",
+    "ok": "#34d399",
+    "warn": "#f59e0b",
+    "crit": "#f87171",
+    "fontSans": "system-ui, -apple-system, 'Segoe UI', sans-serif",
+    "fontMono": "ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace",
+    "labelTransform": "none",
+    "labelTracking": "0.02em",
+    "radius": "10px"
+  }
+}

@@ -1,0 +1,270 @@
+:root,
+[data-appearance="paper"] {
+  --bg: #f5f0eb;
+  --surface: #fffaf6;
+  --border: #e4d8cc;
+  --text: #1c1917;
+  --muted: #7a7068;
+  --accent: #c97b4a;
+  --accent-soft: #f3e4d8;
+  --accent-foreground: #fffaf6;
+  --focus: rgba(201, 123, 74, 0.4);
+  --ok: #3f7a4c;
+  --warn: #b45309;
+  --crit: #b42318;
+  --font-sans: Georgia, "Iowan Old Style", "Palatino Linotype", Palatino, serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --label-transform: none;
+  --label-tracking: 0.02em;
+  --radius: 12px;
+  --text-size: 15px;
+}
+
+[data-appearance="dark"] {
+  --bg: #141414;
+  --surface: #1c1c1c;
+  --border: #2a2a2a;
+  --text: #f3f3f3;
+  --muted: #9a9a9a;
+  --accent: #3b82f6;
+  --accent-soft: #1a2740;
+  --accent-foreground: #141414;
+  --focus: rgba(59, 130, 246, 0.45);
+  --ok: #34d399;
+  --warn: #f59e0b;
+  --crit: #f87171;
+  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --label-transform: none;
+  --label-tracking: 0.02em;
+  --radius: 10px;
+}
+
+[data-appearance="observatory"] {
+  --bg: #f0f0e8;
+  --surface: #e8e8dc;
+  --border: #1a1a1a;
+  --text: #141414;
+  --muted: #5a5a52;
+  --accent: #1a1a1a;
+  --accent-soft: #d8d8ce;
+  --accent-foreground: #f0f0e8;
+  --focus: rgba(26, 26, 26, 0.35);
+  --ok: #1a1a1a;
+  --warn: #1a1a1a;
+  --crit: #1a1a1a;
+  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --label-transform: uppercase;
+  --label-tracking: 0.08em;
+  --radius: 0px;
+}
+
+[data-appearance="manuscript"] {
+  --bg: #fdf6e3;
+  --surface: #fff8e8;
+  --border: #ead9b8;
+  --text: #3d2e14;
+  --muted: #8a7344;
+  --accent: #e8a020;
+  --accent-soft: #f8e6b8;
+  --accent-foreground: #3d2e14;
+  --focus: rgba(232, 160, 32, 0.4);
+  --ok: #6a7a32;
+  --warn: #c47b10;
+  --crit: #b42318;
+  --font-sans: Palatino, "Palatino Linotype", Georgia, serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --label-transform: none;
+  --label-tracking: 0.04em;
+  --radius: 8px;
+}
+
+html[data-appearance] {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--text-size);
+}
+
+.ap-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  background: rgba(20, 20, 20, 0.28);
+}
+
+.ap-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 9999;
+  width: min(360px, 100vw);
+  height: 100vh;
+  background: var(--surface);
+  color: var(--text);
+  border-left: 1px solid var(--border);
+  font-family: var(--font-sans);
+  font-size: var(--text-size);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+.ap-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.ap-title {
+  margin: 0;
+  font-size: 1.05em;
+  font-weight: 600;
+}
+
+.ap-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.ap-section-label {
+  font-size: 11px;
+  letter-spacing: var(--label-tracking);
+  text-transform: var(--label-transform);
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+
+.ap-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ap-chip,
+.ap-ghost {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ap-chip[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-foreground);
+  border-color: var(--accent);
+}
+
+.ap-ghost {
+  background: transparent;
+}
+
+.ap-icon {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+}
+
+.ap-chip:focus-visible,
+.ap-ghost:focus-visible,
+.ap-swatch:focus-visible,
+.ap-color:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.ap-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.ap-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  padding: 0;
+  cursor: pointer;
+  background: var(--swatch, #ccc);
+}
+
+.ap-swatch[aria-pressed="true"] {
+  border: 2px solid var(--text);
+}
+
+.ap-swatch-custom {
+  background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red);
+  position: relative;
+  overflow: hidden;
+}
+
+.ap-swatch-custom input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.ap-color-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ap-color {
+  width: 36px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.ap-preview {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  padding: 12px;
+}
+
+.ap-preview-kicker {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: var(--label-tracking);
+  text-transform: var(--label-transform);
+}
+
+.ap-preview-bar {
+  margin-top: 8px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+@media (max-width: 520px) {
+  .ap-drawer {
+    width: 100vw;
+  }
+}

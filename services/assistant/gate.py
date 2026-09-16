@@ -1,45 +1,48 @@
 """
-gate.py — CERIC Gate enforcement.
+gate.py — Active-reading Gate enforcement.
 
-The Gate is the integrity mechanism of the CERIC reading system.
-DO NOT MODIFY THE PASS CONDITION. DO NOT ADD BYPASS PARAMETERS.
-
-A paper passes the Gate if and only if:
-  1. All five CERIC slots (claim, evidence, reasoning, implications, context)
-     are present and non-empty after .strip()
+DO NOT ADD BYPASS PARAMETERS. The pass condition is always:
+  1. Every configured analysis slot is a non-empty string after .strip()
   2. aq_written is True in frontmatter
 
-This module is called by /api/examine. It raises GateError (HTTP 423) if
-the paper does not pass. No other code path should ever call the Anthropic API.
+Slot names default to the classic CERIC five, but may be supplied by the
+caller from vault settings (analysis_tags → lowercase keys). Enforcement
+stays hard either way.
 """
 
 from pathlib import Path
+from typing import Optional, Sequence
+
 import frontmatter
 
 
-CERIC_SLOTS = ["claim", "evidence", "reasoning", "implications", "context"]
+DEFAULT_SLOTS = ["claim", "evidence", "reasoning", "implications", "context"]
+# Back-compat alias
+CERIC_SLOTS = DEFAULT_SLOTS
 
 
 class GateError(Exception):
-    """Raised when the CERIC gate check fails. HTTP 423 Locked."""
+    """Raised when the gate check fails. HTTP 423 Locked."""
 
     def __init__(self, missing_slots: list[str], aq_missing: bool):
         self.missing_slots = missing_slots
         self.aq_missing = aq_missing
         parts = []
         if missing_slots:
-            parts.append(f"CERIC slots not filled: {', '.join(missing_slots)}")
+            parts.append(f"Analysis slots not filled: {', '.join(missing_slots)}")
         if aq_missing:
             parts.append("Adversarial question not written (aq_written must be true)")
         super().__init__("; ".join(parts))
 
 
-def check_gate(note_path: Path) -> None:
+def check_gate(note_path: Path, slots: Optional[Sequence[str]] = None) -> None:
     """
-    Check whether a paper note passes the CERIC gate.
+    Check whether a paper note passes the active-reading gate.
 
     Args:
         note_path: Path to the .md file for the paper.
+        slots: Frontmatter keys that must be non-empty. Defaults to classic
+            CERIC keys when omitted.
 
     Raises:
         FileNotFoundError: If the note does not exist.
@@ -50,9 +53,10 @@ def check_gate(note_path: Path) -> None:
 
     post = frontmatter.load(str(note_path))
     fm = post.metadata
+    required = list(slots) if slots else list(DEFAULT_SLOTS)
 
     missing_slots = []
-    for slot in CERIC_SLOTS:
+    for slot in required:
         value = fm.get(slot, "")
         if not isinstance(value, str) or not value.strip():
             missing_slots.append(slot)

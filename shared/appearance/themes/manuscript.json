@@ -1,0 +1,21 @@
+{
+  "id": "manuscript",
+  "label": "Manuscript",
+  "tokens": {
+    "bg": "#fdf6e3",
+    "surface": "#fff8e8",
+    "border": "#ead9b8",
+    "text": "#3d2e14",
+    "muted": "#8a7344",
+    "accent": "#e8a020",
+    "accentForeground": "#3d2e14",
+    "ok": "#6a7a32",
+    "warn": "#c47b10",
+    "crit": "#b42318",
+    "fontSans": "Palatino, 'Palatino Linotype', Georgia, serif",
+    "fontMono": "ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace",
+    "labelTransform": "none",
+    "labelTracking": "0.04em",
+    "radius": "8px"
+  }
+}

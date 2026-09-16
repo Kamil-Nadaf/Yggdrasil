@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import TaskStatusEditor from "./TaskStatusEditor";
 import {
   DEFAULT_FOLDER_COLORS,
   PAGE_LABELS,
@@ -187,13 +186,6 @@ export default function PageThemeDrawer({ open, page, onClose }: Props) {
                   onChange={(latexNumber) => patch({ ...theme, latexNumber })}
                 />
               </div>
-            </div>
-          )}
-
-          {page === "tasks" && (
-            <div className="settings-item">
-              <label>Task statuses</label>
-              <TaskStatusEditor />
             </div>
           )}
 

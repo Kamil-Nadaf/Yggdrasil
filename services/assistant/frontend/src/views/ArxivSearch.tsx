@@ -7,6 +7,25 @@ import AbstractText from "../components/AbstractText";
 const SHORTLIST_KEY = "yggdrasil:shortlist";
 const MY_LIST_KEY = "yggdrasil:my-list";
 const PANEL_SIZES_KEY = "yggdrasil:panel-sizes";
+const TOPIC_KEY = "yggdrasil:arxiv-topic";
+
+const DEFAULT_TOPICS: { id: string; label: string; group?: string }[] = [
+  { id: "all", label: "All new papers (every field)", group: "Start here" },
+  { id: "physics.chem-ph", label: "Chemical Physics", group: "Chemistry & Earth" },
+  { id: "physics.geo-ph", label: "Geophysics", group: "Chemistry & Earth" },
+  { id: "physics.hist-ph", label: "History & Philosophy of Physics", group: "Chemistry & Earth" },
+  { id: "math", label: "Mathematics (all)", group: "Mathematics" },
+  { id: "cs", label: "Computer Science (all)", group: "Computer Science" },
+  { id: "astro-ph.HE", label: "High Energy Astrophysical Phenomena", group: "Astrophysics" },
+];
+
+function loadTopic(): string {
+  try {
+    return localStorage.getItem(TOPIC_KEY) || "astro-ph.HE";
+  } catch {
+    return "astro-ph.HE";
+  }
+}
 
 function loadList(key: string): ArxivPaper[] {
   try {
@@ -46,7 +65,13 @@ function CategoryBadges({ categories }: { categories: string[] }) {
 export default function ArxivSearch() {
   const [daily, setDaily] = useState<ArxivPaper[]>([]);
   const [dailyLoading, setDailyLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [filterText, setFilterText] = useState("");
+  const [topic, setTopic] = useState(loadTopic);
+  const [customTopic, setCustomTopic] = useState("");
+  const [topicQuery, setTopicQuery] = useState("");
+  const [editingTopic, setEditingTopic] = useState(false);
+  const [topics, setTopics] = useState(DEFAULT_TOPICS);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   const [shortlist, setShortlist] = useState<ArxivPaper[]>(() => loadList(SHORTLIST_KEY));
@@ -65,10 +90,16 @@ export default function ArxivSearch() {
     setTimeout(() => setToast(null), 4000);
   }
 
-  const { cericStatus, selectedText, selectionPaperId, addingSlot, flashId, handleTextSelect, addSelectionToSlot, refreshCericStatus } =
+  const { slots, cericStatus, selectedText, selectionPaperId, addingSlot, flashId, handleTextSelect, addSelectionToSlot, refreshCericStatus } =
     useCericAppend(showToast);
 
-  useEffect(() => { fetchDaily(); }, []);
+  useEffect(() => {
+    api.arxiv.topics().then((r) => {
+      if (r.topics?.length) setTopics(r.topics);
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => { fetchDaily(false); }, [topic]);
   useEffect(() => { saveList(SHORTLIST_KEY, shortlist); }, [shortlist]);
   useEffect(() => { saveList(MY_LIST_KEY, myList); }, [myList]);
   useEffect(() => {
@@ -81,12 +112,30 @@ export default function ArxivSearch() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myList]);
 
-  function fetchDaily() {
-    setDailyLoading(true);
-    api.arxiv.daily(200)
-      .then(setDaily)
-      .catch(() => showToast("Failed to fetch daily arXiv feed", false))
-      .finally(() => setDailyLoading(false));
+  function fetchDaily(refresh: boolean) {
+    if (refresh) setRefreshing(true);
+    else setDailyLoading(true);
+    api.arxiv.daily(200, topic, refresh)
+      .then((r) => {
+        setDaily(r.papers || []);
+        if (r.warning) {
+          showToast(r.warning, false);
+        } else if (refresh) {
+          showToast(`Updated ${r.papers?.length || 0} papers from arXiv (${r.cat})`, true);
+        }
+      })
+      .catch((e) => showToast(e instanceof Error ? e.message : "Failed to fetch daily arXiv feed", false))
+      .finally(() => {
+        setDailyLoading(false);
+        setRefreshing(false);
+      });
+  }
+
+  function applyTopic(next: string) {
+    const cleaned = next.trim();
+    if (!cleaned) return;
+    setTopic(cleaned);
+    try { localStorage.setItem(TOPIC_KEY, cleaned); } catch { /* ignore */ }
   }
 
   function toggleAbstract(id: string) {
@@ -133,15 +182,35 @@ export default function ArxivSearch() {
   const filteredDaily = useMemo(() => {
     const q = filterText.trim().toLowerCase();
     if (!q) return daily;
-    return daily.filter((p) =>
-      p.title.toLowerCase().includes(q) ||
-      p.authors.join(" ").toLowerCase().includes(q) ||
-      p.categories.join(" ").toLowerCase().includes(q)
-    );
+    return daily.filter((p) => {
+      const hay = [
+        p.title,
+        p.authors.join(" "),
+        p.categories.join(" "),
+        p.abstract || "",
+        p.id,
+      ].join(" ").toLowerCase();
+      return hay.includes(q);
+    });
   }, [daily, filterText]);
 
   const activePaper = myList.find((p) => p.id === activeId) || null;
   const today = new Date().toLocaleDateString("en", { year: "numeric", month: "short", day: "numeric" });
+  const topicLabel = topics.find((t) => t.id === topic)?.label || topic;
+  const topicGroups = useMemo(() => {
+    const q = topicQuery.trim().toLowerCase();
+    const groups: { name: string; items: { id: string; label: string }[] }[] = [];
+    const byName = new Map<string, { id: string; label: string }[]>();
+    for (const t of topics) {
+      if (q && !`${t.label} ${t.id} ${t.group || ""}`.toLowerCase().includes(q)) continue;
+      const name = t.group || "Other";
+      const list = byName.get(name) || [];
+      list.push({ id: t.id, label: t.label });
+      byName.set(name, list);
+    }
+    for (const [name, items] of byName) groups.push({ name, items });
+    return groups;
+  }, [topics, topicQuery]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 48px)" }}>
@@ -158,12 +227,66 @@ export default function ArxivSearch() {
             <h2>Daily Papers</h2>
             <span className="arxiv-date">{today}</span>
             <div className="arxiv-panel-header-spacer" />
-            <span className="arxiv-count">{daily.length}</span>
+            <span className="arxiv-count">{filteredDaily.length}{filterText ? `/${daily.length}` : ""}</span>
           </div>
-          <div className="arxiv-search-bar">
+          <div className="arxiv-search-bar" style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={refreshing}
+                onClick={() => fetchDaily(true)}
+                title="Fetch latest papers from arXiv now"
+              >
+                {refreshing ? "Updating…" : "Update from web"}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setEditingTopic((v) => !v)}
+              >
+                {editingTopic ? "Done" : "Topic"}
+              </button>
+            </div>
+            {editingTopic ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <input
+                  type="text"
+                  placeholder="Filter topics: chemistry, math, geology…"
+                  value={topicQuery}
+                  onChange={(e) => setTopicQuery(e.target.value)}
+                />
+                <select
+                  size={12}
+                  value={topic}
+                  onChange={(e) => { if (e.target.value) applyTopic(e.target.value); }}
+                  style={{ width: "100%", fontSize: 12 }}
+                >
+                  {topicGroups.map((g) => (
+                    <optgroup key={g.name} label={g.name}>
+                      {g.items.map((t) => (
+                        <option key={t.id} value={t.id}>{t.label} ({t.id})</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <input
+                    type="text"
+                    placeholder="Custom cat: e.g. hep-ph or math.GT"
+                    value={customTopic}
+                    onChange={(e) => setCustomTopic(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") applyTopic(customTopic); }}
+                  />
+                  <button type="button" className="btn" onClick={() => applyTopic(customTopic)}>Set</button>
+                </div>
+              </div>
+            ) : (
+              <div className="muted mono" style={{ fontSize: 11 }}>{topicLabel}{topic !== topicLabel ? ` · ${topic}` : ""}</div>
+            )}
             <input
               type="text"
-              placeholder="Search title, author, keyword..."
+              placeholder="Filter title, author, abstract, keyword…"
               value={filterText}
               onChange={(e) => setFilterText(e.target.value)}
             />
@@ -254,7 +377,7 @@ export default function ArxivSearch() {
             <div className="arxiv-reading-pane" onMouseUp={() => handleTextSelect(activePaper.id)}>
               <div style={{ display: "flex", alignItems: "flex-start" }}>
                 <div className="arxiv-reading-title" style={{ flex: 1 }}>{activePaper.title}</div>
-                <SlotIndicator status={cericStatus[activePaper.id]} />
+                <SlotIndicator status={cericStatus[activePaper.id]} slots={slots} />
               </div>
               <div className="arxiv-reading-authors">{activePaper.authors.join(", ")}</div>
               <div className="arxiv-reading-meta">
@@ -272,11 +395,16 @@ export default function ArxivSearch() {
                 <CericSelectionToolbar
                   selectedText={selectedText}
                   addingSlot={addingSlot}
+                  slots={slots}
                   onAdd={(slotKey) => addSelectionToSlot(activePaper, slotKey)}
                 />
               )}
 
-              <AbstractText text={activePaper.abstract} className={`arxiv-reading-abstract${flashId === activePaper.id ? " flash" : ""}`} />
+              <AbstractText
+                text={activePaper.abstract}
+                className={`arxiv-reading-abstract${flashId === activePaper.id ? " flash" : ""}`}
+                onMouseUp={() => handleTextSelect(activePaper.id)}
+              />
               <div className="arxiv-reading-actions">
                 <button className="btn" onClick={() => window.open(activePaper.pdf_url, "_blank", "noopener,noreferrer")}>
                   ↗ Open PDF
@@ -304,7 +432,7 @@ export default function ArxivSearch() {
                     onClick={() => setActiveId(p.id)}
                   >
                     <span className="arxiv-saved-card-title">{p.title}</span>
-                    <SlotIndicator status={cericStatus[p.id]} />
+                    <SlotIndicator status={cericStatus[p.id]} slots={slots} />
                     <button className="btn" onClick={(e) => { e.stopPropagation(); handleAddToZotero(p); }}>
                       Zotero
                     </button>

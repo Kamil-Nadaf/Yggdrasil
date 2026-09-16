@@ -1,126 +1,16 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useRef, useState } from "react";
+import {
+  WorkspaceMenuBar,
+  ViewModeToggle,
+  FilesToggleButton,
+  pressKeepFocus,
+  type MenuConfig,
+  type MenuItem,
+} from "./WorkspaceMenuBar";
 
 export type LatexViewMode = "editor" | "split" | "pdf";
 
-type MenuId = "file" | "edit" | "insert" | "view" | "format" | "history" | "templates" | null;
-
-type MenuItem =
-  | {
-      type: "item";
-      label: string;
-      shortcut?: string;
-      disabled?: boolean;
-      hint?: string;
-      onClick: () => void;
-    }
-  | { type: "sep" };
-
-/**
- * Format-bar only: keep CodeMirror focused.
- * Do not use on menus / Share / Save — preventDefault on pointerdown swallows
- * click, which Safari needs for file pickers and which makes buttons look dead.
- */
-export function pressKeepFocus(handler: () => void) {
-  return {
-    onPointerDown: (e: React.PointerEvent) => {
-      if (e.button !== 0) return;
-      const el = e.currentTarget as HTMLButtonElement;
-      if (el.disabled) return;
-      e.preventDefault();
-      handler();
-    },
-  };
-}
-
-function MenuDropdown({
-  id,
-  label,
-  open,
-  onOpen,
-  items,
-  align = "left",
-  panel,
-}: {
-  id: MenuId;
-  label: string;
-  open: MenuId;
-  onOpen: (id: MenuId) => void;
-  items?: MenuItem[];
-  align?: "left" | "right";
-  panel?: ReactNode;
-}) {
-  const active = open === id;
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
-
-  useLayoutEffect(() => {
-    if (!active || !triggerRef.current) return;
-    const r = triggerRef.current.getBoundingClientRect();
-    const width = 240;
-    let left = align === "right" ? r.right - width : r.left;
-    left = Math.min(Math.max(8, left), window.innerWidth - width - 8);
-    setPos({ top: r.bottom + 4, left });
-  }, [active, align]);
-
-  return (
-    <div className={`latex-menu${active ? " open" : ""}`}>
-      <button
-        ref={triggerRef}
-        type="button"
-        className="latex-menu-trigger"
-        aria-haspopup="menu"
-        aria-expanded={active}
-        onClick={() => onOpen(active ? null : id)}
-        onMouseEnter={() => {
-          if (open) onOpen(id);
-        }}
-      >
-        {label}
-      </button>
-      {active &&
-        createPortal(
-          <div
-            className="latex-menu-dropdown"
-            role="menu"
-            style={{ top: pos.top, left: pos.left }}
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {panel
-              ? panel
-              : items?.map((item, i) =>
-                  item.type === "sep" ? (
-                    <div key={`sep-${i}`} className="latex-menu-sep" />
-                  ) : (
-                    <button
-                      key={item.label}
-                      type="button"
-                      role="menuitem"
-                      className="latex-menu-item"
-                      disabled={item.disabled}
-                      title={item.disabled ? item.hint : item.shortcut}
-                      onClick={() => {
-                        if (item.disabled) return;
-                        item.onClick();
-                        onOpen(null);
-                      }}
-                    >
-                      <span>{item.label}</span>
-                      {(item.disabled ? item.hint : item.shortcut) && (
-                        <span className="latex-menu-shortcut">
-                          {item.disabled ? item.hint : item.shortcut}
-                        </span>
-                      )}
-                    </button>
-                  )
-                )}
-          </div>,
-          document.body
-        )}
-    </div>
-  );
-}
+export { pressKeepFocus };
 
 export function LatexMenuBar({
   filename,
@@ -211,32 +101,7 @@ export function LatexMenuBar({
   historyMsg: string | null;
   onShare: () => void;
 }) {
-  const [open, setOpen] = useState<MenuId>(null);
-  const barRef = useRef<HTMLDivElement | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: PointerEvent) => {
-      const t = e.target as Node;
-      if (barRef.current?.contains(t)) return;
-      if (t instanceof Element && t.closest(".latex-menu-dropdown")) return;
-      setOpen(null);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(null);
-    };
-    document.addEventListener("pointerdown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("pointerdown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  useEffect(() => {
-    if (open === "history") onHistoryRefresh();
-  }, [open, onHistoryRefresh]);
 
   useEffect(() => {
     if (renaming) {
@@ -391,123 +256,103 @@ export function LatexMenuBar({
     </div>
   );
 
+  const menus: MenuConfig[] = [
+    { id: "file", label: "File", items: fileItems },
+    { id: "edit", label: "Edit", items: editItems },
+    { id: "insert", label: "Insert", items: insertItems },
+    { id: "view", label: "View", items: viewItems },
+    { id: "format", label: "Format", items: formatItems },
+    { id: "history", label: "History", panel: historyPanel },
+    { id: "templates", label: "Templates", items: templateItems },
+  ];
+
+  const centerSlot = (
+    <>
+      {renaming ? (
+        <input
+          ref={renameInputRef}
+          type="text"
+          value={filename}
+          onChange={(e) => onFilenameChange(e.target.value)}
+          onBlur={() => onCommitRename()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              onCommitRename();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              onCancelRename();
+            }
+          }}
+          placeholder="path/filename"
+          className="mono latex-filename-input"
+          title="Enter to save rename, Esc to cancel"
+        />
+      ) : (
+        <span
+          className="latex-filename-label mono"
+          title="Click to rename"
+          role="button"
+          tabIndex={0}
+          onClick={onStartRename}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onStartRename();
+            }
+          }}
+        >
+          {displayName}
+          {dirty ? " *" : ""}
+        </span>
+      )}
+      {saveMsg && (
+        <span className={`mono ${saveMsg.ok ? "ok" : "crit"}`} style={{ fontSize: 12 }}>
+          {saveMsg.text}
+        </span>
+      )}
+    </>
+  );
+
+  const rightSlot = (
+    <>
+      <FilesToggleButton collapsed={filesCollapsed} onToggle={onToggleFiles} />
+      <ViewModeToggle
+        modes={[
+          { id: "editor" as const, label: "Editor", title: "Editor only" },
+          { id: "split" as const, label: "Split", title: "Editor + PDF" },
+          { id: "pdf" as const, label: "PDF", title: "PDF only" },
+        ]}
+        active={viewMode}
+        onChange={onViewMode}
+      />
+      <button type="button" className="btn" onClick={onShare}>
+        Share
+      </button>
+      <button type="button" className="btn btn-primary" disabled={compiling} onClick={onCompile}>
+        {compiling ? "Compiling…" : "Recompile"}
+      </button>
+      <button
+        type="button"
+        className="btn"
+        disabled={saving || !filename.trim()}
+        title={!filename.trim() ? "Name the file first" : "Save to vault"}
+        onClick={onSave}
+      >
+        {saving ? "Saving…" : "Save"}
+      </button>
+    </>
+  );
+
   return (
-    <div className="latex-menubar-wrap" ref={barRef}>
-      <div className="latex-menubar">
-        <MenuDropdown id="file" label="File" open={open} onOpen={setOpen} items={fileItems} />
-        <MenuDropdown id="edit" label="Edit" open={open} onOpen={setOpen} items={editItems} />
-        <MenuDropdown id="insert" label="Insert" open={open} onOpen={setOpen} items={insertItems} />
-        <MenuDropdown id="view" label="View" open={open} onOpen={setOpen} items={viewItems} />
-        <MenuDropdown id="format" label="Format" open={open} onOpen={setOpen} items={formatItems} />
-        <MenuDropdown id="history" label="History" open={open} onOpen={setOpen} panel={historyPanel} />
-        <MenuDropdown id="templates" label="Templates" open={open} onOpen={setOpen} items={templateItems} />
-      </div>
-
-      <div className="latex-toolbar-center">
-        {renaming ? (
-          <input
-            ref={renameInputRef}
-            type="text"
-            value={filename}
-            onChange={(e) => onFilenameChange(e.target.value)}
-            onBlur={() => onCommitRename()}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                onCommitRename();
-              } else if (e.key === "Escape") {
-                e.preventDefault();
-                onCancelRename();
-              }
-            }}
-            placeholder="path/filename"
-            className="mono latex-filename-input"
-            title="Enter to save rename, Esc to cancel"
-          />
-        ) : (
-          <span
-            className="latex-filename-label mono"
-            title="Click to rename"
-            role="button"
-            tabIndex={0}
-            onClick={onStartRename}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                onStartRename();
-              }
-            }}
-          >
-            {displayName}
-            {dirty ? " *" : ""}
-          </span>
-        )}
-        {saveMsg && (
-          <span className={`mono ${saveMsg.ok ? "ok" : "crit"}`} style={{ fontSize: 12 }}>
-            {saveMsg.text}
-          </span>
-        )}
-      </div>
-
-      <div className="latex-toolbar-right">
-        <div className="latex-layout-seg" role="group" aria-label="Layout">
-          {(
-            [
-              { id: "editor" as const, label: "Editor", title: "Editor only" },
-              { id: "split" as const, label: "Split", title: "Editor + PDF" },
-              { id: "pdf" as const, label: "PDF", title: "PDF only" },
-            ] as const
-          ).map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              className={`latex-layout-btn${viewMode === m.id ? " active" : ""}`}
-              title={m.title}
-              aria-pressed={viewMode === m.id}
-              onClick={() => {
-                setOpen(null);
-                onViewMode(m.id);
-              }}
-            >
-              {m.label}
-            </button>
-          ))}
-        </div>
-        <button
-          type="button"
-          className="btn"
-          onClick={() => {
-            setOpen(null);
-            onShare();
-          }}
-        >
-          Share
-        </button>
-        <button
-          type="button"
-          className="btn btn-primary"
-          disabled={compiling}
-          onClick={() => {
-            setOpen(null);
-            onCompile();
-          }}
-        >
-          {compiling ? "Compiling…" : "Recompile"}
-        </button>
-        <button
-          type="button"
-          className="btn"
-          disabled={saving || !filename.trim()}
-          title={!filename.trim() ? "Name the file first" : "Save to vault"}
-          onClick={() => {
-            setOpen(null);
-            onSave();
-          }}
-        >
-          {saving ? "Saving…" : "Save"}
-        </button>
-      </div>
-    </div>
+    <WorkspaceMenuBar
+      menus={menus}
+      centerSlot={centerSlot}
+      rightSlot={rightSlot}
+      onMenuOpen={(id) => {
+        if (id === "history") onHistoryRefresh();
+      }}
+    />
   );
 }
 

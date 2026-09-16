@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -6,178 +6,277 @@ import {
   useSensor,
   useSensors,
   useDroppable,
+  useDraggable,
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { useDraggable } from "@dnd-kit/core";
-import { api, type Task } from "../api/client";
-import { THEME_EVENT, loadTaskStatuses, type TaskStatusDef } from "../lib/theme";
+import { api, type TaskProject, type MainTask, type Subtask, type TaskStatusDef } from "../api/client";
+import { LatexPromptModal } from "../components/LatexMenuBar";
+import DeadlinePicker from "../components/DeadlinePicker";
+import StatusPill from "../components/StatusPill";
+import {
+  ensureTaskStatuses,
+  getCachedTaskStatuses,
+  TASK_STATUSES_EVENT,
+  STATUS_ICON_GLYPH,
+} from "../lib/taskStatuses";
 
-type Status = string;
 type Mode = "list" | "kanban";
+type StatusFilter = "all" | string;
 
-function KanbanCard({ task }: { task: Task }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: task.id });
-  const style = transform
-    ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`, opacity: isDragging ? 0.4 : 1 }
-    : undefined;
+function mtKey(projectSlug: string, mainTaskId: string) {
+  return `${projectSlug}:${mainTaskId}`;
+}
+
+function ProgressBar({ done, total }: { done: number; total: number }) {
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
   return (
-    <div ref={setNodeRef} className="task-kanban-card" style={style} {...listeners} {...attributes}>
-      <div className="task-kanban-title">{task.title}</div>
-      {task.tags.length > 0 && (
-        <div className="task-tags">
-          {task.tags.map((t) => (
-            <span key={t} className="task-tag">{t}</span>
-          ))}
-        </div>
-      )}
+    <div className="task-progress-bar" title={`${pct}%`}>
+      <div className="task-progress-fill" style={{ width: `${pct}%` }} />
     </div>
   );
 }
 
-function KanbanColumn({ id, label, color, tasks }: { id: Status; label: string; color: string; tasks: Task[] }) {
-  const { setNodeRef, isOver } = useDroppable({ id });
-  return (
-    <div ref={setNodeRef} className={`task-kanban-col${isOver ? " over" : ""}`} style={{ borderTopColor: color }}>
-      <div className="task-kanban-col-head">
-        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span className="status-editor-dot" style={{ background: color }} />
-          {label}
-        </span>
-        <span className="muted mono">{tasks.length}</span>
-      </div>
-      <div className="task-kanban-col-body">
-        {tasks.map((t) => (
-          <KanbanCard key={t.id} task={t} />
-        ))}
-      </div>
-    </div>
-  );
+interface KanbanCardData {
+  mainTask: MainTask;
+  projectSlug: string;
+  projectName: string;
 }
 
-export default function TasksView() {
-  const [tasks, setTasks] = useState<Task[]>([]);
+export default function TasksView({
+  focus,
+  onFocusConsumed,
+}: {
+  focus?: { projectSlug: string; mainTaskId: string } | null;
+  onFocusConsumed?: () => void;
+}) {
+  const [projects, setProjects] = useState<TaskProject[]>([]);
+  const [statuses, setStatuses] = useState<TaskStatusDef[]>(() => getCachedTaskStatuses());
   const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState<Mode>("list");
-  const [newTitle, setNewTitle] = useState("");
-  const [newParent, setNewParent] = useState<string>("");
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
+  const [mainTasksByProject, setMainTasksByProject] = useState<Record<string, MainTask[]>>({});
+  const [expandedMainTasks, setExpandedMainTasks] = useState<Set<string>>(new Set());
+  const [subtasksByKey, setSubtasksByKey] = useState<Record<string, Subtask[]>>({});
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
+  const [newMainTaskName, setNewMainTaskName] = useState<Record<string, string>>({});
+  const [newSubtaskName, setNewSubtaskName] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState<string | null>(null);
-  const [statuses, setStatuses] = useState<TaskStatusDef[]>(() => loadTaskStatuses());
-
-  useEffect(() => {
-    const sync = () => setStatuses(loadTaskStatuses());
-    window.addEventListener(THEME_EVENT, sync);
-    return () => window.removeEventListener(THEME_EVENT, sync);
-  }, []);
-
-  const columns = useMemo(() => {
-    const known = new Set(statuses.map((s) => s.id));
-    const extra = tasks
-      .map((t) => t.status)
-      .filter((id) => id && !known.has(id))
-      .filter((id, i, arr) => arr.indexOf(id) === i)
-      .map((id) => ({ id, label: id, color: "#6B7280" }));
-    return [...statuses, ...extra];
-  }, [statuses, tasks]);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [sortByStatus, setSortByStatus] = useState(false);
+  const [kanbanCards, setKanbanCards] = useState<KanbanCardData[]>([]);
+  const [activeCardId, setActiveCardId] = useState<string | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
-  const reload = useCallback(async () => {
-    const r = await api.tasks.list();
-    setTasks(r.tasks);
-  }, []);
+  // The status a subtask jumps to via the quick-complete checkbox — the
+  // literal "done" status if it still exists, else whatever is last in order.
+  const doneStatusId = statuses.find((s) => s.id === "done")?.id ?? statuses[statuses.length - 1]?.id ?? "done";
+  const todoStatusId = statuses[0]?.id ?? "todo";
 
-  useEffect(() => {
-    reload().finally(() => setLoading(false));
-  }, [reload]);
-
-  const parents = useMemo(() => tasks.filter((t) => !t.parent), [tasks]);
-  const childrenOf = useCallback(
-    (id: string) => tasks.filter((t) => t.parent === id),
-    [tasks]
-  );
+  function statusRank(id: string): number {
+    const i = statuses.findIndex((s) => s.id === id);
+    return i === -1 ? statuses.length : i;
+  }
 
   function flash(text: string) {
     setMsg(text);
     setTimeout(() => setMsg(null), 2500);
   }
 
-  async function handleCreate() {
-    const title = newTitle.trim();
-    if (!title) return;
-    await api.tasks.create({
-      title,
-      parent: newParent || null,
-      status: "todo",
-      tags: [],
-      recurring: false,
+  useEffect(() => {
+    ensureTaskStatuses(() => api.taskStatuses.get()).then(setStatuses);
+    const onUpdate = () => setStatuses(getCachedTaskStatuses());
+    window.addEventListener(TASK_STATUSES_EVENT, onUpdate);
+    return () => window.removeEventListener(TASK_STATUSES_EVENT, onUpdate);
+  }, []);
+
+  const refreshProjects = useCallback(async () => {
+    const r = await api.taskProjects.list();
+    setProjects(r.projects);
+    return r.projects;
+  }, []);
+
+  const loadMainTasks = useCallback(async (slug: string) => {
+    const r = await api.mainTasks.list(slug);
+    setMainTasksByProject((prev) => ({ ...prev, [slug]: r.main_tasks }));
+    return r.main_tasks;
+  }, []);
+
+  const loadSubtasks = useCallback(async (slug: string, mainTaskId: string) => {
+    const r = await api.subtasks.list(slug, mainTaskId);
+    setSubtasksByKey((prev) => ({ ...prev, [mtKey(slug, mainTaskId)]: r.subtasks }));
+    return r.subtasks;
+  }, []);
+
+  useEffect(() => {
+    refreshProjects().finally(() => setLoading(false));
+  }, [refreshProjects]);
+
+  // Dashboard bar click → expand and reveal that project/main task.
+  useEffect(() => {
+    if (!focus) return;
+    (async () => {
+      setExpandedProjects((prev) => new Set(prev).add(focus.projectSlug));
+      await loadMainTasks(focus.projectSlug);
+      const key = mtKey(focus.projectSlug, focus.mainTaskId);
+      setExpandedMainTasks((prev) => new Set(prev).add(key));
+      await loadSubtasks(focus.projectSlug, focus.mainTaskId);
+      onFocusConsumed?.();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus]);
+
+  const refreshKanban = useCallback(async () => {
+    const projectList = projects.length ? projects : await refreshProjects();
+    const cards: KanbanCardData[] = [];
+    for (const project of projectList) {
+      const mainTasks = await loadMainTasks(project.slug);
+      for (const mt of mainTasks) {
+        cards.push({ mainTask: mt, projectSlug: project.slug, projectName: project.name });
+      }
+    }
+    setKanbanCards(cards);
+  }, [projects, refreshProjects, loadMainTasks]);
+
+  useEffect(() => {
+    if (mode === "kanban") void refreshKanban();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
+  async function toggleProjectExpand(slug: string) {
+    setExpandedProjects((prev) => {
+      const next = new Set(prev);
+      if (next.has(slug)) next.delete(slug);
+      else next.add(slug);
+      return next;
     });
-    setNewTitle("");
-    await reload();
-    flash("Task added");
+    if (!mainTasksByProject[slug]) await loadMainTasks(slug);
   }
 
-  async function setStatus(id: string, status: Status) {
-    await api.tasks.update(id, { status });
-    await reload();
+  async function toggleMainTaskExpand(slug: string, id: string) {
+    const key = mtKey(slug, id);
+    setExpandedMainTasks((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+    if (!subtasksByKey[key]) await loadSubtasks(slug, id);
   }
 
-  async function toggleDone(task: Task) {
-    await setStatus(task.id, task.status === "done" ? "todo" : "done");
+  async function createProject(name: string) {
+    setNewProjectOpen(false);
+    try {
+      await api.taskProjects.create(name);
+      await refreshProjects();
+      flash(`Created ${name}`);
+    } catch (error) {
+      flash(error instanceof Error ? error.message : "Could not create project");
+    }
   }
 
-  async function handleDelete(id: string) {
-    if (!window.confirm("Delete this task?")) return;
-    await api.tasks.delete(id);
-    await reload();
+  async function deleteProject(project: TaskProject) {
+    if (project.pinned) return;
+    if (!window.confirm(`Delete project "${project.name}" and everything inside it?`)) return;
+    await api.taskProjects.delete(project.slug);
+    await refreshProjects();
   }
 
-  async function updateTags(id: string, raw: string) {
-    const tags = raw.split(",").map((s) => s.trim()).filter(Boolean);
-    await api.tasks.update(id, { tags });
-    await reload();
+  async function createMainTask(slug: string) {
+    const name = (newMainTaskName[slug] || "").trim();
+    if (!name) return;
+    await api.mainTasks.create(slug, { name });
+    setNewMainTaskName((prev) => ({ ...prev, [slug]: "" }));
+    await loadMainTasks(slug);
+    await refreshProjects();
   }
 
-  async function updateDue(id: string, due: string) {
-    await api.tasks.update(id, { due });
-    await reload();
+  async function deleteMainTask(slug: string, id: string) {
+    if (!window.confirm("Delete this main task and its subtasks?")) return;
+    await api.mainTasks.delete(slug, id);
+    await loadMainTasks(slug);
+    await refreshProjects();
   }
 
-  async function toggleRecurring(task: Task) {
-    await api.tasks.update(task.id, { recurring: !task.recurring });
-    await reload();
+  async function toggleActive(slug: string, mt: MainTask) {
+    await api.mainTasks.update(slug, mt.id, { is_active: !mt.is_active });
+    await loadMainTasks(slug);
+  }
+
+  async function updateMainTaskStatus(slug: string, mt: MainTask, statusId: string) {
+    await api.mainTasks.update(slug, mt.id, { status_id: statusId });
+    await loadMainTasks(slug);
+  }
+
+  async function updateDeadline(slug: string, mt: MainTask, deadline: string | null) {
+    await api.mainTasks.update(slug, mt.id, { deadline });
+    await loadMainTasks(slug);
+  }
+
+  async function createSubtask(slug: string, mainTaskId: string) {
+    const key = mtKey(slug, mainTaskId);
+    const name = (newSubtaskName[key] || "").trim();
+    if (!name) return;
+    await api.subtasks.create(slug, mainTaskId, { name });
+    setNewSubtaskName((prev) => ({ ...prev, [key]: "" }));
+    await loadSubtasks(slug, mainTaskId);
+    await loadMainTasks(slug);
+  }
+
+  async function updateSubtaskStatus(slug: string, mainTaskId: string, st: Subtask, statusId: string) {
+    await api.subtasks.update(slug, mainTaskId, st.id, { status_id: statusId });
+    await loadSubtasks(slug, mainTaskId);
+    await loadMainTasks(slug);
+  }
+
+  /** Checkbox: quick shortcut that jumps straight to Done, or back to To Do if already Done. */
+  async function quickToggleSubtask(slug: string, mainTaskId: string, st: Subtask) {
+    await updateSubtaskStatus(slug, mainTaskId, st, st.status_id === doneStatusId ? todoStatusId : doneStatusId);
+  }
+
+  async function updateSubtaskDeadline(slug: string, mainTaskId: string, st: Subtask, deadline: string | null) {
+    await api.subtasks.update(slug, mainTaskId, st.id, { deadline });
+    await loadSubtasks(slug, mainTaskId);
+  }
+
+  async function deleteSubtask(slug: string, mainTaskId: string, id: string) {
+    await api.subtasks.delete(slug, mainTaskId, id);
+    await loadSubtasks(slug, mainTaskId);
+    await loadMainTasks(slug);
   }
 
   function onDragStart(e: DragStartEvent) {
-    setActiveId(String(e.active.id));
+    setActiveCardId(String(e.active.id));
   }
 
   async function onDragEnd(e: DragEndEvent) {
-    setActiveId(null);
+    setActiveCardId(null);
     const over = e.over?.id;
-    if (!over) return;
-    const status = String(over) as Status;
-    if (!columns.some((c) => c.id === status)) return;
+    if (!over || !statuses.some((s) => s.id === over)) return;
+    const statusId = String(over);
     const id = String(e.active.id);
-    const task = tasks.find((t) => t.id === id);
-    if (!task || task.status === status) return;
-    await setStatus(id, status);
+    const card = kanbanCards.find((c) => c.mainTask.id === id);
+    if (!card || card.mainTask.status_id === statusId) return;
+    await api.mainTasks.update(card.projectSlug, id, { status_id: statusId });
+    setKanbanCards((prev) =>
+      prev.map((c) => (c.mainTask.id === id ? { ...c, mainTask: { ...c.mainTask, status_id: statusId } } : c))
+    );
   }
 
-  function toggleExpand(id: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  function orderMainTasks(list: MainTask[]): MainTask[] {
+    const filtered = statusFilter === "all" ? list : list.filter((mt) => mt.status_id === statusFilter);
+    return sortByStatus ? [...filtered].sort((a, b) => statusRank(a.status_id) - statusRank(b.status_id)) : filtered;
+  }
+
+  function orderSubtasks(list: Subtask[]): Subtask[] {
+    const filtered = statusFilter === "all" ? list : list.filter((st) => st.status_id === statusFilter);
+    return sortByStatus ? [...filtered].sort((a, b) => statusRank(a.status_id) - statusRank(b.status_id)) : filtered;
   }
 
   if (loading) return <div className="muted">Loading…</div>;
 
-  const activeTask = activeId ? tasks.find((t) => t.id === activeId) : null;
+  const activeCard = activeCardId ? kanbanCards.find((c) => c.mainTask.id === activeCardId) : null;
 
   return (
     <div className="tasks-view">
@@ -187,202 +286,189 @@ export default function TasksView() {
           <button className={`btn${mode === "list" ? " btn-primary" : ""}`} onClick={() => setMode("list")}>List</button>
           <button className={`btn${mode === "kanban" ? " btn-primary" : ""}`} onClick={() => setMode("kanban")}>Kanban</button>
         </div>
+        {mode === "list" && (
+          <>
+            <button className="btn btn-primary" onClick={() => setNewProjectOpen(true)}>+ New Project</button>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} title="Filter by status">
+              <option value="all">All statuses</option>
+              {statuses.map((s) => (
+                <option key={s.id} value={s.id}>{STATUS_ICON_GLYPH[s.icon]} {s.name}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className={`btn${sortByStatus ? " btn-primary" : ""}`}
+              aria-pressed={sortByStatus}
+              onClick={() => setSortByStatus((v) => !v)}
+            >
+              Sort by status
+            </button>
+          </>
+        )}
         {msg && <span className="ok mono" style={{ fontSize: 12 }}>{msg}</span>}
       </div>
 
-      <div className="card tasks-create">
-        <input
-          type="text"
-          placeholder="New task…"
-          value={newTitle}
-          onChange={(e) => setNewTitle(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") handleCreate(); }}
-          style={{ flex: 1 }}
-        />
-        <select value={newParent} onChange={(e) => setNewParent(e.target.value)}>
-          <option value="">Top-level</option>
-          {parents.map((p) => (
-            <option key={p.id} value={p.id}>{p.title}</option>
-          ))}
-        </select>
-        <button className="btn btn-primary" onClick={handleCreate} disabled={!newTitle.trim()}>Add</button>
-      </div>
-
       {mode === "list" ? (
-        <div className="task-list">
-          <div className="task-list-head">
-            <span>Name</span>
-            <span>Tags</span>
-            <span>Status</span>
-            <span>Due</span>
-            <span></span>
-          </div>
-          {parents.length === 0 && <div className="muted" style={{ padding: 16 }}>No tasks yet — add a Daily Routine parent, then nest sub-tasks under it.</div>}
-          {parents.map((parent) => {
-            const kids = childrenOf(parent.id);
-            const isOpen = expanded.has(parent.id) || kids.length === 0;
+        <div className="task-projects">
+          {projects.map((project) => {
+            const open = expandedProjects.has(project.slug);
+            const mainTasks = orderMainTasks(mainTasksByProject[project.slug] || []);
             return (
-              <div key={parent.id} className="task-group">
-                <TaskRow
-                  task={parent}
-                  depth={0}
-                  hasKids={kids.length > 0}
-                  expanded={isOpen}
-                  onToggleExpand={() => toggleExpand(parent.id)}
-                  onToggleDone={() => toggleDone(parent)}
-                  onStatus={(s) => setStatus(parent.id, s)}
-                  onTags={(raw) => updateTags(parent.id, raw)}
-                  onDue={(d) => updateDue(parent.id, d)}
-                  onRecurring={() => toggleRecurring(parent)}
-                  onDelete={() => handleDelete(parent.id)}
-                  statuses={columns}
-                />
-                {isOpen && kids.map((child) => (
-                  <TaskRow
-                    key={child.id}
-                    task={child}
-                    depth={1}
-                    hasKids={false}
-                    expanded={false}
-                    onToggleExpand={() => {}}
-                    onToggleDone={() => toggleDone(child)}
-                    onStatus={(s) => setStatus(child.id, s)}
-                    onTags={(raw) => updateTags(child.id, raw)}
-                    onDue={(d) => updateDue(child.id, d)}
-                    onRecurring={() => toggleRecurring(child)}
-                    onDelete={() => handleDelete(child.id)}
-                    statuses={columns}
-                  />
-                ))}
+              <div key={project.slug} className="task-project card">
+                <div className="task-project-head">
+                  <button type="button" className="task-expand" onClick={() => toggleProjectExpand(project.slug)}>
+                    {open ? "▾" : "▸"}
+                  </button>
+                  <span className="task-project-name">{project.name}</span>
+                  <span className="muted mono">{project.main_task_count} main task{project.main_task_count === 1 ? "" : "s"}</span>
+                  <div className="task-row-actions">
+                    {!project.pinned && (
+                      <button className="btn btn-crit" onClick={() => deleteProject(project)}>Delete</button>
+                    )}
+                  </div>
+                </div>
+                {open && (
+                  <div className="task-project-body">
+                    {mainTasks.map((mt) => {
+                      const key = mtKey(project.slug, mt.id);
+                      const mtOpen = expandedMainTasks.has(key);
+                      const subtasks = orderSubtasks(subtasksByKey[key] || []);
+                      return (
+                        <div key={mt.id} className="task-main">
+                          <div className="task-main-head">
+                            <button type="button" className="task-expand" onClick={() => toggleMainTaskExpand(project.slug, mt.id)}>
+                              {mtOpen ? "▾" : "▸"}
+                            </button>
+                            <button
+                              type="button"
+                              className={`task-star${mt.is_active ? " active" : ""}`}
+                              title={mt.is_active ? "Active — showing on Dashboard" : "Mark active — show on Dashboard"}
+                              onClick={() => toggleActive(project.slug, mt)}
+                            >
+                              {mt.is_active ? "★" : "☆"}
+                            </button>
+                            <span className="task-main-name">{mt.name}</span>
+                            <StatusPill statuses={statuses} statusId={mt.status_id} onChange={(s) => updateMainTaskStatus(project.slug, mt, s)} />
+                            <span className="muted mono">{mt.subtask_done}/{mt.subtask_total} subtasks</span>
+                            <ProgressBar done={mt.subtask_done} total={mt.subtask_total} />
+                            <DeadlinePicker value={mt.deadline} onChange={(d) => updateDeadline(project.slug, mt, d)} title="Main task deadline" />
+                            <button className="btn btn-crit" onClick={() => deleteMainTask(project.slug, mt.id)}>Delete</button>
+                          </div>
+                          {mtOpen && (
+                            <div className="task-sub-list">
+                              {subtasks.map((st) => (
+                                <div key={st.id} className={`task-row${st.status_id === doneStatusId ? " done" : ""}`}>
+                                  <div className="task-row-name">
+                                    <span className="task-expand spacer" />
+                                    <button
+                                      type="button"
+                                      className={`task-check${st.status_id === doneStatusId ? " checked" : ""}`}
+                                      onClick={() => quickToggleSubtask(project.slug, mt.id, st)}
+                                      title="Quick-complete (jumps to Done)"
+                                    >
+                                      {st.status_id === doneStatusId ? "●" : "○"}
+                                    </button>
+                                    <span className="task-title">{st.name}</span>
+                                  </div>
+                                  <StatusPill statuses={statuses} statusId={st.status_id} onChange={(s) => updateSubtaskStatus(project.slug, mt.id, st, s)} />
+                                  <DeadlinePicker
+                                    value={st.deadline}
+                                    onChange={(d) => updateSubtaskDeadline(project.slug, mt.id, st, d)}
+                                    title="Subtask deadline"
+                                  />
+                                  <button className="btn btn-crit" onClick={() => deleteSubtask(project.slug, mt.id, st.id)}>Delete</button>
+                                </div>
+                              ))}
+                              <div className="task-sub-add">
+                                <input
+                                  type="text"
+                                  placeholder="New subtask…"
+                                  value={newSubtaskName[key] || ""}
+                                  onChange={(e) => setNewSubtaskName((prev) => ({ ...prev, [key]: e.target.value }))}
+                                  onKeyDown={(e) => { if (e.key === "Enter") createSubtask(project.slug, mt.id); }}
+                                />
+                                <button className="btn" onClick={() => createSubtask(project.slug, mt.id)}>Add</button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    <div className="task-sub-add">
+                      <input
+                        type="text"
+                        placeholder="New main task…"
+                        value={newMainTaskName[project.slug] || ""}
+                        onChange={(e) => setNewMainTaskName((prev) => ({ ...prev, [project.slug]: e.target.value }))}
+                        onKeyDown={(e) => { if (e.key === "Enter") createMainTask(project.slug); }}
+                      />
+                      <button className="btn" onClick={() => createMainTask(project.slug)}>Add main task</button>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
-          {/* Orphans with parent missing */}
-          {tasks.filter((t) => t.parent && !tasks.some((p) => p.id === t.parent)).map((orphan) => (
-            <TaskRow
-              key={orphan.id}
-              task={orphan}
-              depth={0}
-              hasKids={false}
-              expanded={false}
-              onToggleExpand={() => {}}
-              onToggleDone={() => toggleDone(orphan)}
-              onStatus={(s) => setStatus(orphan.id, s)}
-              onTags={(raw) => updateTags(orphan.id, raw)}
-              onDue={(d) => updateDue(orphan.id, d)}
-              onRecurring={() => toggleRecurring(orphan)}
-              onDelete={() => handleDelete(orphan.id)}
-              statuses={columns}
-            />
-          ))}
         </div>
       ) : (
         <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
           <div className="task-kanban">
-            {columns.map((col) => (
-              <KanbanColumn
-                key={col.id}
-                id={col.id}
-                label={col.label}
-                color={col.color}
-                tasks={tasks.filter((t) => t.status === col.id)}
-              />
+            {statuses.map((s) => (
+              <KanbanColumn key={s.id} status={s} cards={kanbanCards.filter((c) => c.mainTask.status_id === s.id)} />
             ))}
           </div>
           <DragOverlay>
-            {activeTask ? (
+            {activeCard ? (
               <div className="task-kanban-card dragging">
-                <div className="task-kanban-title">{activeTask.title}</div>
+                <div className="task-kanban-title">{activeCard.mainTask.name}</div>
               </div>
             ) : null}
           </DragOverlay>
         </DndContext>
       )}
+
+      <LatexPromptModal
+        open={newProjectOpen}
+        title="New Project"
+        label="Project name"
+        confirmLabel="Create"
+        onClose={() => setNewProjectOpen(false)}
+        onConfirm={createProject}
+      />
     </div>
   );
 }
 
-function TaskRow({
-  task,
-  depth,
-  hasKids,
-  expanded,
-  onToggleExpand,
-  onToggleDone,
-  onStatus,
-  onTags,
-  onDue,
-  onRecurring,
-  onDelete,
-  statuses,
-}: {
-  task: Task;
-  depth: number;
-  hasKids: boolean;
-  expanded: boolean;
-  onToggleExpand: () => void;
-  onToggleDone: () => void;
-  onStatus: (s: Status) => void;
-  onTags: (raw: string) => void;
-  onDue: (d: string) => void;
-  onRecurring: () => void;
-  onDelete: () => void;
-  statuses: TaskStatusDef[];
-}) {
-  const statusDef = statuses.find((s) => s.id === task.status);
-  const statusColor = statusDef?.color || "var(--muted)";
+function KanbanCard({ card }: { card: KanbanCardData }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: card.mainTask.id });
+  const style = transform
+    ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`, opacity: isDragging ? 0.4 : 1 }
+    : undefined;
   return (
-    <div className={`task-row${task.status === "done" ? " done" : ""}`} style={{ paddingLeft: 12 + depth * 20 }}>
-      <div className="task-row-name">
-        {hasKids ? (
-          <button type="button" className="task-expand" onClick={onToggleExpand}>{expanded ? "▾" : "▸"}</button>
-        ) : (
-          <span className="task-expand spacer" />
-        )}
-        <button
-          type="button"
-          className={`task-check${task.status === "done" ? " checked" : ""}`}
-          onClick={onToggleDone}
-          title="Toggle done"
-          style={{ color: statusColor }}
-        >
-          {task.status === "done" ? "●" : "○"}
-        </button>
-        <span className="task-title">{task.title}</span>
-        {task.recurring && <span className="task-tag recurring">daily</span>}
+    <div ref={setNodeRef} className="task-kanban-card" style={style} {...listeners} {...attributes}>
+      <div className="task-kanban-title">{card.mainTask.name}</div>
+      <div className="muted mono" style={{ fontSize: 11 }}>{card.projectName}</div>
+      {card.mainTask.subtask_total > 0 && (
+        <div className="muted mono" style={{ fontSize: 11 }}>
+          {card.mainTask.subtask_done}/{card.mainTask.subtask_total} subtasks
+        </div>
+      )}
+    </div>
+  );
+}
+
+function KanbanColumn({ status, cards }: { status: TaskStatusDef; cards: KanbanCardData[] }) {
+  const { setNodeRef, isOver } = useDroppable({ id: status.id });
+  return (
+    <div ref={setNodeRef} className={`task-kanban-col${isOver ? " over" : ""}`} style={{ borderTopColor: status.color }}>
+      <div className="task-kanban-col-head">
+        <span>{STATUS_ICON_GLYPH[status.icon]} {status.name.toUpperCase()}</span>
+        <span className="muted mono">{cards.length}</span>
       </div>
-      <div className="task-row-tags">
-        <input
-          className="task-inline-input"
-          defaultValue={task.tags.join(", ")}
-          placeholder="tags"
-          onBlur={(e) => {
-            const next = e.target.value;
-            if (next !== task.tags.join(", ")) onTags(next);
-          }}
-        />
-      </div>
-      <div>
-        <select value={task.status} onChange={(e) => onStatus(e.target.value)}>
-          {statuses.map((s) => (
-            <option key={s.id} value={s.id}>{s.label}</option>
-          ))}
-          {!statuses.some((s) => s.id === task.status) && (
-            <option value={task.status}>{task.status}</option>
-          )}
-        </select>
-      </div>
-      <div>
-        <input
-          type="date"
-          className="task-inline-input"
-          value={task.due || ""}
-          onChange={(e) => onDue(e.target.value)}
-        />
-      </div>
-      <div className="task-row-actions">
-        <button className="btn" title="Toggle recurring daily" onClick={onRecurring}>{task.recurring ? "↻" : "○↻"}</button>
-        <button className="btn btn-crit" onClick={onDelete}>Delete</button>
+      <div className="task-kanban-col-body">
+        {cards.map((c) => (
+          <KanbanCard key={c.mainTask.id} card={c} />
+        ))}
       </div>
     </div>
   );

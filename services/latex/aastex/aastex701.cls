@@ -6924,7 +6924,7 @@ ltxgrid%
 %% needed?
 \def\raggedcolumn@sw#1#2{#2}  % implement flushbottom as it was in revtex4
 
-\RequirePackage{epsf,graphicx}
+\RequirePackage{graphicx}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% tighten only works with two column styles:

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type MouseEventHandler } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import renderMathInElement from "katex/contrib/auto-render";
@@ -10,7 +10,15 @@ marked.setOptions({ breaks: true, gfm: true });
  * a raw string full of literal $...$ and \emph{...}. Abstracts are third-party
  * content, so markdown output is sanitized before it ever touches the DOM.
  */
-export default function AbstractText({ text, className }: { text: string; className?: string }) {
+export default function AbstractText({
+  text,
+  className,
+  onMouseUp,
+}: {
+  text: string;
+  className?: string;
+  onMouseUp?: MouseEventHandler<HTMLDivElement>;
+}) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -34,5 +42,11 @@ export default function AbstractText({ text, className }: { text: string; classN
     }
   }, [text]);
 
-  return <div ref={ref} className={`abstract-text${className ? ` ${className}` : ""}`} />;
+  return (
+    <div
+      ref={ref}
+      className={`abstract-text${className ? ` ${className}` : ""}`}
+      onMouseUp={onMouseUp}
+    />
+  );
 }

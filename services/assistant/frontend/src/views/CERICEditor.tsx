@@ -1,15 +1,16 @@
 import { useEffect, useState, useCallback } from "react";
 import { api, type Paper, type PaperFrontmatter } from "../api/client";
 import GateIndicator from "../components/GateIndicator";
+import { buildLatexSnippet } from "../components/LatexExportUtils";
 import { getActiveProviderPayload } from "../lib/aiProvider";
-
-const SLOTS = [
-  { key: "claim",       label: "C — Claim",       hint: "What is the paper's central claim?" },
-  { key: "evidence",    label: "E — Evidence",     hint: "What data/observations support it?" },
-  { key: "reasoning",   label: "R — Reasoning",    hint: "What is the logical chain from E to C?" },
-  { key: "implications",label: "I — Implications", hint: "What does this mean for GRB physics?" },
-  { key: "context",     label: "C — Context",      hint: "Where does this fit in the literature? [[wikilink]] references." },
-] as const;
+import {
+  ANALYSIS_TAGS_EVENT,
+  ensureAnalysisTags,
+  getCachedAnalysisSlots,
+  type AnalysisSlot,
+} from "../lib/analysisTags";
+import BooksTab from "./BooksTab";
+import MarkdownNotesTab from "./MarkdownNotesTab";
 
 interface Props {
   citekey: string | null;
@@ -18,24 +19,18 @@ interface Props {
   onPaperDeleted?: () => void;
 }
 
-function slotsFilledCount(fm: PaperFrontmatter): number {
-  return SLOTS.filter((s) => ((fm[s.key] as string) || "").trim()).length;
+function slotsFilledCount(fm: PaperFrontmatter, slots: AnalysisSlot[]): number {
+  return slots.filter((s) => ((fm[s.key] as string) || "").trim()).length;
 }
 
-function escLatex(s: string): string {
-  return s.replace(/([%$&#_{}])/g, "\\$1");
-}
-
-function buildLatexSnippet(fm: PaperFrontmatter): string {
-  const parts = [`\\subsection{${escLatex(fm.title || "Untitled")}}`];
-  for (const s of SLOTS) {
-    const val = ((fm[s.key] as string) || "").trim();
-    if (val) {
-      const heading = s.label.split(" — ")[1] || s.key;
-      parts.push(`\\paragraph{${escLatex(heading)}} ${escLatex(val)}`);
-    }
-  }
-  return parts.join("\n\n");
+function paperLatexSnippet(fm: PaperFrontmatter, slots: AnalysisSlot[]): string {
+  return buildLatexSnippet({
+    title: fm.title || "Untitled",
+    sections: slots.map((s) => ({
+      heading: s.label,
+      body: ((fm[s.key] as string) || "").trim(),
+    })),
+  });
 }
 
 async function copyToClipboard(text: string): Promise<boolean> {
@@ -50,9 +45,11 @@ async function copyToClipboard(text: string): Promise<boolean> {
 function CollectionTab({
   onSelect,
   onDeleted,
+  slots,
 }: {
   onSelect: (citekey: string) => void;
   onDeleted?: (citekey: string) => void;
+  slots: AnalysisSlot[];
 }) {
   const [papers, setPapers] = useState<Paper[]>([]);
   const [loading, setLoading] = useState(true);
@@ -98,7 +95,7 @@ function CollectionTab({
   }
 
   async function handleCopyLatex(fm: PaperFrontmatter) {
-    const ok = await copyToClipboard(buildLatexSnippet(fm));
+    const ok = await copyToClipboard(paperLatexSnippet(fm, slots));
     flashCopyMsg(ok ? "Copied LaTeX snippet" : "Copy failed — clipboard unavailable");
   }
 
@@ -128,8 +125,8 @@ function CollectionTab({
       const hay = `${fm.title || ""} ${((fm.tags as string[]) || []).join(" ")}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
-    const filled = slotsFilledCount(fm);
-    const isComplete = filled === 5 && Boolean(fm.aq_written);
+    const filled = slotsFilledCount(fm, slots);
+    const isComplete = filled === slots.length && Boolean(fm.aq_written);
     if (status === "draft" && isComplete) return false;
     if (status === "complete" && !isComplete) return false;
     return true;
@@ -165,7 +162,7 @@ function CollectionTab({
         ) : (
           filtered.map((p) => {
             const fm = p.frontmatter;
-            const filled = slotsFilledCount(fm);
+            const filled = slotsFilledCount(fm, slots);
             return (
               <div key={p.citekey} className="card" style={{ cursor: "pointer" }} onClick={() => onSelect(p.citekey)}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
@@ -198,13 +195,13 @@ function CollectionTab({
                   <div
                     style={{
                       height: "100%",
-                      width: `${(filled / 5) * 100}%`,
-                      background: filled === 5 ? "var(--ok)" : "var(--page-accent)",
+                      width: `${(filled / Math.max(slots.length, 1)) * 100}%`,
+                      background: filled === slots.length ? "var(--ok)" : "var(--page-accent)",
                       transition: "width 0.3s",
                     }}
                   />
                 </div>
-                <div className="muted mono" style={{ fontSize: 10, marginTop: 4 }}>{filled}/5 slots</div>
+                <div className="muted mono" style={{ fontSize: 10, marginTop: 4 }}>{filled}/{slots.length} slots</div>
               </div>
             );
           })
@@ -215,7 +212,8 @@ function CollectionTab({
 }
 
 export default function CERICEditor({ citekey, onBack, onSelectPaper, onPaperDeleted }: Props) {
-  const [tab, setTab] = useState<"editor" | "collection">(citekey ? "editor" : "collection");
+  const [tab, setTab] = useState<"editor" | "collection" | "books" | "quick-notes" | "documentation" | "meeting-minutes">(citekey ? "editor" : "collection");
+  const [slots, setSlots] = useState<AnalysisSlot[]>(() => getCachedAnalysisSlots());
   const [paper, setPaper] = useState<Paper | null>(null);
   const [form, setForm] = useState<Partial<PaperFrontmatter>>({});
   const [saving, setSaving] = useState(false);
@@ -226,6 +224,13 @@ export default function CERICEditor({ citekey, onBack, onSelectPaper, onPaperDel
   const [dirty, setDirty] = useState(false);
   const [expandedSlots, setExpandedSlots] = useState<Set<string>>(new Set());
   const [combinedMsg, setCombinedMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    ensureAnalysisTags(() => api.analysisTags.get()).then(setSlots);
+    const sync = () => setSlots(getCachedAnalysisSlots());
+    window.addEventListener(ANALYSIS_TAGS_EVENT, sync);
+    return () => window.removeEventListener(ANALYSIS_TAGS_EVENT, sync);
+  }, []);
 
   function toggleSlot(key: string) {
     setExpandedSlots((prev) => {
@@ -313,6 +318,10 @@ export default function CERICEditor({ citekey, onBack, onSelectPaper, onPaperDel
     <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
       <button className={`btn${tab === "editor" ? " btn-primary" : ""}`} onClick={() => setTab("editor")}>Editor</button>
       <button className={`btn${tab === "collection" ? " btn-primary" : ""}`} onClick={() => setTab("collection")}>Collection</button>
+      <button className={`btn${tab === "books" ? " btn-primary" : ""}`} onClick={() => setTab("books")}>Books</button>
+      <button className={`btn${tab === "quick-notes" ? " btn-primary" : ""}`} onClick={() => setTab("quick-notes")}>Quick Notes</button>
+      <button className={`btn${tab === "documentation" ? " btn-primary" : ""}`} onClick={() => setTab("documentation")}>Documentation</button>
+      <button className={`btn${tab === "meeting-minutes" ? " btn-primary" : ""}`} onClick={() => setTab("meeting-minutes")}>Meeting Minutes</button>
     </div>
   );
 
@@ -321,8 +330,29 @@ export default function CERICEditor({ citekey, onBack, onSelectPaper, onPaperDel
       <div>
         {tabBar}
         <CollectionTab
+          slots={slots}
           onSelect={(ck) => { onSelectPaper?.(ck); }}
           onDeleted={(ck) => { if (ck === citekey) onPaperDeleted?.(); }}
+        />
+      </div>
+    );
+  }
+
+  if (tab === "books") {
+    return (
+      <div className="books-tab-wrap">
+        {tabBar}
+        <BooksTab />
+      </div>
+    );
+  }
+
+  if (tab === "quick-notes" || tab === "documentation" || tab === "meeting-minutes") {
+    return (
+      <div>
+        {tabBar}
+        <MarkdownNotesTab
+          section={tab === "quick-notes" ? "Quick Notes" : tab === "documentation" ? "Documentation" : "Meeting Minutes"}
         />
       </div>
     );
@@ -347,7 +377,7 @@ export default function CERICEditor({ citekey, onBack, onSelectPaper, onPaperDel
 
   const fm = form;
   const gate = paper.gate;
-  const allSlotsFilled = SLOTS.every((s) => (fm[s.key] as string | undefined)?.trim());
+  const allSlotsFilled = slots.every((s) => (fm[s.key] as string | undefined)?.trim());
   const aqWritten = Boolean(fm.aq_written);
 
   return (
@@ -375,8 +405,8 @@ export default function CERICEditor({ citekey, onBack, onSelectPaper, onPaperDel
 
       <GateIndicator gate={gate} />
 
-      {/* ── CERIC Slots — collapsed by default, click the header to expand ── */}
-      {SLOTS.map((slot) => {
+      {/* ── Analysis slots — collapsed by default, click the header to expand ── */}
+      {slots.map((slot) => {
         const val = (fm[slot.key] as string) || "";
         const filled = val.trim().length > 0;
         const open = expandedSlots.has(slot.key);
@@ -389,13 +419,13 @@ export default function CERICEditor({ citekey, onBack, onSelectPaper, onPaperDel
               aria-expanded={open}
             >
               <span className={`slot-collapse-caret${open ? " open" : ""}`}>▸</span>
-              {slot.label}
+              {slot.letter} — {slot.label}
               {filled && <span className="slot-collapse-dot" title="filled" />}
             </button>
             {open && (
               <textarea
                 className={`slot-textarea${filled ? " filled" : ""}`}
-                placeholder={slot.hint}
+                placeholder={`Write your ${slot.label.toLowerCase()} notes…`}
                 value={val}
                 onChange={(e) => setField(slot.key, e.target.value)}
                 autoFocus
@@ -405,11 +435,11 @@ export default function CERICEditor({ citekey, onBack, onSelectPaper, onPaperDel
         );
       })}
 
-      {/* ── Combined — auto-merges all five slots for a quick copy/export ─── */}
+      {/* ── Combined — auto-merges all slots for a quick copy/export ─── */}
       <div className="slot-block combined-block" style={{ marginBottom: 16 }}>
         <div className="slot-label">Combined</div>
         <div className="combined-preview mono">
-          {SLOTS.map((s) => ((fm[s.key] as string) || "").trim())
+          {slots.map((s) => ((fm[s.key] as string) || "").trim())
             .filter(Boolean)
             .join("\n\n") || <span className="muted">Fill in slots above to see the combined text here.</span>}
         </div>
@@ -417,10 +447,10 @@ export default function CERICEditor({ citekey, onBack, onSelectPaper, onPaperDel
           <button
             className="btn"
             onClick={async () => {
-              const combined = SLOTS.map((s) => `${s.label}: ${((fm[s.key] as string) || "").trim()}`)
+              const combined = slots.map((s) => `${s.label}: ${((fm[s.key] as string) || "").trim()}`)
                 .filter((line) => !line.endsWith(": "))
                 .join("\n\n");
-              flashCombinedMsg((await copyToClipboard(combined)) ? "Copied combined CERIC text" : "Copy failed — clipboard unavailable");
+              flashCombinedMsg((await copyToClipboard(combined)) ? "Copied combined analysis text" : "Copy failed — clipboard unavailable");
             }}
           >
             Copy
@@ -429,7 +459,7 @@ export default function CERICEditor({ citekey, onBack, onSelectPaper, onPaperDel
             className="btn"
             onClick={async () => {
               flashCombinedMsg(
-                (await copyToClipboard(buildLatexSnippet(fm)))
+                (await copyToClipboard(paperLatexSnippet(fm, slots)))
                   ? "Copied LaTeX snippet — paste into any .tex file"
                   : "Copy failed — clipboard unavailable"
               );
@@ -513,7 +543,7 @@ export default function CERICEditor({ citekey, onBack, onSelectPaper, onPaperDel
         </button>
         {!allSlotsFilled || !aqWritten ? (
           <span className="muted" style={{ marginLeft: 12, fontSize: 12 }}>
-            Fill all 5 slots and mark aq_written to unlock
+            Fill all {slots.length} slots and mark aq_written to unlock
           </span>
         ) : null}
       </div>

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Yggdrasil</title>
+  <style>
+    html, body { margin: 0; height: 100%; font-family: "IBM Plex Sans", system-ui, sans-serif; background: #f5f5f2; color: #1a1a1a; }
+    .wrap { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px; box-sizing: border-box; }
+    h1 { font-family: "IBM Plex Serif", Georgia, serif; font-size: 28px; margin: 0 0 8px; }
+    p { margin: 0 0 20px; color: #5a5a5a; text-align: center; max-width: 440px; line-height: 1.5; }
+    .status { min-height: 1.4em; font-size: 14px; color: #3a322c; }
+    .bar { width: 320px; height: 6px; background: #d9d6d1; overflow: hidden; margin-top: 16px; }
+    .bar span { display: block; width: 40%; height: 100%; background: #1a1a1a; animation: slide 1.2s ease-in-out infinite; }
+    .err { color: #b5544a; white-space: pre-wrap; max-width: 460px; text-align: center; }
+    .panel { display: none; width: 100%; max-width: 440px; text-align: left; }
+    .panel.on { display: block; }
+    label { display: block; font-size: 13px; color: #5a5a5a; margin-bottom: 6px; }
+    input[type=text] { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #cfcac2; background: #fff; font-size: 14px; margin-bottom: 12px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; }
+    button { border: 1px solid #1a1a1a; background: #1a1a1a; color: #f5f5f2; padding: 10px 14px; font-size: 14px; cursor: pointer; }
+    button.secondary { background: transparent; color: #1a1a1a; }
+    .mark { position: fixed; right: 14px; bottom: 10px; font-size: 11px; color: #9c978d; }
+    @keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(320px); } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Yggdrasil</h1>
+
+    <div id="boot" class="panel on">
+      <p>Setting up reading tools. This happens once, then the app opens by itself.</p>
+      <div class="status" id="status">Starting…</div>
+      <div class="bar" id="bar"><span></span></div>
+      <div class="err" id="err"></div>
+    </div>
+
+    <div id="picker" class="panel">
+      <p>Choose where your notes and papers will be saved on this computer. You can change this later in Settings.</p>
+      <label for="path">Data folder</label>
+      <input id="path" type="text" readonly placeholder="No folder selected yet" />
+      <div class="row">
+        <button type="button" class="secondary" id="browse">Choose folder…</button>
+        <button type="button" id="continue" disabled>Continue</button>
+      </div>
+      <div class="err" id="pickerErr"></div>
+    </div>
+  </div>
+  <div class="mark">© 2026 Kamil Nadaf · MIT License</div>
+  <script>
+    function setStatus(msg) {
+      document.getElementById("status").textContent = msg;
+    }
+    function showError(msg) {
+      document.getElementById("bar").style.display = "none";
+      document.getElementById("err").textContent = msg;
+    }
+    function showPicker(defaultPath) {
+      document.getElementById("boot").classList.remove("on");
+      document.getElementById("picker").classList.add("on");
+      if (defaultPath) {
+        document.getElementById("path").value = defaultPath;
+        document.getElementById("continue").disabled = false;
+      }
+    }
+    function hidePicker() {
+      document.getElementById("picker").classList.remove("on");
+      document.getElementById("boot").classList.add("on");
+      document.getElementById("bar").style.display = "block";
+    }
+    document.getElementById("browse").onclick = async function () {
+      try {
+        const path = await window.pywebview.api.pick_folder();
+        if (path) {
+          document.getElementById("path").value = path;
+          document.getElementById("continue").disabled = false;
+        }
+      } catch (e) {
+        document.getElementById("pickerErr").textContent = String(e);
+      }
+    };
+    document.getElementById("continue").onclick = async function () {
+      const path = document.getElementById("path").value.trim();
+      if (!path) return;
+      try {
+        hidePicker();
+        setStatus("Saving data folder…");
+        await window.pywebview.api.confirm_data_path(path);
+      } catch (e) {
+        document.getElementById("picker").classList.add("on");
+        document.getElementById("boot").classList.remove("on");
+        document.getElementById("pickerErr").textContent = String(e);
+      }
+    };
+  </script>
+</body>
+</html>

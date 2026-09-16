@@ -106,6 +106,77 @@ def latexmk_engine_flag(source: str) -> str:
     return "-pdf"
 
 
+_MISSING_TEX_RE = re.compile(
+    r"File [`']([^`']+\.(?:sty|cls|tex|def|fd|enc))[`'] not found",
+    re.IGNORECASE,
+)
+_STY_TO_PKG = {
+    "epsf.sty": "epsf",
+    "graphicx.sty": "graphics",
+    "graphics.sty": "graphics",
+    "color.sty": "graphics",
+    "trig.sty": "graphics",
+    "xcolor.sty": "xcolor",
+    "hyperref.sty": "hyperref",
+    "natbib.sty": "natbib",
+    "booktabs.sty": "booktabs",
+    "url.sty": "url",
+    "amsmath.sty": "amsmath",
+    "amssymb.sty": "amsfonts",
+}
+
+
+def packages_from_log(log: str) -> list[str]:
+    names = []
+    for fname in _MISSING_TEX_RE.findall(log):
+        names.append(_STY_TO_PKG.get(fname.lower(), Path(fname).stem))
+    return list(dict.fromkeys(names))
+
+
+async def tlmgr_install(packages: list[str]) -> list[str]:
+    tlmgr = shutil.which("tlmgr")
+    if not tlmgr or not packages:
+        return []
+    installed: list[str] = []
+    for pkg in packages:
+        proc = await asyncio.create_subprocess_exec(
+            tlmgr,
+            "install",
+            pkg,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        try:
+            await asyncio.wait_for(proc.communicate(), timeout=180)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            continue
+        if proc.returncode == 0:
+            installed.append(pkg)
+    return installed
+
+
+async def run_latexmk(build_dir: Path, source_name: str, engine_flag: str) -> tuple[int, str]:
+    proc = await asyncio.create_subprocess_exec(
+        "latexmk",
+        engine_flag,
+        "-interaction=nonstopmode",
+        f"-output-directory={build_dir}",
+        source_name,
+        cwd=str(build_dir),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    try:
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=COMPILE_TIMEOUT)
+        return proc.returncode or 0, stdout.decode(errors="replace")
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        return 124, "Compilation exceeded the time limit and was killed."
+
+
 def extract_errors(log: str) -> list[str]:
     lines = log.splitlines()
     errors = []
@@ -184,30 +255,30 @@ async def compile_latex(payload: CompileRequest):
         build_dir = source_path.parent
 
         engine_flag = latexmk_engine_flag(payload.source)
-        proc = await asyncio.create_subprocess_exec(
-            "latexmk",
-            engine_flag,
-            "-interaction=nonstopmode",
-            f"-output-directory={build_dir}",
-            str(source_path.name),
-            cwd=str(build_dir),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        try:
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=COMPILE_TIMEOUT)
-            log = stdout.decode(errors="replace")
-            returncode = proc.returncode
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
+        returncode, log = await run_latexmk(build_dir, source_path.name, engine_flag)
+        if returncode == 124:
             return JSONResponse(
                 status_code=422,
                 content={
-                    "log": "Compilation exceeded the time limit and was killed.",
+                    "log": log,
                     "errors": [f"Compilation timed out after {COMPILE_TIMEOUT}s"],
                 },
             )
+
+        # TinyTeX is minimal. If a paper needs epsf.sty (or similar), install
+        # the TeX Live package and retry instead of leaving a dead compile.
+        attempted: set[str] = set()
+        for _ in range(3):
+            missing = [p for p in packages_from_log(log) if p not in attempted]
+            if not missing:
+                break
+            attempted.update(missing)
+            installed = await tlmgr_install(missing)
+            if not installed:
+                break
+            returncode, log = await run_latexmk(build_dir, source_path.name, engine_flag)
+            if returncode == 0:
+                break
 
         pdf_path = source_path.with_suffix(".pdf")
         if returncode != 0 or not pdf_path.exists():
@@ -416,4 +487,6 @@ async def cleanup_work_dir():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("latex_service:app", host="0.0.0.0", port=9000, reload=False)
+    host = os.environ.get("LATEX_BIND", "0.0.0.0")
+    port = int(os.environ.get("LATEX_PORT", "9000"))
+    uvicorn.run(app, host=host, port=port, reload=False)

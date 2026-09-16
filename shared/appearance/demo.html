@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Appearance panel</title>
+  <script src="./appearance.js"></script>
+  <link rel="stylesheet" href="./appearance.css">
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      font-size: var(--text-size);
+    }
+    .host {
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 32px 20px;
+    }
+    .host-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-top: 16px;
+    }
+    .host-btn {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: var(--accent);
+      color: var(--accent-foreground);
+      border-radius: 999px;
+      padding: 8px 14px;
+      font: inherit;
+      cursor: pointer;
+    }
+    .muted { color: var(--muted); }
+    .mono { font-family: var(--font-mono); }
+    .locked { display: flex; gap: 8px; margin-top: 12px; }
+    .locked span {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+    }
+  </style>
+</head>
+<body>
+  <main class="host">
+    <button id="settings-btn" class="host-btn" type="button">Open appearance</button>
+    <div class="host-card">
+      <h1>Host app preview</h1>
+      <p class="muted">This card uses --bg, --surface, --text, and --accent. Locked GBM / LAT swatches stay put.</p>
+      <p class="mono">var(--text-size) on this page</p>
+      <div class="locked">
+        <span style="background:var(--locked-gbm)" title="GBM"></span>
+        <span style="background:var(--locked-lat)" title="LAT"></span>
+      </div>
+    </div>
+  </main>
+  <script>
+    AppearancePanel.init({
+      trigger: "#settings-btn",
+      lockedColors: { gbm: "#1f77b4", lat: "#e8792a" },
+    });
+  </script>
+</body>
+</html>

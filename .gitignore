@@ -74,6 +74,7 @@ htmlcov/
 # Build artifacts
 dist/
 build/
+release/
 *.egg-info/
 
 # Local development

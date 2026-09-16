@@ -1,0 +1,21 @@
+{
+  "id": "paper",
+  "label": "Paper",
+  "tokens": {
+    "bg": "#f5f0eb",
+    "surface": "#fffaf6",
+    "border": "#e4d8cc",
+    "text": "#1c1917",
+    "muted": "#7a7068",
+    "accent": "#c97b4a",
+    "accentForeground": "#fffaf6",
+    "ok": "#3f7a4c",
+    "warn": "#b45309",
+    "crit": "#b42318",
+    "fontSans": "Georgia, 'Iowan Old Style', 'Palatino Linotype', Palatino, serif",
+    "fontMono": "ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace",
+    "labelTransform": "none",
+    "labelTracking": "0.02em",
+    "radius": "12px"
+  }
+}

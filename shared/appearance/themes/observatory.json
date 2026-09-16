@@ -1,0 +1,21 @@
+{
+  "id": "observatory",
+  "label": "Observatory",
+  "tokens": {
+    "bg": "#f0f0e8",
+    "surface": "#e8e8dc",
+    "border": "#1a1a1a",
+    "text": "#141414",
+    "muted": "#5a5a52",
+    "accent": "#1a1a1a",
+    "accentForeground": "#f0f0e8",
+    "ok": "#1a1a1a",
+    "warn": "#1a1a1a",
+    "crit": "#1a1a1a",
+    "fontSans": "system-ui, -apple-system, 'Segoe UI', sans-serif",
+    "fontMono": "ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace",
+    "labelTransform": "uppercase",
+    "labelTracking": "0.08em",
+    "radius": "0px"
+  }
+}

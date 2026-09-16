@@ -1,22 +1,26 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, type ArxivPaper } from "../api/client";
+import {
+  ANALYSIS_TAGS_EVENT,
+  ensureAnalysisTags,
+  getCachedAnalysisSlots,
+  type AnalysisSlot,
+} from "../lib/analysisTags";
 
-export const CERIC_SLOTS = [
-  { key: "claim", letter: "C", label: "Claim" },
-  { key: "evidence", letter: "E", label: "Evidence" },
-  { key: "reasoning", letter: "R", label: "Reasoning" },
-  { key: "implications", letter: "I", label: "Implications" },
-  { key: "context", letter: "C", label: "Context" },
-] as const;
+export type CericStatus = Record<string, boolean>;
 
-export type CericSlotKey = (typeof CERIC_SLOTS)[number]["key"];
-export type CericStatus = Partial<Record<CericSlotKey, boolean>>;
-
-export function SlotIndicator({ status }: { status?: CericStatus }) {
+export function SlotIndicator({
+  status,
+  slots,
+}: {
+  status?: CericStatus;
+  slots?: AnalysisSlot[];
+}) {
+  const list = slots || getCachedAnalysisSlots();
   return (
     <span className="arxiv-slot-indicator">
-      {CERIC_SLOTS.map((s, i) => (
-        <span key={i} className={status?.[s.key] ? "filled" : ""}>
+      {list.map((s, i) => (
+        <span key={`${s.key}-${i}`} className={status?.[s.key] ? "filled" : ""}>
           {s.letter}{status?.[s.key] ? "✓" : "·"}
         </span>
       ))}
@@ -25,23 +29,29 @@ export function SlotIndicator({ status }: { status?: CericStatus }) {
 }
 
 /**
- * Shared "select text → push into a CERIC slot" behavior, used by both the
- * Daily ArXiv reading pane and the Search view's result cards. A single
- * `window.getSelection()` is browser-wide, so we track which paper the current
- * selection belongs to (`selectionPaperId`) alongside the text itself.
+ * Shared "select text → push into an analysis slot" behavior, used by both the
+ * Daily ArXiv reading pane and the Search view's result cards.
  */
 export function useCericAppend(showToast: (text: string, ok: boolean) => void) {
+  const [slots, setSlots] = useState<AnalysisSlot[]>(() => getCachedAnalysisSlots());
   const [cericStatus, setCericStatus] = useState<Record<string, CericStatus>>({});
   const [selectedText, setSelectedText] = useState("");
   const [selectionPaperId, setSelectionPaperId] = useState<string | null>(null);
   const [addingSlot, setAddingSlot] = useState<string | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
 
+  useEffect(() => {
+    ensureAnalysisTags(() => api.analysisTags.get()).then(setSlots);
+    const sync = () => setSlots(getCachedAnalysisSlots());
+    window.addEventListener(ANALYSIS_TAGS_EVENT, sync);
+    return () => window.removeEventListener(ANALYSIS_TAGS_EVENT, sync);
+  }, []);
+
   async function refreshCericStatus(citekey: string) {
     try {
       const p = await api.papers.get(citekey);
       const status: CericStatus = {};
-      for (const s of CERIC_SLOTS) status[s.key] = Boolean((p.frontmatter[s.key] as string || "").trim());
+      for (const s of slots) status[s.key] = Boolean((p.frontmatter[s.key] as string || "").trim());
       setCericStatus((prev) => ({ ...prev, [citekey]: status }));
     } catch {
       setCericStatus((prev) => ({ ...prev, [citekey]: {} }));
@@ -71,20 +81,21 @@ export function useCericAppend(showToast: (text: string, ok: boolean) => void) {
         arxiv: paper.id,
         year,
       });
-      const label = CERIC_SLOTS.find((s) => s.key === slotKey)?.label || slotKey;
+      const label = slots.find((s) => s.key === slotKey)?.label || slotKey;
       showToast(`Added to ${label} ✓`, true);
       await refreshCericStatus(paper.id);
       setFlashId(paper.id);
       setTimeout(() => setFlashId(null), 900);
       clearSelection();
     } catch (e) {
-      showToast(e instanceof Error ? e.message : "Failed to add to CERIC", false);
+      showToast(e instanceof Error ? e.message : "Failed to add to analysis slot", false);
     } finally {
       setAddingSlot(null);
     }
   }
 
   return {
+    slots,
     cericStatus,
     selectedText,
     selectionPaperId,
@@ -101,18 +112,21 @@ export function CericSelectionToolbar({
   selectedText,
   addingSlot,
   onAdd,
+  slots,
 }: {
   selectedText: string;
   addingSlot: string | null;
   onAdd: (slotKey: string) => void;
+  slots?: AnalysisSlot[];
 }) {
+  const list = slots || getCachedAnalysisSlots();
   return (
     <div className="arxiv-ceric-toolbar">
       <span className="arxiv-ceric-toolbar-preview">
         "{selectedText.length > 60 ? selectedText.slice(0, 60) + "…" : selectedText}"
       </span>
       <span className="arxiv-ceric-toolbar-label">Add to:</span>
-      {CERIC_SLOTS.map((s) => (
+      {list.map((s) => (
         <button
           key={s.key}
           className="btn"
@@ -126,3 +140,6 @@ export function CericSelectionToolbar({
     </div>
   );
 }
+
+/** @deprecated Use getCachedAnalysisSlots — kept for import compatibility */
+export const CERIC_SLOTS = getCachedAnalysisSlots();

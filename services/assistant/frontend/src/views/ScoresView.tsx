@@ -1,11 +1,5 @@
-import { useEffect, useMemo, useState, Fragment, type CSSProperties, type MouseEvent } from "react";
-import {
-  Group as PanelGroup,
-  Panel,
-  Separator as PanelResizeHandle,
-  type Layout,
-} from "react-resizable-panels";
-import { api, type ScoreDay, type Task } from "../api/client";
+import { useEffect, useMemo, useState, Fragment, type CSSProperties } from "react";
+import { api, type ActiveMainTask } from "../api/client";
 import {
   type HabitDef,
   loadHabitDefs,
@@ -17,22 +11,10 @@ type RangeMode = "week" | "month" | "year";
 
 const PHD_START_KEY = "yggdrasil:phd-start";
 const PHD_END_KEY = "yggdrasil:phd-end";
-const DASH_TOP_LAYOUT_KEY = "yggdrasil:dash-top-layout";
+const PROGRAM_LABEL_KEY = "yggdrasil:program-label";
 const DASH_HEIGHTS_KEY = "yggdrasil:dash-heights";
 
-type DashWidget = "today" | "activity" | "rules" | "top";
-
-function loadTopLayout(): Layout {
-  try {
-    const raw = localStorage.getItem(DASH_TOP_LAYOUT_KEY);
-    if (!raw) return { week: 65, days: 35 };
-    const parsed = JSON.parse(raw) as Layout;
-    if (typeof parsed.week === "number" && typeof parsed.days === "number") return parsed;
-  } catch {
-    /* ignore */
-  }
-  return { week: 65, days: 35 };
-}
+type DashWidget = "active" | "today" | "activity";
 
 function loadHeights(): Partial<Record<DashWidget, number>> {
   try {
@@ -100,14 +82,16 @@ function daysBetween(startIso: string, endIso: string, todayIso: string): number
   return Math.ceil(ms / (1000 * 60 * 60 * 24));
 }
 
-/** SVG lightcurve — daily activity (habits + tasks) vs time */
+/** SVG lightcurve — Habits and Subtasks completed vs time (from the heatmap data, not points). */
 function Lightcurve({
   days,
-  values,
+  habits,
+  subtasks,
   today,
 }: {
   days: string[];
-  values: number[];
+  habits: number[];
+  subtasks: number[];
   today: string;
 }) {
   const W = 720;
@@ -116,19 +100,22 @@ function Lightcurve({
   const innerW = W - pad.l - pad.r;
   const innerH = H - pad.t - pad.b;
   const n = Math.max(days.length, 1);
-  // 15% headroom above the highest point so the peak's dot/line never sits
-  // flush against the top edge (was reading as visually "cut off").
-  const maxV = Math.max(1, ...values) * 1.15;
+  const maxV = Math.max(1, ...habits, ...subtasks) * 1.15;
   const xAt = (i: number) => pad.l + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
   const yAt = (v: number) => pad.t + innerH - (v / maxV) * innerH;
 
-  const pts = values.map((v, i) => `${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`);
-  const line = pts.length ? `M ${pts.join(" L ")}` : "";
-  const area =
-    pts.length > 0
-      ? `M ${xAt(0).toFixed(1)},${(pad.t + innerH).toFixed(1)} L ${pts.join(" L ")} L ${xAt(n - 1).toFixed(1)},${(pad.t + innerH).toFixed(1)} Z`
-      : "";
+  function pathFor(values: number[]) {
+    const pts = values.map((v, i) => `${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`);
+    const line = pts.length ? `M ${pts.join(" L ")}` : "";
+    const area =
+      pts.length > 0
+        ? `M ${xAt(0).toFixed(1)},${(pad.t + innerH).toFixed(1)} L ${pts.join(" L ")} L ${xAt(n - 1).toFixed(1)},${(pad.t + innerH).toFixed(1)} Z`
+        : "";
+    return { line, area };
+  }
 
+  const hab = pathFor(habits);
+  const sub = pathFor(subtasks);
   const todayIdx = days.indexOf(today);
   const tickIdx =
     n <= 8
@@ -136,7 +123,7 @@ function Lightcurve({
       : [0, Math.floor((n - 1) / 2), n - 1].filter((v, i, a) => a.indexOf(v) === i);
 
   return (
-    <svg className="lightcurve-svg" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="My lightcurve">
+    <svg className="lightcurve-svg" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Habits and Subtasks lightcurve">
       <line
         className="lightcurve-axis"
         x1={pad.l}
@@ -156,17 +143,30 @@ function Lightcurve({
           </g>
         );
       })}
-      {area && <path className="lightcurve-area" d={area} />}
-      {line && <path className="lightcurve-line" d={line} fill="none" />}
-      {values.map((v, i) => (
+      {hab.area && <path className="lightcurve-area habits" d={hab.area} />}
+      {sub.area && <path className="lightcurve-area subtasks" d={sub.area} />}
+      {hab.line && <path className="lightcurve-line habits" d={hab.line} fill="none" />}
+      {sub.line && <path className="lightcurve-line subtasks" d={sub.line} fill="none" />}
+      {habits.map((v, i) => (
         <circle
-          key={days[i]}
-          className={`lightcurve-dot${days[i] === today ? " today" : ""}`}
+          key={`h-${days[i]}`}
+          className={`lightcurve-dot habits${days[i] === today ? " today" : ""}`}
           cx={xAt(i)}
           cy={yAt(v)}
           r={days[i] === today ? 4 : 2.5}
         >
-          <title>{`${days[i]}: ${v}`}</title>
+          <title>{`${days[i]} habits: ${v}`}</title>
+        </circle>
+      ))}
+      {subtasks.map((v, i) => (
+        <circle
+          key={`s-${days[i]}`}
+          className={`lightcurve-dot subtasks${days[i] === today ? " today" : ""}`}
+          cx={xAt(i)}
+          cy={yAt(v)}
+          r={days[i] === today ? 3.5 : 2}
+        >
+          <title>{`${days[i]} subtasks: ${v}`}</title>
         </circle>
       ))}
       {todayIdx >= 0 && (
@@ -187,11 +187,25 @@ function Lightcurve({
   );
 }
 
-export default function ScoresView() {
-  const [week, setWeek] = useState<{ days: ScoreDay[]; week_total: number; week_target: number } | null>(null);
+/** Fill-weight progress bar — no hue, per the e-ink theme constraint. */
+function TaskProgressBar({ done, total }: { done: number; total: number }) {
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  return (
+    <div className="dash-task-bar-track" title={`${pct}%`}>
+      <div className="dash-task-bar-fill" style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
+export default function ScoresView({
+  onOpenTask,
+}: {
+  onOpenTask?: (projectSlug: string, mainTaskId: string) => void;
+}) {
+  const [activeTasks, setActiveTasks] = useState<ActiveMainTask[]>([]);
   const [mode, setMode] = useState<RangeMode>("month");
   const [habitDays, setHabitDays] = useState<{ date: string; habits: Record<string, boolean | number> }[]>([]);
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [taskCompletionDays, setTaskCompletionDays] = useState<{ date: string; count: number }[]>([]);
   const [todayHabits, setTodayHabits] = useState<Record<string, boolean | number>>({});
   const [habitDefs, setHabitDefs] = useState<HabitDef[]>(() => loadHabitDefs());
   const [customizing, setCustomizing] = useState(false);
@@ -199,7 +213,7 @@ export default function ScoresView() {
   const [loading, setLoading] = useState(true);
   const [phdStart, setPhdStart] = useState(() => localStorage.getItem(PHD_START_KEY) || "");
   const [phdEnd, setPhdEnd] = useState(() => localStorage.getItem(PHD_END_KEY) || "");
-  const [topLayout, setTopLayout] = useState<Layout>(() => loadTopLayout());
+  const [programLabel, setProgramLabel] = useState(() => localStorage.getItem(PROGRAM_LABEL_KEY) || "");
   const [heights, setHeights] = useState<Partial<Record<DashWidget, number>>>(() => loadHeights());
 
   const today = isoLocal(new Date());
@@ -208,15 +222,15 @@ export default function ScoresView() {
   const remaining = daysBetween(phdStart, phdEnd, today);
 
   async function reload() {
-    const [w, h, t, todayH] = await Promise.all([
-      api.scores.week(),
+    const [active, h, todayH, completed] = await Promise.all([
+      api.tasks.activeSummary(),
       api.habits.range(range.start, range.end),
-      api.tasks.list(),
       api.habits.get(today),
+      api.tasks.completedByDay(range.start, range.end),
     ]);
-    setWeek(w);
+    setActiveTasks(active.active);
     setHabitDays(h.days);
-    setTasks(t.tasks);
+    setTaskCompletionDays(completed.days);
     const keys = habitDefs.map((d) => d.key);
     const habits = { ...Object.fromEntries(keys.map((k) => [k, false])), ...todayH.habits };
     setTodayHabits(habits);
@@ -245,11 +259,9 @@ export default function ScoresView() {
     patchTodayInHeatmap(next);
     try {
       const r = await api.habits.set(today, next);
-      // Keep only known keys for display; server may merge defaults
       const merged = { ...next, ...r.habits };
       setTodayHabits(merged);
       patchTodayInHeatmap(merged);
-      api.scores.week().then(setWeek).catch(() => {});
     } catch {
       setTodayHabits(prev);
       patchTodayInHeatmap(prev);
@@ -295,6 +307,13 @@ export default function ScoresView() {
     else localStorage.removeItem(PHD_END_KEY);
   }
 
+  function saveProgramLabel(label: string) {
+    const next = label.trim();
+    setProgramLabel(next);
+    if (next) localStorage.setItem(PROGRAM_LABEL_KEY, next);
+    else localStorage.removeItem(PROGRAM_LABEL_KEY);
+  }
+
   const [exportingDigest, setExportingDigest] = useState(false);
 
   async function handleExportDigest() {
@@ -317,11 +336,6 @@ export default function ScoresView() {
     }
   }
 
-  function saveTopLayout(layout: Layout) {
-    setTopLayout(layout);
-    localStorage.setItem(DASH_TOP_LAYOUT_KEY, JSON.stringify(layout));
-  }
-
   function persistHeight(id: DashWidget, h: number) {
     if (h < 60) return;
     setHeights((prev) => {
@@ -334,22 +348,6 @@ export default function ScoresView() {
   function persistWidgetHeight(id: DashWidget, el: HTMLElement | null) {
     if (!el) return;
     persistHeight(id, Math.round(el.getBoundingClientRect().height));
-  }
-
-  function startTopHeightDrag(e: MouseEvent<HTMLButtonElement>) {
-    e.preventDefault();
-    e.stopPropagation();
-    const startY = e.clientY;
-    const startH = heights.top ?? 148;
-    const onMove = (ev: globalThis.MouseEvent) => {
-      persistHeight("top", Math.max(120, Math.min(420, Math.round(startH + ev.clientY - startY))));
-    };
-    const onUp = () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
   }
 
   function widgetStyle(id: DashWidget): CSSProperties | undefined {
@@ -369,28 +367,20 @@ export default function ScoresView() {
 
   const tasksDoneByDate = useMemo(() => {
     const m = new Map<string, number>();
-    tasks.forEach((t) => {
-      if (t.status === "done" && t.completed_date) {
-        m.set(t.completed_date, (m.get(t.completed_date) || 0) + 1);
-      }
-    });
+    taskCompletionDays.forEach((d) => m.set(d.date, d.count));
     return m;
-  }, [tasks]);
+  }, [taskCompletionDays]);
 
-  /** Daily "flux": habits checked + tasks done — updates live with the heatmap */
-  const lightcurveValues = useMemo(() => {
-    return range.days.map((d) => {
-      const habits = habitByDate.get(d) || {};
-      const habitPts = Object.values(habits).filter((v) => Boolean(v)).length;
-      const taskPts = tasksDoneByDate.get(d) || 0;
-      return habitPts + taskPts;
-    });
-  }, [range.days, habitByDate, tasksDoneByDate]);
+  const habitCountValues = useMemo(
+    () => range.days.map((d) => habitKeys.filter((k) => Boolean(habitByDate.get(d)?.[k])).length),
+    [range.days, habitKeys, habitByDate]
+  );
+  const subtaskCountValues = useMemo(
+    () => range.days.map((d) => tasksDoneByDate.get(d) || 0),
+    [range.days, tasksDoneByDate]
+  );
 
-  if (loading && !week) return <div className="muted">Loading…</div>;
-  if (!week) return <div className="crit">Failed to load scores</div>;
-
-  const pct = Math.min(100, Math.round((week.week_total / week.week_target) * 100));
+  if (loading) return <div className="muted">Loading…</div>;
 
   return (
     <div className={`dashboard${customizing ? " is-editing" : ""}`}>
@@ -411,96 +401,36 @@ export default function ScoresView() {
         </div>
       </div>
 
-      <div className="dash-top-bleed">
-      <PanelGroup
-        id="dash-top"
-        orientation="horizontal"
-        className="dash-top-row"
-        defaultLayout={topLayout}
-        disabled={!customizing}
-        style={{ height: heights.top ?? 148 }}
-        onLayoutChanged={(layout) => {
-          if (customizing) saveTopLayout(layout);
-        }}
+      <div
+        className="card dash-widget"
+        style={{ marginBottom: 20, ...widgetStyle("active") }}
+        onMouseUp={(e) => customizing && persistWidgetHeight("active", e.currentTarget)}
       >
-        <Panel id="week" defaultSize="65" minSize="30" className="dash-panel">
-          <div className="card dash-week-card">
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-              <h2 style={{ margin: 0 }}>This Week</h2>
-              <span className="mono" style={{ fontSize: 20, color: pct >= 100 ? "var(--ok)" : "var(--accent)" }}>
-                {week.week_total} / {week.week_target} pts
-              </span>
-            </div>
-            <div style={{ height: 8, background: "var(--border)", borderRadius: 4, overflow: "hidden" }}>
-              <div
-                style={{
-                  height: "100%",
-                  width: `${pct}%`,
-                  background: pct >= 100 ? "var(--ok)" : "var(--accent)",
-                  borderRadius: 4,
-                  transition: "width 0.5s ease",
-                }}
-              />
-            </div>
-            <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>{pct}% of weekly target</div>
-            {customizing && (
+        <h2 style={{ margin: "0 0 10px" }}>Active Tasks</h2>
+        {activeTasks.length === 0 ? (
+          <div className="muted" style={{ fontSize: 13 }}>
+            No active main tasks yet — mark one ★ active in the Tasks section to pin its progress here.
+          </div>
+        ) : (
+          <div className="dash-task-list">
+            {activeTasks.map((t) => (
               <button
                 type="button"
-                className="dash-corner-grip"
-                aria-label="Resize This Week"
-                onMouseDown={startTopHeightDrag}
-              />
-            )}
-          </div>
-        </Panel>
-
-        <PanelResizeHandle className="dash-resize-handle" disabled={!customizing} />
-
-        <Panel id="days" defaultSize="35" minSize="20" className="dash-panel">
-          <div className="card dash-days-card">
-            <div className="today-header" style={{ marginBottom: 8 }}>
-              <h2 style={{ margin: 0 }}>Days Remaining</h2>
-            </div>
-            {customizing ? (
-              <div className="phd-date-edit">
-                <label>
-                  <span className="muted">PhD start</span>
-                  <input type="date" value={phdStart} onChange={(e) => savePhdDates(e.target.value, phdEnd)} />
-                </label>
-                <label>
-                  <span className="muted">PhD end</span>
-                  <input type="date" value={phdEnd} onChange={(e) => savePhdDates(phdStart, e.target.value)} />
-                </label>
-              </div>
-            ) : remaining === null ? (
-              <div className="muted" style={{ fontSize: 13 }}>
-                Click Edit to set PhD start &amp; end.
-              </div>
-            ) : (
-              <>
-                <div className="dash-days-count mono" style={{ color: remaining <= 30 ? "var(--crit)" : "var(--text)" }}>
-                  {remaining < 0 ? 0 : remaining}
+                key={`${t.project_slug}:${t.main_task_id}`}
+                className="dash-task-bar"
+                onClick={() => onOpenTask?.(t.project_slug, t.main_task_id)}
+              >
+                <div className="dash-task-bar-label">
+                  <span>{t.project_name} › {t.main_task_name}</span>
+                  <span className="muted mono">
+                    {t.subtask_done}/{t.subtask_total} subtasks{t.deadline ? ` · due ${t.deadline}` : ""}
+                  </span>
                 </div>
-                <div className="muted" style={{ fontSize: 12 }}>
-                  {remaining < 0
-                    ? "Past end date"
-                    : remaining === 0
-                      ? "Last day"
-                      : `day${remaining === 1 ? "" : "s"} until ${phdEnd}`}
-                </div>
-              </>
-            )}
-            {customizing && (
-              <button
-                type="button"
-                className="dash-corner-grip"
-                aria-label="Resize Days Remaining"
-                onMouseDown={startTopHeightDrag}
-              />
-            )}
+                <TaskProgressBar done={t.subtask_done} total={t.subtask_total} />
+              </button>
+            ))}
           </div>
-        </Panel>
-      </PanelGroup>
+        )}
       </div>
 
       <div
@@ -509,20 +439,44 @@ export default function ScoresView() {
         onMouseUp={(e) => customizing && persistWidgetHeight("today", e.currentTarget)}
       >
         <div className="today-header">
-          <h2 style={{ margin: 0 }}>Today · {today}</h2>
+          <h2 style={{ margin: 0 }}>
+            Today · {today}
+            {remaining !== null && programLabel ? ` · ${remaining < 0 ? 0 : remaining} days left in ${programLabel}` : ""}
+          </h2>
         </div>
 
         {customizing && (
-          <div className="habit-edit-bar">
-            <input
-              type="text"
-              placeholder="New habit name…"
-              value={newHabitLabel}
-              onChange={(e) => setNewHabitLabel(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") addHabit(); }}
-            />
-            <button className="btn btn-primary" onClick={addHabit} disabled={!newHabitLabel.trim()}>Add</button>
-          </div>
+          <>
+            <div className="phd-date-edit">
+              <label style={{ gridColumn: "1 / -1" }}>
+                <span className="muted">Program / role name (optional countdown)</span>
+                <input
+                  type="text"
+                  value={programLabel}
+                  placeholder="PhD, Masters, Bachelor, Professor…"
+                  onChange={(e) => saveProgramLabel(e.target.value)}
+                />
+              </label>
+              <label>
+                <span className="muted">Start</span>
+                <input type="date" value={phdStart} onChange={(e) => savePhdDates(e.target.value, phdEnd)} />
+              </label>
+              <label>
+                <span className="muted">End</span>
+                <input type="date" value={phdEnd} onChange={(e) => savePhdDates(phdStart, e.target.value)} />
+              </label>
+            </div>
+            <div className="habit-edit-bar">
+              <input
+                type="text"
+                placeholder="New habit name…"
+                value={newHabitLabel}
+                onChange={(e) => setNewHabitLabel(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") addHabit(); }}
+              />
+              <button className="btn btn-primary" onClick={addHabit} disabled={!newHabitLabel.trim()}>Add</button>
+            </div>
+          </>
         )}
 
         <div className="habit-checkin">
@@ -544,7 +498,7 @@ export default function ScoresView() {
 
       <div
         className="card heatmap-card dash-widget"
-        style={{ marginBottom: 20, ...widgetStyle("activity") }}
+        style={widgetStyle("activity")}
         onMouseUp={(e) => customizing && persistWidgetHeight("activity", e.currentTarget)}
       >
         <div className="heatmap-toolbar">
@@ -589,7 +543,7 @@ export default function ScoresView() {
                 })}
               </Fragment>
             ))}
-            <div className="heatmap-row-label">Tasks done</div>
+            <div className="heatmap-row-label">Subtasks done</div>
             {range.days.map((d) => {
               const n = tasksDoneByDate.get(d) || 0;
               const level = n === 0 ? "" : n >= 4 ? " l3" : n >= 2 ? " l2" : " l1";
@@ -597,7 +551,7 @@ export default function ScoresView() {
                 <div
                   key={`tasks-${d}`}
                   className={`heatmap-cell${n ? ` filled${level}` : ""}${d === today ? " today-col" : ""}`}
-                  title={`${n} tasks · ${d}`}
+                  title={`${n} subtasks · ${d}`}
                 />
               );
             })}
@@ -613,43 +567,18 @@ export default function ScoresView() {
         </div>
       </div>
 
-      {/* Not a resizable dash-widget: the chart's height must always follow its
-          own aspect ratio, so a stale drag-resized fixed height can't clip it. */}
-      <div className="card lightcurve-card" style={{ marginBottom: 20 }}>
+      <div className="card lightcurve-card" style={{ marginTop: 20 }}>
         <div className="heatmap-toolbar">
           <h2 style={{ margin: 0 }}>My Lightcurve</h2>
           <span className="muted mono" style={{ fontSize: 11 }}>
-            daily habits + tasks · {mode}
+            <span className="lightcurve-legend-dot habits">● Habits</span>
+            {"  "}
+            <span className="lightcurve-legend-dot subtasks">● Subtasks</span>
+            {" · "}
+            {mode}
           </span>
         </div>
-        <Lightcurve days={range.days} values={lightcurveValues} today={today} />
-      </div>
-
-      <div
-        className="card dash-widget"
-        style={widgetStyle("rules")}
-        onMouseUp={(e) => customizing && persistWidgetHeight("rules", e.currentTarget)}
-      >
-        <h2>Scoring Rules</h2>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-          <tbody>
-            {[
-              ["Paper triage verdict", "1 pt each", "cap 10/day"],
-              ["T1 CERIC complete", "5 pts", "all 5 slots filled"],
-              ["AQ written", "2 pts", "aq_written = true"],
-              ["Concept note updated", "4 pts", "updated: today"],
-              ["Weekly synthesis", "10 pts", "cap 1/day"],
-              ["Task completed", "2 pts each", "cap 15 pts/day"],
-              ["Habit checked", "1 pt each", "from Daily-YYYY-MM-DD.md"],
-            ].map(([action, pts, note]) => (
-              <tr key={action} style={{ borderBottom: "1px solid var(--border)" }}>
-                <td style={{ padding: "6px 0", color: "var(--text)" }}>{action}</td>
-                <td style={{ padding: "6px 8px", color: "var(--accent)", fontFamily: "var(--font-mono)", textAlign: "right" }}>{pts}</td>
-                <td style={{ padding: "6px 0 6px 8px", color: "var(--muted)", fontSize: 12 }}>{note}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <Lightcurve days={range.days} habits={habitCountValues} subtasks={subtaskCountValues} today={today} />
       </div>
     </div>
   );

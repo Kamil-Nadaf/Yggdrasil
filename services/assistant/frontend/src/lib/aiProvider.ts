@@ -15,7 +15,7 @@ export const PROVIDER_META: Record<
   { label: string; defaultBase: string; defaultModel: string; needsKey: boolean }
 > = {
   ollama: { label: "Ollama", defaultBase: "http://localhost:11434", defaultModel: "llama3.2", needsKey: false },
-  lmstudio: { label: "LM Studio", defaultBase: "http://localhost:1234", defaultModel: "local-model", needsKey: false },
+  lmstudio: { label: "LM Studio", defaultBase: "http://127.0.0.1:1234", defaultModel: "spark-x2.5-4b", needsKey: true },
   claude: { label: "Claude (Anthropic)", defaultBase: "", defaultModel: "claude-sonnet-4-5", needsKey: true },
   deepseek: { label: "DeepSeek", defaultBase: "https://api.deepseek.com", defaultModel: "deepseek-chat", needsKey: true },
   kimi: { label: "Kimi (Moonshot)", defaultBase: "https://api.moonshot.cn/v1", defaultModel: "moonshot-v1-8k", needsKey: true },
@@ -61,7 +61,7 @@ export function saveProviderStore(store: Record<AiProviderId, AiProviderConfig>)
 
 export function getActiveProviderId(): AiProviderId {
   const v = localStorage.getItem(ACTIVE_KEY) as AiProviderId | null;
-  return v && v in PROVIDER_META ? v : "ollama";
+  return v && v in PROVIDER_META ? v : "lmstudio";
 }
 
 export function setActiveProviderId(id: AiProviderId) {

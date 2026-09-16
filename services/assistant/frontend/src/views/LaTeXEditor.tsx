@@ -13,7 +13,6 @@ import {
 } from "react-resizable-panels";
 import { api, type LatexFile } from "../api/client";
 import { LATEX_TEMPLATES, type LatexTemplate } from "../lib/latexTemplates";
-import { createPortal } from "react-dom";
 import {
   LatexMenuBar,
   LatexShareModal,
@@ -21,6 +20,11 @@ import {
   pressKeepFocus,
   type LatexViewMode,
 } from "../components/LatexMenuBar";
+import { WorkspaceLayout } from "../components/WorkspaceLayout";
+import { WorkspaceSidebar } from "../components/WorkspaceSidebar";
+import { PreviewToolbar, useFullscreenPane, useZoom } from "../components/WorkspacePreviewPane";
+import { apiErrorMessage } from "../lib/apiError";
+import { downloadBlobUrl, downloadBase64 } from "../lib/download";
 
 const LATEX_LANG = StreamLanguage.define(stex);
 
@@ -35,20 +39,6 @@ const NEW_FILE_SOURCE = `\\documentclass[11pt]{article}
 
 function todayFilename() {
   return `draft-${new Date().toISOString().slice(0, 10)}`;
-}
-
-function apiErrorMessage(e: unknown, fallback: string) {
-  if (!(e instanceof Error)) return fallback;
-  const detail = (e as Error & { data?: { detail?: unknown } }).data?.detail;
-  if (typeof detail === "string" && detail.trim()) return detail;
-  if (Array.isArray(detail)) {
-    const parts = detail.map((item) =>
-      typeof item === "string" ? item : (item as { msg?: string }).msg || ""
-    );
-    const joined = parts.filter(Boolean).join("; ");
-    if (joined) return joined;
-  }
-  return e.message || fallback;
 }
 
 function renameDestination(src: string, typed: string, kind: "file" | "folder" | "asset") {
@@ -196,41 +186,6 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
-function downloadBlobUrl(url: string, filename: string) {
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.rel = "noopener";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
-
-function downloadBase64(b64: string, filename: string, mime: string) {
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
-  downloadBlobUrl(url, filename);
-  URL.revokeObjectURL(url);
-}
-
-/** Folder outline with up-arrow (upload-folder). */
-function IconUploadFolder() {
-  return (
-    <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"
-      />
-      <path
-        fill="var(--surface, #161B27)"
-        d="M12 17c-.55 0-1-.45-1-1v-3.17l-.88.88a.996.996 0 1 1-1.41-1.41l2.59-2.59c.39-.39 1.02-.39 1.41 0l2.59 2.59a.996.996 0 1 1-1.41 1.41L13 12.83V16c0 .55-.45 1-1 1z"
-      />
-    </svg>
-  );
-}
-
 /** B/W landscape figure icon. */
 function IconFigure() {
   return (
@@ -245,383 +200,6 @@ function IconFigure() {
         strokeLinejoin="round"
       />
     </svg>
-  );
-}
-
-function IconDownload() {
-  return (
-    <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M12 3a1 1 0 0 1 1 1v8.59l2.3-2.3a1 1 0 1 1 1.4 1.42l-4 4a1 1 0 0 1-1.4 0l-4-4a1 1 0 1 1 1.4-1.42L11 12.59V4a1 1 0 0 1 1-1zM5 18a1 1 0 1 0 0 2h14a1 1 0 1 0 0-2H5z"
-      />
-    </svg>
-  );
-}
-
-/** Magnifying glass with + (zoom in). */
-function IconZoomIn() {
-  return (
-    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <circle cx="10.5" cy="10.5" r="6.5" />
-      <path d="M15.5 15.5 21 21" />
-      <path d="M10.5 7.5v6M7.5 10.5h6" />
-    </svg>
-  );
-}
-
-/** Magnifying glass with − (zoom out). */
-function IconZoomOut() {
-  return (
-    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <circle cx="10.5" cy="10.5" r="6.5" />
-      <path d="M15.5 15.5 21 21" />
-      <path d="M7.5 10.5h6" />
-    </svg>
-  );
-}
-
-/** Four outward corners — enter fullscreen. */
-function IconFullscreen() {
-  return (
-    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M4 9V4h5" />
-      <path d="M20 9V4h-5" />
-      <path d="M4 15v5h5" />
-      <path d="M20 15v5h-5" />
-    </svg>
-  );
-}
-
-/** Four inward corners — exit fullscreen / small screen. */
-function IconExitFullscreen() {
-  return (
-    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M9 4v5H4" />
-      <path d="M15 4v5h5" />
-      <path d="M9 20v-5H4" />
-      <path d="M15 20v-5h5" />
-    </svg>
-  );
-}
-
-const PDF_ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
-
-function FileTree({
-  files,
-  assets,
-  folders,
-  selected,
-  currentFolder,
-  onSelect,
-  onOpenFolder,
-  onDelete,
-  onDeleteFolder,
-  onDeleteAsset,
-  onRequestRename,
-  onNew,
-  onNewFolder,
-  onUploadFiles,
-  onUploadFolder,
-  onDropFiles,
-  onMoveIntoFolder,
-  searchTerm,
-  onSearchChange,
-  onCollapse,
-}: {
-  files: LatexFile[];
-  assets: LatexFile[];
-  folders: string[];
-  selected: string;
-  currentFolder: string;
-  onSelect: (name: string) => void;
-  onOpenFolder: (folder: string) => void;
-  onDelete: (name: string) => void;
-  onDeleteFolder: (folder: string) => void;
-  onDeleteAsset: (name: string) => void;
-  onRequestRename: (path: string, kind: "file" | "folder" | "asset") => void;
-  onNew: () => void;
-  onNewFolder: () => void;
-  onUploadFiles: () => void;
-  onUploadFolder: () => void;
-  onDropFiles: (dataTransfer: DataTransfer) => void;
-  onMoveIntoFolder: (path: string, folder: string) => void;
-  searchTerm: string;
-  onSearchChange: (value: string) => void;
-  onCollapse: () => void;
-}) {
-  const [ctx, setCtx] = useState<{ x: number; y: number; path: string; kind: "file" | "folder" | "asset" } | null>(null);
-  const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
-  const DRAG_MIME = "application/x-yggdrasil-latex-path";
-
-  function displayName(full: string) {
-    if (!currentFolder) return full;
-    return full.startsWith(currentFolder + "/") ? full.slice(currentFolder.length + 1) : full;
-  }
-
-  function requestRename(path: string, kind: "file" | "folder" | "asset") {
-    setCtx(null);
-    onRequestRename(path, kind);
-  }
-
-  useEffect(() => {
-    if (!ctx) return;
-    const close = (e: PointerEvent) => {
-      if (e.target instanceof Element && e.target.closest(".latex-ctx-menu")) return;
-      setCtx(null);
-    };
-    document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
-  }, [ctx]);
-
-  function openCtx(e: React.MouseEvent, path: string, kind: "file" | "folder" | "asset") {
-    e.preventDefault();
-    e.stopPropagation();
-    setCtx({ x: e.clientX, y: e.clientY, path, kind });
-  }
-
-  return (
-    <div className="latex-file-tree">
-      <div className="latex-tree-header">
-        <div className="latex-tree-header-row">
-          <span className="latex-tree-title">Files</span>
-          <div className="latex-tree-actions">
-            <button type="button" className="latex-tree-action" onClick={onNew} title="New file" aria-label="New file">
-              <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
-                <path fill="currentColor" d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm1 7V3.5L18.5 9H15zM8 13h8v2H8v-2zm0 4h8v2H8v-2zm0-8h5v2H8V9z"/>
-              </svg>
-            </button>
-            <button type="button" className="latex-tree-action" onClick={onNewFolder} title="New folder" aria-label="New folder">
-              <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
-                <path fill="currentColor" d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2zm1 5h2v3h3v2h-3v3h-2v-3H8v-2h3V9z"/>
-              </svg>
-            </button>
-            <button type="button" className="latex-tree-action" onClick={onUploadFiles} title="Upload files" aria-label="Upload files">
-              <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
-                <path fill="currentColor" d="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z"/>
-              </svg>
-            </button>
-            <button type="button" className="latex-tree-action" onClick={onUploadFolder} title="Upload folder / project" aria-label="Upload folder">
-              <IconUploadFolder />
-            </button>
-            <button type="button" className="latex-tree-action" onClick={onCollapse} title="Collapse files" aria-label="Collapse files">
-              <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
-                <path fill="currentColor" d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z"/>
-              </svg>
-            </button>
-          </div>
-        </div>
-        <div className="latex-tree-search-wrap">
-          <input
-            type="search"
-            value={searchTerm}
-            onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search files"
-            className="latex-tree-search"
-          />
-        </div>
-      </div>
-      <div
-        className="latex-tree-list"
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => {
-          e.preventDefault();
-          onDropFiles(e.dataTransfer);
-        }}
-      >
-        <div className="latex-breadcrumb">
-          <button
-            type="button"
-            className={`latex-breadcrumb-item${currentFolder === "" ? " active" : ""}`}
-            onClick={() => onOpenFolder("")}
-          >
-            root
-          </button>
-          {currentFolder && (
-            <>
-              <span className="latex-breadcrumb-sep">/</span>
-              {currentFolder.split("/").map((part, index, parts) => {
-                const path = parts.slice(0, index + 1).join("/");
-                return (
-                  <span key={path} className="latex-breadcrumb-crumb">
-                    <button
-                      type="button"
-                      className={`latex-breadcrumb-item${index === parts.length - 1 ? " active" : ""}`}
-                      onClick={() => onOpenFolder(path)}
-                    >
-                      {part}
-                    </button>
-                    {index < parts.length - 1 && <span className="latex-breadcrumb-sep">/</span>}
-                  </span>
-                );
-              })}
-            </>
-          )}
-        </div>
-
-        {folders.length > 0 && (
-          <div className="latex-tree-section">
-            {folders.map((folder) => (
-              <div
-                key={folder}
-                className={`latex-tree-folder${dragOverFolder === folder ? " drop-target" : ""}`}
-                onClick={() => onOpenFolder(folder)}
-                onContextMenu={(e) => openCtx(e, folder, "folder")}
-                onClickCapture={(e) => {
-                  if (e.ctrlKey || e.metaKey) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    requestRename(folder, "folder");
-                  }
-                }}
-                onDragOver={(e) => {
-                  if (!e.dataTransfer.types.includes(DRAG_MIME)) return;
-                  e.preventDefault();
-                  e.stopPropagation();
-                  e.dataTransfer.dropEffect = "move";
-                  setDragOverFolder(folder);
-                }}
-                onDragLeave={() => setDragOverFolder((f) => (f === folder ? null : f))}
-                onDrop={(e) => {
-                  const path = e.dataTransfer.getData(DRAG_MIME);
-                  setDragOverFolder(null);
-                  if (!path) return; // not an internal drag — let it fall through to onDropFiles (OS upload)
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onMoveIntoFolder(path, folder);
-                }}
-              >
-                <div className="latex-tree-folder-icon" aria-hidden>📁</div>
-                <div className="latex-tree-name" title={`${displayName(folder)} — right-click to rename`}>
-                  {displayName(folder)}
-                </div>
-                <div className="latex-tree-folder-actions">
-                  <button
-                    type="button"
-                    className="latex-tree-folder-btn delete"
-                    title="Delete folder"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeleteFolder(folder);
-                    }}
-                  >
-                    ×
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {files.length === 0 && assets.length === 0 ? (
-          <div className="latex-tree-empty">No files — drop .tex / images here</div>
-        ) : (
-          <>
-            {files.map((f) => (
-              <div
-                key={f.name}
-                className={`latex-tree-item${selected === f.name ? " active" : ""}`}
-                draggable
-                onDragStart={(e) => {
-                  e.dataTransfer.effectAllowed = "move";
-                  e.dataTransfer.setData(DRAG_MIME, f.name);
-                }}
-                onClick={(e) => {
-                  if (e.ctrlKey || e.metaKey) {
-                    e.preventDefault();
-                    requestRename(f.name, "file");
-                    return;
-                  }
-                  onSelect(f.name);
-                }}
-                onContextMenu={(e) => openCtx(e, f.name, "file")}
-              >
-                <div className="latex-tree-name" title={`${displayName(f.name)} — right-click to rename`}>
-                  {displayName(f.name)}
-                </div>
-                <div className="latex-tree-meta">
-                  {(f.size / 1024).toFixed(1)} KB
-                </div>
-                <button
-                  className="latex-tree-delete"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDelete(f.name);
-                  }}
-                  title="Delete file"
-                >×</button>
-              </div>
-            ))}
-            {assets.map((a) => (
-              <div
-                key={a.name}
-                className="latex-tree-item latex-tree-asset"
-                draggable
-                onDragStart={(e) => {
-                  e.dataTransfer.effectAllowed = "move";
-                  e.dataTransfer.setData(DRAG_MIME, a.name);
-                }}
-                onClick={(e) => {
-                  if (e.ctrlKey || e.metaKey) {
-                    e.preventDefault();
-                    requestRename(a.name, "asset");
-                  }
-                }}
-                onContextMenu={(e) => openCtx(e, a.name, "asset")}
-              >
-                <div className="latex-tree-name" title={`${displayName(a.name)} — right-click to rename`}>
-                  {displayName(a.name)}
-                </div>
-                <div className="latex-tree-meta">asset</div>
-                <button
-                  className="latex-tree-delete"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDeleteAsset(a.name);
-                  }}
-                  title="Delete asset"
-                >×</button>
-              </div>
-            ))}
-          </>
-        )}
-      </div>
-      {ctx && createPortal(
-        <div
-          className="latex-ctx-menu"
-          style={{ top: ctx.y, left: ctx.x }}
-          role="menu"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={(e) => {
-              e.stopPropagation();
-              requestRename(ctx.path, ctx.kind);
-            }}
-          >
-            Rename
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="danger"
-            onClick={(e) => {
-              e.stopPropagation();
-              setCtx(null);
-              if (ctx.kind === "folder") onDeleteFolder(ctx.path);
-              else if (ctx.kind === "asset") onDeleteAsset(ctx.path);
-              else onDelete(ctx.path);
-            }}
-          >
-            Delete
-          </button>
-        </div>,
-        document.body
-      )}
-    </div>
   );
 }
 
@@ -685,36 +263,8 @@ function PreviewPane({
   const paneRef = useRef<HTMLDivElement | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [pageCount, setPageCount] = useState(0);
-  const [zoom, setZoom] = useState(1);
-  const [fullscreen, setFullscreen] = useState(false);
-
-  function zoomIn() {
-    setZoom((z) => {
-      const next = PDF_ZOOM_STEPS.find((s) => s > z + 0.001);
-      return next ?? z;
-    });
-  }
-
-  function zoomOut() {
-    setZoom((z) => {
-      const prev = [...PDF_ZOOM_STEPS].reverse().find((s) => s < z - 0.001);
-      return prev ?? z;
-    });
-  }
-
-  useEffect(() => {
-    if (!fullscreen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setFullscreen(false);
-    };
-    document.addEventListener("keydown", onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prev;
-    };
-  }, [fullscreen]);
+  const { zoom, zoomIn, zoomOut, atMinZoom, atMaxZoom } = useZoom();
+  const { fullscreen, setFullscreen } = useFullscreenPane();
 
   useEffect(() => {
     const host = hostRef.current;
@@ -771,9 +321,6 @@ function PreviewPane({
     };
   }, [pdfUrl, zoom, fullscreen]);
 
-  const atMinZoom = zoom <= PDF_ZOOM_STEPS[0];
-  const atMaxZoom = zoom >= PDF_ZOOM_STEPS[PDF_ZOOM_STEPS.length - 1];
-
   return (
     <div
       ref={paneRef}
@@ -789,69 +336,21 @@ function PreviewPane({
       )}
       {pdfUrl ? (
         <>
-          <div className="latex-preview-toolbar">
-            <span className="mono muted">
-              {pageCount ? `${pageCount} page${pageCount === 1 ? "" : "s"}` : "Rendering…"}
-            </span>
-            <div className="latex-preview-actions">
-              <button
-                type="button"
-                className="latex-preview-icon-btn"
-                title="Zoom out"
-                aria-label="Zoom out"
-                disabled={atMinZoom}
-                onClick={zoomOut}
-              >
-                <IconZoomOut />
-              </button>
-              <span className="latex-preview-zoom-label mono" title="Zoom level">
-                {Math.round(zoom * 100)}%
-              </span>
-              <button
-                type="button"
-                className="latex-preview-icon-btn"
-                title="Zoom in"
-                aria-label="Zoom in"
-                disabled={atMaxZoom}
-                onClick={zoomIn}
-              >
-                <IconZoomIn />
-              </button>
-              {fullscreen ? (
-                <button
-                  type="button"
-                  className="latex-preview-icon-btn"
-                  title="Exit full screen"
-                  aria-label="Exit full screen"
-                  onClick={() => setFullscreen(false)}
-                >
-                  <IconExitFullscreen />
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="latex-preview-icon-btn"
-                  title="Full screen"
-                  aria-label="Full screen"
-                  onClick={() => setFullscreen(true)}
-                >
-                  <IconFullscreen />
-                </button>
-              )}
-              <button
-                type="button"
-                className="latex-preview-download"
-                title="Download PDF"
-                aria-label="Download PDF"
-                onClick={() =>
-                  downloadBlobUrl(pdfUrl, pdfName.endsWith(".pdf") ? pdfName : `${pdfName || "document"}.pdf`)
-                }
-              >
-                <IconDownload />
-                <span>Download PDF</span>
-              </button>
-            </div>
-          </div>
+          <PreviewToolbar
+            statusLabel={pageCount ? `${pageCount} page${pageCount === 1 ? "" : "s"}` : "Rendering…"}
+            zoom={zoom}
+            atMinZoom={atMinZoom}
+            atMaxZoom={atMaxZoom}
+            onZoomIn={zoomIn}
+            onZoomOut={zoomOut}
+            fullscreen={fullscreen}
+            onEnterFullscreen={() => setFullscreen(true)}
+            onExitFullscreen={() => setFullscreen(false)}
+            downloadLabel="Download PDF"
+            onDownload={() =>
+              downloadBlobUrl(pdfUrl, pdfName.endsWith(".pdf") ? pdfName : `${pdfName || "document"}.pdf`)
+            }
+          />
           {renderError ? (
             <div className="latex-preview-empty">Preview error: {renderError}</div>
           ) : (
@@ -902,7 +401,10 @@ export default function LaTeXEditor() {
   const [errors, setErrors] = useState<string[]>([]);
   const [lineCol, setLineCol] = useState("Line 1, Col 1");
   const [filesCollapsed, setFilesCollapsed] = useState(() => {
-    return localStorage.getItem("yggdrasil:latex-files-collapsed") === "1";
+    const next = localStorage.getItem("yggdrasil:latex-sidebar");
+    if (next === "collapsed" || next === "open") return next === "collapsed";
+    // Older key hid the tree with no visible way to bring it back.
+    return false;
   });
   const [viewMode, setViewMode] = useState<LatexViewMode>(() => {
     const saved = localStorage.getItem("yggdrasil:latex-view");
@@ -948,7 +450,7 @@ export default function LaTeXEditor() {
 
   function setFilesOpen(open: boolean) {
     setFilesCollapsed(!open);
-    localStorage.setItem("yggdrasil:latex-files-collapsed", open ? "0" : "1");
+    localStorage.setItem("yggdrasil:latex-sidebar", open ? "open" : "collapsed");
   }
   function getSource() {
     if (viewRef.current) {
@@ -1695,8 +1197,7 @@ export default function LaTeXEditor() {
   const filteredAssets = visibleAssets.filter((f) => f.name.toLowerCase().includes(searchTerm.toLowerCase()));
   const filteredFolders = visibleFolders.filter((folder) => folder.toLowerCase().includes(searchTerm.toLowerCase()));
 
-  return (
-    <div className="latex-shell">
+  const menuBar = (
       <LatexMenuBar
         filename={filename}
         renaming={renaming}
@@ -1749,6 +1250,35 @@ export default function LaTeXEditor() {
         historyMsg={historyMsg}
         onShare={() => setShareOpen(true)}
       />
+  );
+
+  const sidebar = (
+    <WorkspaceSidebar
+      files={filteredFiles}
+      assets={filteredAssets}
+      folders={filteredFolders}
+      selected={selected}
+      currentFolder={currentFolder}
+      onSelect={handleSelectFile}
+      onOpenFolder={handleOpenFolder}
+      onDelete={handleDelete}
+      onDeleteFolder={handleDeleteFolder}
+      onDeleteAsset={handleDeleteAsset}
+      onRequestRename={requestTreeRename}
+      onNew={handleNewFile}
+      onNewFolder={handleNewFolder}
+      onUploadFiles={handleUploadFiles}
+      onUploadFolder={handleUploadFolder}
+      onDropFiles={handleDroppedFiles}
+      onMoveIntoFolder={handleMoveIntoFolder}
+      searchTerm={searchTerm}
+      onSearchChange={setSearchTerm}
+      onCollapse={() => setFilesOpen(false)}
+    />
+  );
+
+  return (
+    <>
       <LatexShareModal open={shareOpen} onClose={() => setShareOpen(false)} />
       <LatexPromptModal
         open={Boolean(prompt)}
@@ -1799,45 +1329,14 @@ export default function LaTeXEditor() {
         {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
       />
 
-      {/* File tree + editor / pdf / split
-          react-resizable-panels v4: number sizes are PIXELS; use string % */}
-      <PanelGroup id="latex" orientation="horizontal" className="latex-panel-group" style={{ height: "100%" }}>
-        {!filesCollapsed && (
-          <>
-            <Panel
-              id="latex-files"
-              defaultSize="22"
-              minSize="16"
-              maxSize="40"
-              className="latex-panel"
-            >
-              <FileTree
-                files={filteredFiles}
-                assets={filteredAssets}
-                folders={filteredFolders}
-                selected={selected}
-                currentFolder={currentFolder}
-                onSelect={handleSelectFile}
-                onOpenFolder={handleOpenFolder}
-                onDelete={handleDelete}
-                onDeleteFolder={handleDeleteFolder}
-                onDeleteAsset={handleDeleteAsset}
-                onRequestRename={requestTreeRename}
-                onNew={handleNewFile}
-                onNewFolder={handleNewFolder}
-                onUploadFiles={handleUploadFiles}
-                onUploadFolder={handleUploadFolder}
-                onDropFiles={handleDroppedFiles}
-                onMoveIntoFolder={handleMoveIntoFolder}
-                searchTerm={searchTerm}
-                onSearchChange={setSearchTerm}
-                onCollapse={() => setFilesOpen(false)}
-              />
-            </Panel>
-            <PanelResizeHandle className="latex-resize-handle" />
-          </>
-        )}
-
+      <WorkspaceLayout
+        panelGroupId="latex"
+        menuBar={menuBar}
+        sidebar={sidebar}
+        sidebarCollapsed={filesCollapsed}
+        onShowSidebar={() => setFilesOpen(true)}
+        sidebarSize={{ default: 22, min: 16, max: 40 }}
+      >
         {editorVisible && (
           <>
             <Panel
@@ -1877,7 +1376,7 @@ export default function LaTeXEditor() {
             />
           </Panel>
         )}
-      </PanelGroup>
-    </div>
+      </WorkspaceLayout>
+    </>
   );
 }

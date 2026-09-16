@@ -31,7 +31,7 @@ export default function ArxivBrowser() {
     setTimeout(() => setToast(null), 4000);
   }
 
-  const { cericStatus, selectedText, selectionPaperId, addingSlot, flashId, handleTextSelect, addSelectionToSlot, refreshCericStatus } =
+  const { slots, cericStatus, selectedText, selectionPaperId, addingSlot, flashId, handleTextSelect, addSelectionToSlot, refreshCericStatus } =
     useCericAppend(showToast);
 
   async function handleSearch() {
@@ -154,7 +154,7 @@ export default function ArxivBrowser() {
                 </div>
                 <div style={{ display: "flex", alignItems: "flex-start" }}>
                   <div className="browser-card-title" style={{ flex: 1 }}>{p.title}</div>
-                  <SlotIndicator status={cericStatus[p.id]} />
+                  <SlotIndicator status={cericStatus[p.id]} slots={slots} />
                 </div>
                 <div className="browser-card-authors">
                   {expandedAuthors.has(p.id) || p.authors.length <= 3
@@ -170,7 +170,11 @@ export default function ArxivBrowser() {
                   )}
                 </div>
                 {!expandedIds.has(p.id) && (
-                  <AbstractText text={p.abstract} className="browser-card-abstract-preview" />
+                  <AbstractText
+                    text={p.abstract}
+                    className="browser-card-abstract-preview"
+                    onMouseUp={() => handleTextSelect(p.id)}
+                  />
                 )}
                 <button
                   className="arxiv-row-abstract-toggle"
@@ -179,12 +183,17 @@ export default function ArxivBrowser() {
                   {expandedIds.has(p.id) ? "▾ hide abstract" : "▸ show full abstract"}
                 </button>
                 {expandedIds.has(p.id) && (
-                  <AbstractText text={p.abstract} className={`browser-card-abstract${flashId === p.id ? " flash" : ""}`} />
+                  <AbstractText
+                    text={p.abstract}
+                    className={`browser-card-abstract${flashId === p.id ? " flash" : ""}`}
+                    onMouseUp={() => handleTextSelect(p.id)}
+                  />
                 )}
                 {selectedText && selectionPaperId === p.id && (
                   <CericSelectionToolbar
                     selectedText={selectedText}
                     addingSlot={addingSlot}
+                    slots={slots}
                     onAdd={(slotKey) => addSelectionToSlot(p, slotKey)}
                   />
                 )}

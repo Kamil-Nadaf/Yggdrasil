@@ -1,465 +1,362 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Terminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
-import { WebLinksAddon } from "@xterm/addon-web-links";
-import "@xterm/xterm/css/xterm.css";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
+import AbstractText from "../components/AbstractText";
 import { getActiveProviderPayload } from "../lib/aiProvider";
-import { THEME_EVENT, readCssVar } from "../lib/theme";
+import {
+  loadLokiState,
+  saveLokiState,
+  newChat,
+  newProject,
+  titleFromPrompt,
+  messageId,
+  type LokiChat,
+  type LokiMessage,
+  type LokiSkill,
+  type LokiState,
+} from "../lib/lokiStore";
 
-function feynmanTermTheme() {
-  const bg = readCssVar("--bg", "#0D1117");
-  const fg = readCssVar("--text", "#CDD9E5");
-  const accent = readCssVar("--page-accent", readCssVar("--accent", "#4FC3F7"));
-  const muted = readCssVar("--muted", "#6B7280");
-  const ok = readCssVar("--ok", "#34D399");
-  const crit = readCssVar("--crit", "#F87171");
-  const gate = readCssVar("--gate", "#F59E0B");
-  return {
-    background: bg,
-    foreground: fg,
-    cursor: accent,
-    selectionBackground: accent,
-    black: bg,
-    red: crit,
-    green: ok,
-    yellow: gate,
-    blue: accent,
-    magenta: "#C084FC",
-    cyan: accent,
-    white: fg,
-    brightBlack: muted,
-    brightRed: crit,
-    brightGreen: ok,
-    brightYellow: gate,
-    brightBlue: accent,
-    brightMagenta: "#D8B4FE",
-    brightCyan: accent,
-    brightWhite: fg,
-  };
-}
+const SKILLS: { id: LokiSkill; label: string; hint: string }[] = [
+  { id: "ask", label: "Ask notes", hint: "Answer from your vault only" },
+  { id: "search", label: "Search", hint: "Exact matches in notes" },
+  { id: "keywords", label: "Keywords", hint: "Tags, objects, instruments" },
+  { id: "neighbors", label: "Neighbors", hint: "Graph links with reasons" },
+];
 
-interface Source {
-  citekey: string;
-  excerpt: string;
-}
-
-type AskTab = "notes" | "feynman";
-
-interface FeynmanStatus {
-  ok: boolean;
-  installed: boolean;
-  reachable: boolean;
-  publicUrl: string;
-  wsUrl: string;
-  docsUrl: string;
-  message: string;
-  port: string;
-  mode?: string;
-}
-
-interface SearchResult {
-  citekey: string;
-  title: string;
-  folder: string;
-  path: string;
-  snippet: string;
-}
-
-function NotesPanel() {
-  const [mode, setMode] = useState<"ai" | "search">("ai");
-  const [question, setQuestion] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [answer, setAnswer] = useState<string | null>(null);
-  const [sources, setSources] = useState<Source[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
-
-  async function handleAsk() {
-    if (!question.trim()) return;
-    setLoading(true);
-    setError(null);
-    setAnswer(null);
-    setSources([]);
-    try {
-      const r = await api.ask(question, 6, getActiveProviderPayload());
-      setAnswer(r.answer);
-      setSources(r.sources);
-    } catch (e: unknown) {
-      setError((e as Error).message || "Request failed");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleSearch() {
-    if (!question.trim()) return;
-    setLoading(true);
-    setError(null);
-    setSearchResults(null);
-    try {
-      const r = await api.search(question);
-      setSearchResults(r.results);
-    } catch (e: unknown) {
-      setError((e as Error).message || "Search failed");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function submit() {
-    mode === "ai" ? handleAsk() : handleSearch();
-  }
-
-  return (
-    <div className="ask-panel">
-      <div className="ask-mode-toggle" role="tablist" aria-label="Ask mode">
-        <button
-          type="button"
-          className={`btn${mode === "ai" ? " btn-primary" : ""}`}
-          onClick={() => setMode("ai")}
-        >
-          Ask (AI)
-        </button>
-        <button
-          type="button"
-          className={`btn${mode === "search" ? " btn-primary" : ""}`}
-          onClick={() => setMode("search")}
-        >
-          Search (exact match)
-        </button>
-      </div>
-
-      <p className="muted" style={{ margin: "10px 0 20px" }}>
-        {mode === "ai"
-          ? "Searches your vault and answers from your own notes only. Uses the AI provider configured in Settings (keys stay in this browser)."
-          : "Plain full-text search across every note's title, tags, CERIC slots, and body — no AI, no embeddings, just exact substring matches."}
-      </p>
-
-      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
-        <input
-          type="text"
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && !loading && submit()}
-          placeholder={mode === "ai" ? "What mechanisms explain GRB prompt emission variability?" : "e.g. Lorentz factor, Mrk 501, internal shock"}
-          style={{ flex: 1 }}
-        />
-        <button className="btn btn-primary" onClick={submit} disabled={loading || !question.trim()}>
-          {loading ? "…" : mode === "ai" ? "Ask" : "Search"}
-        </button>
-      </div>
-
-      {error && <div className="crit" style={{ marginBottom: 12 }}>{error}</div>}
-
-      {mode === "ai" && answer && (
-        <div className="card" style={{ marginBottom: 16 }}>
-          <h2>Answer</h2>
-          <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.7 }}>{answer}</div>
-        </div>
-      )}
-
-      {mode === "ai" && sources.length > 0 && (
-        <div>
-          <h2 style={{ marginBottom: 8 }}>Sources</h2>
-          {sources.map((s, i) => (
-            <div key={i} className="card" style={{ marginBottom: 8 }}>
-              <div className="mono" style={{ color: "var(--accent)", fontSize: 12, marginBottom: 4 }}>
-                [{s.citekey}]
-              </div>
-              <div className="muted" style={{ fontSize: 13 }}>…{s.excerpt}…</div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {mode === "search" && searchResults && (
-        <div>
-          <div className="muted mono" style={{ fontSize: 12, marginBottom: 8 }}>
-            {searchResults.length} match{searchResults.length === 1 ? "" : "es"}
-          </div>
-          {searchResults.length === 0 ? (
-            <div className="muted">No matches.</div>
-          ) : (
-            searchResults.map((r) => (
-              <div key={r.path} className="card" style={{ marginBottom: 8 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                  <strong>{r.title}</strong>
-                  <span className="muted mono" style={{ fontSize: 11 }}>{r.folder}</span>
-                </div>
-                <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>…{r.snippet}…</div>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function defaultWsUrl() {
-  const proto = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${proto}://${window.location.hostname}:6174/ws`;
-}
-
-function FeynmanTerminal({ wsUrl }: { wsUrl: string }) {
-  const hostRef = useRef<HTMLDivElement | null>(null);
-  const termRef = useRef<Terminal | null>(null);
-  const fitRef = useRef<FitAddon | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const [connected, setConnected] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    const host = hostRef.current;
-    if (!host) return;
-
-    const term = new Terminal({
-      cursorBlink: true,
-      fontSize: 13,
-      fontFamily: "IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, monospace",
-      theme: feynmanTermTheme(),
-      convertEol: true,
-      scrollback: 5000,
-    });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    term.loadAddon(new WebLinksAddon());
-    term.open(host);
-    fit.fit();
-    termRef.current = term;
-    fitRef.current = fit;
-
-    term.writeln("\x1b[1mFeynman CLI\x1b[0m — physics / astrophysics welcome (no domain picker).");
-    term.writeln("Connecting…\r\n");
-
-    let disposed = false;
-    const ws = new WebSocket(wsUrl);
-    ws.binaryType = "arraybuffer";
-    wsRef.current = ws;
-
-    const sendResize = () => {
-      fit.fit();
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
-      }
-    };
-
-    let gotFirstByte = false;
-    const slowStartTimer = setTimeout(() => {
-      if (!disposed && !gotFirstByte) {
-        term.writeln(
-          "\x1b[2mStill starting — the Feynman CLI itself is booting inside the container. " +
-            "This can take 10-20s on a cold container; it isn't stuck.\x1b[0m"
-        );
-      }
-    }, 6000);
-
-    ws.onopen = () => {
-      if (disposed) return;
-      setConnected(true);
-      setErr(null);
-      term.writeln("Shell connected — waiting for the Feynman CLI to start…\r\n");
-      sendResize();
-      term.focus();
-    };
-
-    ws.onmessage = (ev) => {
-      gotFirstByte = true;
-      clearTimeout(slowStartTimer);
-      if (typeof ev.data === "string") {
-        term.write(ev.data);
-        return;
-      }
-      term.write(new Uint8Array(ev.data as ArrayBuffer));
-    };
-
-    ws.onerror = () => {
-      setErr("WebSocket error — is the feynman container running?");
-    };
-
-    ws.onclose = () => {
-      setConnected(false);
-      if (!disposed) {
-        term.writeln("\r\n\x1b[33m[session closed — click New session to reopen]\x1b[0m");
-      }
-    };
-
-    const dataSub = term.onData((data) => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(data);
-    });
-
-    const onWinResize = () => sendResize();
-    const onTheme = () => {
-      term.options.theme = feynmanTermTheme();
-    };
-    window.addEventListener("resize", onWinResize);
-    window.addEventListener(THEME_EVENT, onTheme);
-    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => sendResize()) : null;
-    ro?.observe(host);
-
-    return () => {
-      disposed = true;
-      clearTimeout(slowStartTimer);
-      window.removeEventListener("resize", onWinResize);
-      window.removeEventListener(THEME_EVENT, onTheme);
-      ro?.disconnect();
-      dataSub.dispose();
-      try {
-        ws.close();
-      } catch {
-        /* ignore */
-      }
-      term.dispose();
-      termRef.current = null;
-      fitRef.current = null;
-      wsRef.current = null;
-    };
-  }, [wsUrl]);
-
-  return (
-    <div className="ask-feynman-term-wrap">
-      <div className="ask-feynman-term-bar mono">
-        <span style={{ color: connected ? "var(--ok)" : "var(--muted)" }}>
-          {connected ? "● connected" : "○ connecting"}
-        </span>
-        {err && <span className="crit">{err}</span>}
-        <span className="muted">physics · astrophysics · GRBs — type naturally in the CLI</span>
-      </div>
-      <div ref={hostRef} className="ask-feynman-term" />
-    </div>
-  );
-}
-
-function FeynmanPanel() {
-  const [status, setStatus] = useState<FeynmanStatus | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [session, setSession] = useState(0);
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const s = await api.feynman.status();
-      setStatus(s);
-    } catch (e: unknown) {
-      setStatus({
-        ok: false,
-        installed: false,
-        reachable: false,
-        publicUrl: `http://${window.location.hostname}:6174/`,
-        wsUrl: defaultWsUrl(),
-        docsUrl: "https://www.feynman.is",
-        message: (e as Error).message || "Status check failed",
-        port: "6174",
-        mode: "terminal",
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    refresh();
-    const id = window.setInterval(refresh, 20000);
-    return () => window.clearInterval(id);
-  }, [refresh]);
-
-  const reachable = Boolean(status?.reachable);
-  const wsUrl = status?.wsUrl || defaultWsUrl();
-
-  return (
-    <div className="ask-panel ask-feynman-panel">
-      <div className="ask-feynman-toolbar">
-        <div className="ask-feynman-meta">
-          <p className="muted" style={{ margin: 0 }}>
-            Terminal Feynman CLI — papers, web search, drafts, citations.{" "}
-            <a href="https://www.feynman.is" target="_blank" rel="noreferrer">
-              feynman.is
-            </a>
-            . Workbench GUI removed; use this shell (physics / astrophysics included — no chip list).
-          </p>
-          <div className="ask-feynman-status mono">
-            {loading && !status ? (
-              <span className="muted">Checking terminal…</span>
-            ) : reachable ? (
-              <span style={{ color: "var(--ok)" }}>● Terminal ready on :{status?.port || "6174"}</span>
-            ) : (
-              <span style={{ color: "var(--crit)" }}>
-                ● Offline{status?.message ? ` — ${status.message}` : ""}
-              </span>
-            )}
-          </div>
-        </div>
-        <div className="ask-feynman-actions">
-          <button type="button" className="btn" onClick={() => { setSession((n) => n + 1); refresh(); }}>
-            New session
-          </button>
-          <button type="button" className="btn" onClick={refresh}>
-            Refresh
-          </button>
-          <a className="btn" href="https://www.feynman.is" target="_blank" rel="noreferrer">
-            Docs
-          </a>
-        </div>
-      </div>
-
-      {reachable ? (
-        <FeynmanTerminal key={session} wsUrl={wsUrl} />
-      ) : (
-        <div className="card ask-feynman-install">
-          <h2 style={{ marginTop: 0 }}>Start Feynman terminal</h2>
-          <p className="muted">
-            Rebuild and start the Feynman CLI container (terminal mode, not the science-workbench GUI):
-          </p>
-          <pre className="ask-feynman-code">{`docker compose build feynman
-docker compose up -d feynman`}</pre>
-          <button type="button" className="btn btn-primary" onClick={refresh} disabled={loading}>
-            {loading ? "Checking…" : "Check again"}
-          </button>
-        </div>
-      )}
-    </div>
-  );
+function persist(next: LokiState) {
+  saveLokiState(next);
+  return next;
 }
 
 export default function AskView() {
-  const [tab, setTab] = useState<AskTab>(() => {
-    const saved = localStorage.getItem("yggdrasil:ask-tab");
-    return saved === "feynman" ? "feynman" : "notes";
-  });
+  const [state, setState] = useState<LokiState>(() => loadLokiState());
+  const [skill, setSkill] = useState<LokiSkill>("ask");
+  const [draft, setDraft] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [projectName, setProjectName] = useState("");
+  const threadRef = useRef<HTMLDivElement>(null);
 
-  function selectTab(next: AskTab) {
-    setTab(next);
-    localStorage.setItem("yggdrasil:ask-tab", next);
+  const active = state.chats.find((c) => c.id === state.activeChatId) || null;
+
+  useEffect(() => {
+    const el = threadRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [active?.messages.length, loading]);
+
+  const chatsByProject = useMemo(() => {
+    const grouped = new Map<string | null, LokiChat[]>();
+    for (const chat of [...state.chats].sort((a, b) => b.updated.localeCompare(a.updated))) {
+      const key = chat.projectId;
+      const list = grouped.get(key) || [];
+      list.push(chat);
+      grouped.set(key, list);
+    }
+    return grouped;
+  }, [state.chats]);
+
+  function update(mutator: (prev: LokiState) => LokiState) {
+    setState((prev) => persist(mutator(prev)));
   }
 
+  function startChat(projectId: string | null = null) {
+    const chat = newChat(projectId);
+    update((prev) => ({
+      ...prev,
+      chats: [chat, ...prev.chats],
+      activeChatId: chat.id,
+    }));
+    setDraft("");
+  }
+
+  function addProject() {
+    const name = projectName.trim();
+    if (!name) return;
+    const project = newProject(name);
+    update((prev) => ({ ...prev, projects: [...prev.projects, project] }));
+    setProjectName("");
+    startChat(project.id);
+  }
+
+  async function send() {
+    const text = draft.trim();
+    if (!text || loading) return;
+
+    let chatId = state.activeChatId;
+    let working = state;
+    if (!chatId) {
+      const chat = newChat(null);
+      working = persist({
+        ...state,
+        chats: [chat, ...state.chats],
+        activeChatId: chat.id,
+      });
+      setState(working);
+      chatId = chat.id;
+    }
+
+    const userMsg: LokiMessage = { id: messageId(), role: "user", text, skill };
+    working = persist({
+      ...working,
+      chats: working.chats.map((c) =>
+        c.id === chatId
+          ? {
+              ...c,
+              title: c.messages.length === 0 ? titleFromPrompt(text) : c.title,
+              updated: new Date().toISOString(),
+              messages: [...c.messages, userMsg],
+            }
+          : c
+      ),
+    });
+    setState(working);
+    setDraft("");
+    setLoading(true);
+
+    let assistant: LokiMessage;
+    try {
+      if (skill === "search") {
+        const r = await api.search(text);
+        const lines = r.results.length
+          ? r.results.map((hit) => `**${hit.title}** \`${hit.folder}\`\n${hit.snippet}`).join("\n\n")
+          : "No matches in your notes.";
+        assistant = { id: messageId(), role: "assistant", text: lines, skill };
+      } else if (skill === "keywords") {
+        const r = await api.loki.keywords(text);
+        const lines = r.keywords.length
+          ? r.keywords
+              .map((k) => `- **${k.term}** · ${k.count} note${k.count === 1 ? "" : "s"} (${k.citekeys.slice(0, 4).join(", ")})`)
+              .join("\n")
+          : "No keywords in matching notes yet. Tags and objects on paper notes will show up here.";
+        assistant = { id: messageId(), role: "assistant", text: lines, skill };
+      } else if (skill === "neighbors") {
+        const r = await api.graphNeighbors(text);
+        const lines = r.neighbors.length
+          ? r.neighbors
+              .map((n) => `- **${n.note}** \`${n.type}\` — ${n.reason_text} _(conf ${n.confidence_score.toFixed(2)})_`)
+              .join("\n")
+          : `No neighbors found for \`${text}\`. Try a citekey, or rebuild typed edges from the Graph view.`;
+        assistant = { id: messageId(), role: "assistant", text: lines, skill };
+      } else {
+        const r = await api.ask(text, 6, getActiveProviderPayload());
+        assistant = {
+          id: messageId(),
+          role: "assistant",
+          text: r.answer,
+          skill,
+          sources: r.sources,
+        };
+      }
+    } catch (e) {
+      assistant = {
+        id: messageId(),
+        role: "assistant",
+        text: (e as Error).message || "Request failed",
+        skill,
+      };
+    } finally {
+      setLoading(false);
+    }
+
+    setState((prev) =>
+      persist({
+        ...prev,
+        chats: prev.chats.map((c) =>
+          c.id === chatId
+            ? { ...c, updated: new Date().toISOString(), messages: [...c.messages, assistant] }
+            : c
+        ),
+      })
+    );
+  }
+
+  const empty = !active || active.messages.length === 0;
+
   return (
-    <div className={`ask-view${tab === "feynman" ? " ask-view--feynman" : ""}`}>
-      <div className="ask-header">
-        <h1 style={{ margin: 0 }}>Ask</h1>
-        <div className="browser-field-tabs ask-tabs" role="tablist" aria-label="Ask subsections">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "notes"}
-            className={`btn${tab === "notes" ? " btn-primary" : ""}`}
-            onClick={() => selectTab("notes")}
-          >
-            Ask Your Notes
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "feynman"}
-            className={`btn${tab === "feynman" ? " btn-primary" : ""}`}
-            onClick={() => selectTab("feynman")}
-          >
-            Feynman
+    <div className="loki-shell">
+      <aside className="loki-sidebar">
+        <div className="loki-sidebar-top">
+          <div className="loki-brand">
+            <div className="loki-brand-name">Loki</div>
+            <div className="loki-brand-sub muted">Master of your notes</div>
+          </div>
+          <button type="button" className="btn btn-primary loki-new" onClick={() => startChat(null)}>
+            + New chat
           </button>
         </div>
-      </div>
 
-      {tab === "notes" ? <NotesPanel /> : <FeynmanPanel />}
+        <div className="loki-sidebar-scroll">
+          {state.projects.map((project) => (
+            <div key={project.id} className="loki-group">
+              <div className="loki-group-title">
+                <span>{project.name}</span>
+                <button type="button" className="loki-ghost" onClick={() => startChat(project.id)}>
+                  +
+                </button>
+              </div>
+              {(chatsByProject.get(project.id) || []).map((chat) => (
+                <button
+                  key={chat.id}
+                  type="button"
+                  className={`loki-chat-item${chat.id === state.activeChatId ? " active" : ""}`}
+                  onClick={() => update((prev) => ({ ...prev, activeChatId: chat.id }))}
+                >
+                  {chat.title}
+                </button>
+              ))}
+            </div>
+          ))}
+
+          <div className="loki-group">
+            <div className="loki-group-title">Chats</div>
+            {(chatsByProject.get(null) || []).map((chat) => (
+              <button
+                key={chat.id}
+                type="button"
+                className={`loki-chat-item${chat.id === state.activeChatId ? " active" : ""}`}
+                onClick={() => update((prev) => ({ ...prev, activeChatId: chat.id }))}
+              >
+                {chat.title}
+              </button>
+            ))}
+            {(chatsByProject.get(null) || []).length === 0 && (
+              <div className="muted loki-empty-hint">No chats yet</div>
+            )}
+          </div>
+        </div>
+
+        <form
+          className="loki-new-project"
+          onSubmit={(e) => {
+            e.preventDefault();
+            addProject();
+          }}
+        >
+          <input
+            value={projectName}
+            onChange={(e) => setProjectName(e.target.value)}
+            placeholder="New project"
+          />
+          <button type="submit" className="btn" disabled={!projectName.trim()}>
+            Add
+          </button>
+        </form>
+      </aside>
+
+      <section className="loki-main">
+        {empty ? (
+          <div className="loki-hero">
+            <h1>Loki</h1>
+            <p className="muted">Ask your notes. Loki only answers from what you have written.</p>
+            <Composer
+              draft={draft}
+              setDraft={setDraft}
+              skill={skill}
+              setSkill={setSkill}
+              loading={loading}
+              onSend={send}
+              wide
+            />
+          </div>
+        ) : (
+          <>
+            <div className="loki-thread" ref={threadRef}>
+              {active!.messages.map((msg) => (
+                <article key={msg.id} className={`loki-msg loki-msg--${msg.role}`}>
+                  <div className="loki-msg-role mono">
+                    {msg.role === "user" ? "You" : "Loki"}
+                    {msg.skill && msg.role === "assistant" ? ` · ${SKILLS.find((s) => s.id === msg.skill)?.label}` : ""}
+                  </div>
+                  <div className="loki-msg-body">
+                    <AbstractText text={msg.text} />
+                    {msg.images?.map((img) => (
+                      <img key={img.src} className="loki-msg-image" src={img.src} alt={img.alt} />
+                    ))}
+                    {msg.sources && msg.sources.length > 0 && (
+                      <div className="loki-sources">
+                        {msg.sources.map((s, i) => (
+                          <div key={`${s.citekey}-${i}`} className="loki-source">
+                            <span className="mono">{s.citekey}</span>
+                            <span className="muted">{s.excerpt}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </article>
+              ))}
+              {loading && <div className="muted loki-thinking">Loki is reading your notes…</div>}
+            </div>
+            <Composer
+              draft={draft}
+              setDraft={setDraft}
+              skill={skill}
+              setSkill={setSkill}
+              loading={loading}
+              onSend={send}
+            />
+          </>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function Composer({
+  draft,
+  setDraft,
+  skill,
+  setSkill,
+  loading,
+  onSend,
+  wide,
+}: {
+  draft: string;
+  setDraft: (v: string) => void;
+  skill: LokiSkill;
+  setSkill: (s: LokiSkill) => void;
+  loading: boolean;
+  onSend: () => void;
+  wide?: boolean;
+}) {
+  return (
+    <div className={`loki-composer${wide ? " loki-composer--wide" : ""}`}>
+      <div className="loki-skills">
+        {SKILLS.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            className={`loki-skill${skill === s.id ? " selected" : ""}`}
+            title={s.hint}
+            onClick={() => setSkill(s.id)}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+      <div className="loki-input-row">
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              onSend();
+            }
+          }}
+          placeholder={
+            skill === "ask"
+              ? "Ask Loki about your notes…"
+              : skill === "search"
+                ? "Search titles, tags, analysis slots…"
+                : skill === "neighbors"
+                  ? "Citekey or note id for graph neighbors…"
+                  : "Find keywords in matching notes…"
+          }
+          rows={wide ? 3 : 2}
+        />
+        <button type="button" className="btn btn-primary" onClick={onSend} disabled={loading || !draft.trim()}>
+          {loading ? "…" : "Send"}
+        </button>
+      </div>
     </div>
   );
 }

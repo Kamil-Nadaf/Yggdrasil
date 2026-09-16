@@ -55,7 +55,11 @@ services:
       LATEX_URL: ${LATEX_URL:-http://latex:9000}
       FEYNMAN_URL: ${FEYNMAN_URL:-http://feynman:6174}
       FEYNMAN_HOST_PORT: ${FEYNMAN_HOST_PORT:-6174}
+      HOST_LLM_GATEWAY: ${HOST_LLM_GATEWAY:-host.docker.internal}
+      LMSTUDIO_URL: ${LMSTUDIO_URL:-http://host.docker.internal:1234}
       TZ: ${TZ:-Asia/Shanghai}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - type: bind
         source: ${VAULT_HOST_PATH}

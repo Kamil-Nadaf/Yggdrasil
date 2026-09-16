@@ -149,8 +149,11 @@ def boot(window) -> None:
     try:
         load_or_ensure(bundle, progress)
     except Exception as exc:
-        window.evaluate_js(f"showError({json.dumps('Setup failed: ' + str(exc))})")
-        return
+        # LaTeX/TeX toolchain setup is best-effort — the rest of the app (Dashboard,
+        # Notes, Tasks, Search, Graph) does not depend on it. A failure here (e.g. no
+        # LaTeX distribution reachable on Windows, where TinyTeX auto-install isn't
+        # wired up yet) should degrade the LaTeX Editor, not block the whole app.
+        progress(f"LaTeX setup skipped: {exc}")
 
     os.environ["VAULT_PATH"] = str(vault)
     os.environ["LANCEDB_PATH"] = str(index_dir)

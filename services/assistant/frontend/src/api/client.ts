@@ -196,6 +196,13 @@ export interface TaskStatusDef {
   icon: StatusIcon;
 }
 
+export interface Goal {
+  id: string;
+  name: string;
+  start_date: string;
+  end_date: string;
+}
+
 export interface MainTask {
   id: string;
   project_slug: string;
@@ -460,6 +467,15 @@ export const api = {
         task_statuses,
         reassign: reassign || {},
       }),
+  },
+
+  goals: {
+    list: () => req<{ goals: Goal[] }>("GET", "/api/settings/goals"),
+    add: (goal: { name: string; start_date: string; end_date: string }) =>
+      req<{ ok: boolean; goals: Goal[] }>("POST", "/api/settings/goals", goal),
+    update: (id: string, goal: Partial<{ name: string; start_date: string; end_date: string }>) =>
+      req<{ ok: boolean; goals: Goal[] }>("PUT", `/api/settings/goals/${encodeURIComponent(id)}`, goal),
+    remove: (id: string) => req<{ ok: boolean; goals: Goal[] }>("DELETE", `/api/settings/goals/${encodeURIComponent(id)}`),
   },
 
   graph: () => req<GraphData>("GET", "/api/graph"),

@@ -39,6 +39,7 @@ def tex_bin_dir() -> Path | None:
     roots = [
         Path("/Library/TeX/texbin"),
         Path.home() / "Library" / "TinyTeX" / "bin",
+        Path.home() / ".TinyTeX" / "bin",
     ]
     for root in roots:
         if root.is_file():

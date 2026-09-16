@@ -1780,15 +1780,16 @@ h2 { font-size: 15px; color: var(--accent); }
 }
 
 .task-status-edit-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) 32px 58px 32px;
   gap: 8px;
   align-items: center;
   margin-bottom: 8px;
 }
 
 .task-status-edit-row input[type="text"] {
-  width: auto;
-  flex: 1;
+  width: 100%;
+  min-width: 0;
 }
 
 .task-status-edit-row input[type="color"] {
@@ -1799,7 +1800,17 @@ h2 { font-size: 15px; color: var(--accent); }
   border-radius: var(--radius);
   background: none;
   cursor: pointer;
-  flex-shrink: 0;
+}
+
+.task-status-edit-row > .btn:first-child {
+  min-width: 0;
+  width: 56px;
+}
+
+.task-status-edit-row > .btn-crit {
+  min-width: 0;
+  width: 32px;
+  padding-inline: 0;
 }
 
 .font-picker-row {
@@ -3084,6 +3095,7 @@ h2 { font-size: 15px; color: var(--accent); }
 
 .lightcurve-line.habits { stroke: var(--accent); }
 .lightcurve-line.subtasks { stroke: #F59E0B; }
+.lightcurve-line.mental-health { stroke: var(--accent); }
 
 .lightcurve-area {
   fill: var(--page-accent);
@@ -3099,6 +3111,7 @@ h2 { font-size: 15px; color: var(--accent); }
 
 .lightcurve-dot.habits { fill: var(--accent); }
 .lightcurve-dot.subtasks { fill: #F59E0B; }
+.lightcurve-dot.mental-health { fill: var(--accent); }
 
 .lightcurve-dot.today {
   fill: var(--ok);
@@ -3121,6 +3134,7 @@ h2 { font-size: 15px; color: var(--accent); }
 
 .lightcurve-legend-dot.habits { color: var(--accent); }
 .lightcurve-legend-dot.subtasks { color: #F59E0B; }
+.lightcurve-legend-dot.mental-health { color: var(--accent); }
 
 /* ── Tasks: project → main task → subtask ───────────────────────────────────── */
 .tasks-header {
@@ -3166,17 +3180,24 @@ h2 { font-size: 15px; color: var(--accent); }
   border-bottom: none;
 }
 
+.task-main-head,
+.task-row {
+  --task-row-columns: 24px 24px minmax(0, 1fr) 200px 110px 132px auto;
+}
+
 .task-main-head {
-  display: flex;
+  display: grid;
+  grid-template-columns: var(--task-row-columns);
   align-items: center;
   gap: 8px;
   padding: 10px 16px;
-  flex-wrap: wrap;
 }
 
 .task-main-name {
-  flex: 1;
-  min-width: 120px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .task-star {
@@ -3259,7 +3280,11 @@ h2 { font-size: 15px; color: var(--accent); }
 }
 
 .task-sub-list .task-row {
-  padding-left: 40px;
+  /* Keep the shared grid on the same left edge as its parent.  The blank
+     expand cell and shaded subtask surface provide the hierarchy without
+     shifting the fixed status, progress, or deadline columns. */
+  padding-left: 16px;
+  padding-right: 16px;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
 }
 
@@ -3278,8 +3303,7 @@ h2 { font-size: 15px; color: var(--accent); }
 .task-progress-fill,
 .dash-task-bar-fill {
   height: 100%;
-  background: var(--text);
-  opacity: 0.75;
+  background: var(--page-accent);
 }
 
 .deadline-picker-input {
@@ -3338,6 +3362,146 @@ h2 { font-size: 15px; color: var(--accent); }
   height: 8px;
 }
 
+.dash-top-row {
+  display: flex;
+  align-items: stretch;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.dash-top-row > .active-tasks-card {
+  flex: 1 1 360px;
+}
+
+/* Fill-weight circular progress ring — same e-ink constraint as the task bars. */
+.week-progress-card {
+  flex: 0 0 160px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.week-progress-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.progress-ring-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.progress-ring-track {
+  stroke: var(--border);
+}
+
+.progress-ring-fill {
+  stroke: var(--page-accent);
+}
+
+.progress-ring-center {
+  position: absolute;
+  font: 600 13px var(--font-mono);
+  color: var(--text);
+}
+
+.goals-row {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.goal-card {
+  position: relative;
+}
+
+.goal-card-name {
+  padding-right: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.goal-card-actions {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  display: flex;
+  gap: 8px;
+}
+
+.goal-card-edit,
+.goal-card-remove {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+}
+
+.goal-card-edit:hover {
+  color: var(--text);
+}
+
+.goal-card-remove:hover {
+  color: var(--crit);
+}
+
+.goal-add-card {
+  flex: 0 0 140px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.goal-add-card:hover {
+  color: var(--text);
+  border-color: var(--text);
+}
+
+.goal-add-form {
+  flex: 0 0 220px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.goal-add-form input[type="text"] {
+  font-size: 12px;
+}
+
+.goal-add-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+}
+
+.goal-add-form-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
 .task-sub-add {
   display: flex;
   gap: 8px;
@@ -3352,10 +3516,10 @@ h2 { font-size: 15px; color: var(--accent); }
 }
 
 .task-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: var(--task-row-columns);
   align-items: center;
   gap: 8px;
-  justify-content: space-between;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
   font-size: 13px;
@@ -3367,10 +3531,7 @@ h2 { font-size: 15px; color: var(--accent); }
 }
 
 .task-row-name {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
+  display: contents;
 }
 
 .task-expand {
@@ -3382,7 +3543,27 @@ h2 { font-size: 15px; color: var(--accent); }
   padding: 0;
 }
 
-.task-expand.spacer { display: inline-block; }
+.task-expand.spacer {
+  display: inline-block;
+}
+
+.task-col-status {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.task-col-progress {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.task-col-date {
+  display: flex;
+  justify-content: flex-start;
+}
 
 .task-check {
   border: none;
@@ -3631,19 +3812,6 @@ h2 { font-size: 15px; color: var(--accent); }
   resize: vertical;
   overflow: auto;
   min-height: 88px;
-}
-
-.phd-date-edit {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.phd-date-edit label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
 }
 
 .heatmap-day-label.today {
@@ -3913,4 +4081,58 @@ h2 { font-size: 15px; color: var(--accent); }
 .books-modal {
   width: min(480px, calc(100vw - 32px));
   margin: 0;
+}
+
+/* ── Mental Health picker ──────────────────────────────────────────────────── */
+.mental-health-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mental-health-picker {
+  display: flex;
+  gap: 6px;
+}
+
+.mental-health-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.mental-health-btn.on {
+  color: var(--bg);
+  background: var(--page-accent);
+  border-color: var(--page-accent);
+}
+
+.mental-health-shape {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  flex-shrink: 0;
+}
+
+.mental-health-shape[data-value="-1"] {
+  background: transparent;
+}
+
+.mental-health-shape[data-value="0"] {
+  background: linear-gradient(to top, currentColor 50%, transparent 50%);
+}
+
+.mental-health-shape[data-value="1"] {
+  background: currentColor;
 }

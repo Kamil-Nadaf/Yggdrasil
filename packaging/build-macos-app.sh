@@ -32,8 +32,8 @@ cat > "${APP}/Contents/Info.plist" << 'EOF'
   <key>CFBundleName</key><string>Yggdrasil</string>
   <key>CFBundleDisplayName</key><string>Yggdrasil</string>
   <key>CFBundleIdentifier</key><string>io.yggdrasil.app</string>
-  <key>CFBundleVersion</key><string>1.1.0</string>
-  <key>CFBundleShortVersionString</key><string>1.1.0</string>
+  <key>CFBundleVersion</key><string>0.1.0</string>
+  <key>CFBundleShortVersionString</key><string>0.1.0</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>Yggdrasil</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
@@ -66,6 +66,8 @@ cp "${ROOT}/services/assistant/data_manifest.py" "${APPDIR}/data_manifest.py"
 cp "${ROOT}/services/assistant/graph_links.py" "${APPDIR}/graph_links.py"
 cp "${ROOT}/services/assistant/analysis_tags.py" "${APPDIR}/analysis_tags.py"
 cp "${ROOT}/services/assistant/arxiv_topics.py" "${APPDIR}/arxiv_topics.py"
+cp "${ROOT}/services/assistant/task_statuses.py" "${APPDIR}/task_statuses.py"
+cp "${ROOT}/services/assistant/goals.py" "${APPDIR}/goals.py"
 rm -rf "${APPDIR}/frontend"
 mkdir -p "${APPDIR}/frontend"
 cp -R "${FRONTEND}/dist" "${APPDIR}/frontend/dist"
@@ -95,6 +97,7 @@ DMG_ROOT="${OUT}/dmg-app-root"
 rm -rf "$DMG_ROOT"
 mkdir -p "$DMG_ROOT"
 cp -R "$APP" "$DMG_ROOT/Yggdrasil.app"
+cp "${ROOT}/LICENSE" "$DMG_ROOT/LICENSE"
 ln -s /Applications "$DMG_ROOT/Applications"
 cat > "$DMG_ROOT/README.txt" << 'EOF'
 Yggdrasil

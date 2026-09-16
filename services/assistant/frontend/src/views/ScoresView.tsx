@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, Fragment, type CSSProperties } from "react";
-import { api, type ActiveMainTask } from "../api/client";
+import { api, type ActiveMainTask, type Goal } from "../api/client";
 import {
   type HabitDef,
   loadHabitDefs,
@@ -7,11 +7,16 @@ import {
   habitKeyFromLabel,
 } from "../lib/habitDefs";
 
-type RangeMode = "week" | "month" | "year";
+const MENTAL_HEALTH_KEY = "mental_health";
+type MentalHealthValue = -1 | 0 | 1;
 
-const PHD_START_KEY = "yggdrasil:phd-start";
-const PHD_END_KEY = "yggdrasil:phd-end";
-const PROGRAM_LABEL_KEY = "yggdrasil:program-label";
+function mentalHealthLabel(v: MentalHealthValue | null | undefined): string {
+  if (v === -1) return "Low";
+  if (v === 1) return "Good";
+  return "Neutral";
+}
+
+type RangeMode = "week" | "month" | "year";
 const DASH_HEIGHTS_KEY = "yggdrasil:dash-heights";
 
 type DashWidget = "active" | "today" | "activity";
@@ -187,12 +192,228 @@ function Lightcurve({
   );
 }
 
+/** Mental Health ECG-style line chart — sharp straight segments, no area fill. */
+function MentalHealthChart({
+  days,
+  values,
+  today,
+}: {
+  days: string[];
+  values: (number | null)[];
+  today: string;
+}) {
+  const W = 720;
+  const H = 120;
+  const pad = { t: 18, r: 16, b: 32, l: 40 };
+  const innerW = W - pad.l - pad.r;
+  const innerH = H - pad.t - pad.b;
+  const n = Math.max(days.length, 1);
+  const xAt = (i: number) => pad.l + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
+  const yAt = (v: number) => pad.t + innerH - ((v + 1) / 2) * innerH; // map -1..+1
+
+  // Build path: only connect consecutive non-null points with straight segments
+  let pathD = "";
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i];
+    if (v === null || v === undefined) continue;
+    // find previous non-null
+    let prevIdx = -1;
+    for (let j = i - 1; j >= 0; j--) {
+      if (values[j] !== null && values[j] !== undefined) {
+        prevIdx = j;
+        break;
+      }
+    }
+    if (prevIdx === -1) {
+      pathD += `M ${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`;
+    } else {
+      const prevV = values[prevIdx]!;
+      // ECG step: horizontal then vertical (sharp corner)
+      const midX = (xAt(prevIdx) + xAt(i)) / 2;
+      pathD += ` L ${midX.toFixed(1)},${yAt(prevV).toFixed(1)} L ${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`;
+    }
+  }
+
+  const todayIdx = days.indexOf(today);
+  const tickIdx =
+    n <= 8
+      ? days.map((_, i) => i)
+      : [0, Math.floor((n - 1) / 2), n - 1].filter((v, i, a) => a.indexOf(v) === i);
+
+  return (
+    <svg className="lightcurve-svg" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Mental Health trend">
+      {/* axes */}
+      <line
+        className="lightcurve-axis"
+        x1={pad.l}
+        y1={pad.t + innerH}
+        x2={pad.l + innerW}
+        y2={pad.t + innerH}
+      />
+      <line className="lightcurve-axis" x1={pad.l} y1={pad.t} x2={pad.l} y2={pad.t + innerH} />
+      {/* gridlines at -1, 0, +1 */}
+      {[-1, 0, 1].map((v) => {
+        const y = yAt(v);
+        return (
+          <g key={v}>
+            <line className="lightcurve-grid" x1={pad.l} y1={y} x2={pad.l + innerW} y2={y} />
+            <text className="lightcurve-tick" x={pad.l - 8} y={y + 3} textAnchor="end">
+              {v === 1 ? "+1" : String(v)}
+            </text>
+          </g>
+        );
+      })}
+      {/* line */}
+      {pathD && <path className="lightcurve-line mental-health" d={pathD} fill="none" />}
+      {/* dots */}
+      {values.map((v, i) =>
+        v === null || v === undefined ? null : (
+          <circle
+            key={`mh-${days[i]}`}
+            className={`lightcurve-dot mental-health${days[i] === today ? " today" : ""}`}
+            cx={xAt(i)}
+            cy={yAt(v)}
+            r={days[i] === today ? 2.5 : 1.5}
+          >
+            <title>{`${days[i]} · ${mentalHealthLabel(v as MentalHealthValue)}`}</title>
+          </circle>
+        )
+      )}
+      {/* today vertical */}
+      {todayIdx >= 0 && (
+        <line
+          className="lightcurve-today"
+          x1={xAt(todayIdx)}
+          y1={pad.t}
+          x2={xAt(todayIdx)}
+          y2={pad.t + innerH}
+        />
+      )}
+      {/* x ticks */}
+      {tickIdx.map((i) => (
+        <text key={days[i]} className="lightcurve-tick" x={xAt(i)} y={H - 10} textAnchor="middle">
+          {days[i].slice(5)}
+        </text>
+      ))}
+    </svg>
+  );
+}
+
 /** Fill-weight progress bar — no hue, per the e-ink theme constraint. */
 function TaskProgressBar({ done, total }: { done: number; total: number }) {
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
   return (
     <div className="dash-task-bar-track" title={`${pct}%`}>
       <div className="dash-task-bar-fill" style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
+/** Fill-weight circular progress ring — same theme constraint as TaskProgressBar (monotone stroke, no hue). */
+function ProgressRing({ pct, size = 72, stroke = 7 }: { pct: number; size?: number; stroke?: number }) {
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const clamped = Math.max(0, Math.min(100, pct));
+  const dash = (clamped / 100) * c;
+  return (
+    <div className="progress-ring-wrap" style={{ width: size, height: size }} title={`${clamped}%`}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle className="progress-ring-track" cx={size / 2} cy={size / 2} r={r} strokeWidth={stroke} fill="none" />
+        <circle
+          className="progress-ring-fill"
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          strokeWidth={stroke}
+          fill="none"
+          strokeDasharray={`${dash.toFixed(1)} ${(c - dash).toFixed(1)}`}
+          strokeLinecap="butt"
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+      </svg>
+      <div className="progress-ring-center">{clamped}%</div>
+    </div>
+  );
+}
+
+/** A single long-running goal countdown card — name, days left, elapsed/total progress bar. */
+function GoalCard({
+  goal,
+  today,
+  onUpdate,
+  onDelete,
+}: {
+  goal: Goal;
+  today: string;
+  onUpdate: (id: string, patch: { name: string; start_date: string; end_date: string }) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState(goal.name);
+  const [editStart, setEditStart] = useState(goal.start_date);
+  const [editEnd, setEditEnd] = useState(goal.end_date);
+
+  const daysLeft = daysBetween(goal.start_date, goal.end_date, today);
+  const start = parseLocal(goal.start_date).getTime();
+  const end = parseLocal(goal.end_date).getTime();
+  const now = parseLocal(today).getTime();
+  const total = end - start;
+  const elapsed = Math.max(0, Math.min(total, now - start));
+  const pct = total > 0 ? Math.round((elapsed / total) * 100) : 0;
+
+  function startEditing() {
+    setEditName(goal.name);
+    setEditStart(goal.start_date);
+    setEditEnd(goal.end_date);
+    setEditing(true);
+  }
+
+  function save() {
+    const name = editName.trim();
+    if (!name || !editStart || !editEnd) return;
+    onUpdate(goal.id, { name, start_date: editStart, end_date: editEnd });
+    setEditing(false);
+  }
+
+  if (editing) {
+    return (
+      <div className="goal-add-form">
+        <input type="text" placeholder="Goal name (e.g. PhD)" value={editName} onChange={(e) => setEditName(e.target.value)} />
+        <label className="muted" style={{ fontSize: 11 }}>
+          Start
+          <input type="date" value={editStart} onChange={(e) => setEditStart(e.target.value)} />
+        </label>
+        <label className="muted" style={{ fontSize: 11 }}>
+          End
+          <input type="date" value={editEnd} onChange={(e) => setEditEnd(e.target.value)} />
+        </label>
+        <div className="goal-add-form-actions">
+          <button type="button" className="btn btn-primary" onClick={save} disabled={!editName.trim() || !editStart || !editEnd}>
+            Save
+          </button>
+          <button type="button" className="btn" onClick={() => setEditing(false)}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card dash-widget week-progress-card goal-card">
+      <div className="goal-card-actions">
+        <button type="button" className="goal-card-edit" title="Edit goal" onClick={startEditing}>
+          ✎
+        </button>
+        <button type="button" className="goal-card-remove" title="Remove goal" onClick={() => onDelete(goal.id)}>
+          ×
+        </button>
+      </div>
+      <div className="week-progress-title goal-card-name">{goal.name}</div>
+      <ProgressRing pct={pct} />
+      <div className="muted" style={{ fontSize: 12 }}>
+        {daysLeft === null ? "—" : daysLeft < 0 ? "Ended" : `${daysLeft} day${daysLeft === 1 ? "" : "s"} left`}
+      </div>
     </div>
   );
 }
@@ -211,15 +432,24 @@ export default function ScoresView({
   const [customizing, setCustomizing] = useState(false);
   const [newHabitLabel, setNewHabitLabel] = useState("");
   const [loading, setLoading] = useState(true);
-  const [phdStart, setPhdStart] = useState(() => localStorage.getItem(PHD_START_KEY) || "");
-  const [phdEnd, setPhdEnd] = useState(() => localStorage.getItem(PHD_END_KEY) || "");
-  const [programLabel, setProgramLabel] = useState(() => localStorage.getItem(PROGRAM_LABEL_KEY) || "");
   const [heights, setHeights] = useState<Partial<Record<DashWidget, number>>>(() => loadHeights());
+  const [goals, setGoals] = useState<Goal[]>([]);
+  const [addingGoal, setAddingGoal] = useState(false);
+  const [goalName, setGoalName] = useState("");
+  const [goalStart, setGoalStart] = useState("");
+  const [goalEnd, setGoalEnd] = useState("");
 
   const today = isoLocal(new Date());
   const range = useMemo(() => rangeFor(mode, new Date()), [mode]);
   const labelOf = useMemo(() => Object.fromEntries(habitDefs.map((h) => [h.key, h.label])), [habitDefs]);
-  const remaining = daysBetween(phdStart, phdEnd, today);
+  const weekProgress = useMemo(() => {
+    const dow = (new Date().getDay() + 6) % 7; // 0=Mon .. 6=Sun
+    const pct = Math.round(((dow + 1) / 7) * 100);
+    const daysLeft = 6 - dow;
+    return { pct, daysLeft };
+  }, [today]);
+  const primaryGoal = goals[0];
+  const otherGoals = goals.slice(1);
 
   async function reload() {
     const [active, h, todayH, completed] = await Promise.all([
@@ -242,6 +472,31 @@ export default function ScoresView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
+  useEffect(() => {
+    api.goals.list().then((r) => setGoals(r.goals));
+  }, []);
+
+  async function submitGoal() {
+    const name = goalName.trim();
+    if (!name || !goalStart || !goalEnd) return;
+    const r = await api.goals.add({ name, start_date: goalStart, end_date: goalEnd });
+    setGoals(r.goals);
+    setGoalName("");
+    setGoalStart("");
+    setGoalEnd("");
+    setAddingGoal(false);
+  }
+
+  async function deleteGoal(id: string) {
+    const r = await api.goals.remove(id);
+    setGoals(r.goals);
+  }
+
+  async function updateGoal(id: string, patch: { name: string; start_date: string; end_date: string }) {
+    const r = await api.goals.update(id, patch);
+    setGoals(r.goals);
+  }
+
   function patchTodayInHeatmap(habits: Record<string, boolean | number>) {
     setHabitDays((prev) => {
       const found = prev.some((d) => d.date === today);
@@ -252,9 +507,14 @@ export default function ScoresView({
     });
   }
 
-  async function toggleHabit(key: string) {
+  async function toggleHabit(key: string, explicitValue?: number) {
     const prev = todayHabits;
-    const next = { ...prev, [key]: !Boolean(prev[key]) };
+    let next: Record<string, boolean | number>;
+    if (key === MENTAL_HEALTH_KEY && explicitValue !== undefined) {
+      next = { ...prev, [key]: explicitValue };
+    } else {
+      next = { ...prev, [key]: !Boolean(prev[key]) };
+    }
     setTodayHabits(next);
     patchTodayInHeatmap(next);
     try {
@@ -296,22 +556,6 @@ export default function ScoresView({
     setTodayHabits(rest);
     patchTodayInHeatmap(rest);
     await api.habits.set(today, rest);
-  }
-
-  function savePhdDates(start: string, end: string) {
-    setPhdStart(start);
-    setPhdEnd(end);
-    if (start) localStorage.setItem(PHD_START_KEY, start);
-    else localStorage.removeItem(PHD_START_KEY);
-    if (end) localStorage.setItem(PHD_END_KEY, end);
-    else localStorage.removeItem(PHD_END_KEY);
-  }
-
-  function saveProgramLabel(label: string) {
-    const next = label.trim();
-    setProgramLabel(next);
-    if (next) localStorage.setItem(PROGRAM_LABEL_KEY, next);
-    else localStorage.removeItem(PROGRAM_LABEL_KEY);
   }
 
   const [exportingDigest, setExportingDigest] = useState(false);
@@ -380,6 +624,17 @@ export default function ScoresView({
     [range.days, tasksDoneByDate]
   );
 
+  const mentalHealthValues = useMemo(() => {
+    return range.days.map((d) => {
+      const raw = habitByDate.get(d)?.[MENTAL_HEALTH_KEY] as unknown as string | number | boolean | undefined;
+      if (typeof raw === "number") return raw;
+      if (raw === "-1") return -1;
+      if (raw === "1") return 1;
+      if (raw === "0") return 0;
+      return null;
+    });
+  }, [habitByDate, range.days]);
+
   if (loading) return <div className="muted">Loading…</div>;
 
   return (
@@ -401,35 +656,88 @@ export default function ScoresView({
         </div>
       </div>
 
-      <div
-        className="card dash-widget"
-        style={{ marginBottom: 20, ...widgetStyle("active") }}
-        onMouseUp={(e) => customizing && persistWidgetHeight("active", e.currentTarget)}
-      >
-        <h2 style={{ margin: "0 0 10px" }}>Active Tasks</h2>
-        {activeTasks.length === 0 ? (
-          <div className="muted" style={{ fontSize: 13 }}>
-            No active main tasks yet — mark one ★ active in the Tasks section to pin its progress here.
+      <div className="dash-top-row">
+        <div
+          className="card dash-widget active-tasks-card"
+          style={widgetStyle("active")}
+          onMouseUp={(e) => customizing && persistWidgetHeight("active", e.currentTarget)}
+        >
+          <h2 style={{ margin: "0 0 10px" }}>Active Tasks</h2>
+          {activeTasks.length === 0 ? (
+            <div className="muted" style={{ fontSize: 13 }}>
+              No active main tasks yet — mark one ★ active in the Tasks section to pin its progress here.
+            </div>
+          ) : (
+            <div className="dash-task-list">
+              {activeTasks.map((t) => (
+                <button
+                  type="button"
+                  key={`${t.project_slug}:${t.main_task_id}`}
+                  className="dash-task-bar"
+                  onClick={() => onOpenTask?.(t.project_slug, t.main_task_id)}
+                >
+                  <div className="dash-task-bar-label">
+                    <span>{t.project_name} › {t.main_task_name}</span>
+                    <span className="muted mono">
+                      {t.subtask_done}/{t.subtask_total} subtasks{t.deadline ? ` · due ${t.deadline}` : ""}
+                    </span>
+                  </div>
+                  <TaskProgressBar done={t.subtask_done} total={t.subtask_total} />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="card dash-widget week-progress-card">
+          <div className="week-progress-title">Week Progress</div>
+          <ProgressRing pct={weekProgress.pct} />
+          <div className="muted" style={{ fontSize: 12 }}>
+            {weekProgress.daysLeft <= 0 ? "Last day" : `${weekProgress.daysLeft} day${weekProgress.daysLeft === 1 ? "" : "s"} left`}
           </div>
-        ) : (
-          <div className="dash-task-list">
-            {activeTasks.map((t) => (
+        </div>
+
+        {primaryGoal && <GoalCard goal={primaryGoal} today={today} onUpdate={updateGoal} onDelete={deleteGoal} />}
+      </div>
+
+      <div className="goals-row" style={{ marginBottom: 20 }}>
+        {otherGoals.map((g) => (
+          <GoalCard key={g.id} goal={g} today={today} onUpdate={updateGoal} onDelete={deleteGoal} />
+        ))}
+        {addingGoal ? (
+          <div className="goal-add-form">
+            <input
+              type="text"
+              placeholder="Goal name (e.g. PhD)"
+              value={goalName}
+              onChange={(e) => setGoalName(e.target.value)}
+            />
+            <label className="muted" style={{ fontSize: 11 }}>
+              Start
+              <input type="date" value={goalStart} onChange={(e) => setGoalStart(e.target.value)} />
+            </label>
+            <label className="muted" style={{ fontSize: 11 }}>
+              End
+              <input type="date" value={goalEnd} onChange={(e) => setGoalEnd(e.target.value)} />
+            </label>
+            <div className="goal-add-form-actions">
               <button
                 type="button"
-                key={`${t.project_slug}:${t.main_task_id}`}
-                className="dash-task-bar"
-                onClick={() => onOpenTask?.(t.project_slug, t.main_task_id)}
+                className="btn btn-primary"
+                onClick={submitGoal}
+                disabled={!goalName.trim() || !goalStart || !goalEnd}
               >
-                <div className="dash-task-bar-label">
-                  <span>{t.project_name} › {t.main_task_name}</span>
-                  <span className="muted mono">
-                    {t.subtask_done}/{t.subtask_total} subtasks{t.deadline ? ` · due ${t.deadline}` : ""}
-                  </span>
-                </div>
-                <TaskProgressBar done={t.subtask_done} total={t.subtask_total} />
+                Save
               </button>
-            ))}
+              <button type="button" className="btn" onClick={() => setAddingGoal(false)}>
+                Cancel
+              </button>
+            </div>
           </div>
+        ) : (
+          <button type="button" className="goal-add-card" onClick={() => setAddingGoal(true)}>
+            + Add Goal
+          </button>
         )}
       </div>
 
@@ -439,33 +747,11 @@ export default function ScoresView({
         onMouseUp={(e) => customizing && persistWidgetHeight("today", e.currentTarget)}
       >
         <div className="today-header">
-          <h2 style={{ margin: 0 }}>
-            Today · {today}
-            {remaining !== null && programLabel ? ` · ${remaining < 0 ? 0 : remaining} days left in ${programLabel}` : ""}
-          </h2>
+          <h2 style={{ margin: 0 }}>Today · {today}</h2>
         </div>
 
         {customizing && (
           <>
-            <div className="phd-date-edit">
-              <label style={{ gridColumn: "1 / -1" }}>
-                <span className="muted">Program / role name (optional countdown)</span>
-                <input
-                  type="text"
-                  value={programLabel}
-                  placeholder="PhD, Masters, Bachelor, Professor…"
-                  onChange={(e) => saveProgramLabel(e.target.value)}
-                />
-              </label>
-              <label>
-                <span className="muted">Start</span>
-                <input type="date" value={phdStart} onChange={(e) => savePhdDates(e.target.value, phdEnd)} />
-              </label>
-              <label>
-                <span className="muted">End</span>
-                <input type="date" value={phdEnd} onChange={(e) => savePhdDates(phdStart, e.target.value)} />
-              </label>
-            </div>
             <div className="habit-edit-bar">
               <input
                 type="text"
@@ -493,6 +779,25 @@ export default function ScoresView({
               )}
             </div>
           ))}
+        </div>
+
+        {/* Mental Health quick-entry */}
+        <div className="mental-health-entry" style={{ marginTop: 12 }}>
+          <span className="muted" style={{ fontSize: 12, marginRight: 8 }}>Mental health:</span>
+          <div className="mental-health-picker">
+            {([-1, 0, 1] as MentalHealthValue[]).map((v) => (
+              <button
+                key={v}
+                type="button"
+                className={`mental-health-btn${(todayHabits[MENTAL_HEALTH_KEY] as number | undefined) === v ? " on" : ""}`}
+                onClick={() => toggleHabit(MENTAL_HEALTH_KEY, v)}
+                title={mentalHealthLabel(v)}
+              >
+                <span className="mental-health-shape" data-value={v} />
+                <span className="mental-health-label">{mentalHealthLabel(v)}</span>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -565,6 +870,18 @@ export default function ScoresView({
           <span className="heatmap-cell filled l3" />
           <span>more</span>
         </div>
+      </div>
+
+      <div className="card lightcurve-card" style={{ marginTop: 20 }}>
+        <div className="heatmap-toolbar">
+          <h2 style={{ margin: 0 }}>Mental Health</h2>
+          <span className="muted mono" style={{ fontSize: 11 }}>
+            <span className="lightcurve-legend-dot mental-health">● Trend</span>
+            {" · "}
+            {mode}
+          </span>
+        </div>
+        <MentalHealthChart days={range.days} values={mentalHealthValues} today={today} />
       </div>
 
       <div className="card lightcurve-card" style={{ marginTop: 20 }}>

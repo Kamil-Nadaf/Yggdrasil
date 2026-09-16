@@ -106,6 +106,7 @@ from task_statuses import (
     normalize_task_statuses,
     load_task_statuses,
 )
+from goals import load_goals, normalize_goals
 from arxiv_topics import ARXIV_TOPICS, is_valid_category, normalize_category, search_query_for
 from graph_links import (
     DEFAULT_SIMILARITY_THRESHOLD,
@@ -347,6 +348,10 @@ def current_analysis_keys() -> list[str]:
 
 def current_task_statuses() -> list[dict]:
     return load_task_statuses(load_app_settings(VAULT))
+
+
+def current_goals() -> list[dict]:
+    return load_goals(load_app_settings(VAULT))
 
 
 def gate_status(citekey: str) -> dict:
@@ -2974,6 +2979,62 @@ async def set_task_statuses(payload: TaskStatusesPayload):
 
     save_app_settings(VAULT, {**load_app_settings(VAULT), "task_statuses": new_statuses})
     return {"ok": True, "task_statuses": new_statuses}
+
+
+@app.get("/api/settings/goals")
+async def get_goals():
+    return {"goals": current_goals()}
+
+
+class GoalPayload(BaseModel):
+    name: str
+    start_date: str
+    end_date: str
+
+
+@app.post("/api/settings/goals")
+async def add_goal(payload: GoalPayload):
+    goals = current_goals()
+    try:
+        goals = normalize_goals([*goals, payload.model_dump()])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    save_app_settings(VAULT, {**load_app_settings(VAULT), "goals": goals})
+    return {"ok": True, "goals": goals}
+
+
+@app.delete("/api/settings/goals/{goal_id}")
+async def delete_goal(goal_id: str):
+    goals = [g for g in current_goals() if g["id"] != goal_id]
+    save_app_settings(VAULT, {**load_app_settings(VAULT), "goals": goals})
+    return {"ok": True, "goals": goals}
+
+
+class GoalUpdatePayload(BaseModel):
+    name: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+
+
+@app.put("/api/settings/goals/{goal_id}")
+async def update_goal(goal_id: str, payload: GoalUpdatePayload):
+    goals = current_goals()
+    idx = next((i for i, g in enumerate(goals) if g["id"] == goal_id), None)
+    if idx is None:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    updated = dict(goals[idx])
+    if payload.name is not None:
+        updated["name"] = payload.name
+    if payload.start_date is not None:
+        updated["start_date"] = payload.start_date
+    if payload.end_date is not None:
+        updated["end_date"] = payload.end_date
+    try:
+        goals[idx] = normalize_goals([updated])[0]
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    save_app_settings(VAULT, {**load_app_settings(VAULT), "goals": goals})
+    return {"ok": True, "goals": goals}
 
 
 # ── Vault git sync (version-history backup to a remote, alongside Syncthing) ───

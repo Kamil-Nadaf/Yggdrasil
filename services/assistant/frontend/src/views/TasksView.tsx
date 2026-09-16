@@ -348,34 +348,43 @@ export default function TasksView({
                               {mt.is_active ? "★" : "☆"}
                             </button>
                             <span className="task-main-name">{mt.name}</span>
-                            <StatusPill statuses={statuses} statusId={mt.status_id} onChange={(s) => updateMainTaskStatus(project.slug, mt, s)} />
-                            <span className="muted mono">{mt.subtask_done}/{mt.subtask_total} subtasks</span>
-                            <ProgressBar done={mt.subtask_done} total={mt.subtask_total} />
-                            <DeadlinePicker value={mt.deadline} onChange={(d) => updateDeadline(project.slug, mt, d)} title="Main task deadline" />
+                            <div className="task-col-progress">
+                              <span className="muted mono">{mt.subtask_done}/{mt.subtask_total} subtasks</span>
+                              <ProgressBar done={mt.subtask_done} total={mt.subtask_total} />
+                            </div>
+                            <div className="task-col-status">
+                              <StatusPill statuses={statuses} statusId={mt.status_id} onChange={(s) => updateMainTaskStatus(project.slug, mt, s)} />
+                            </div>
+                            <div className="task-col-date">
+                              <DeadlinePicker value={mt.deadline} onChange={(d) => updateDeadline(project.slug, mt, d)} title="Main task deadline" />
+                            </div>
                             <button className="btn btn-crit" onClick={() => deleteMainTask(project.slug, mt.id)}>Delete</button>
                           </div>
                           {mtOpen && (
                             <div className="task-sub-list">
                               {subtasks.map((st) => (
                                 <div key={st.id} className={`task-row${st.status_id === doneStatusId ? " done" : ""}`}>
-                                  <div className="task-row-name">
-                                    <span className="task-expand spacer" />
-                                    <button
-                                      type="button"
-                                      className={`task-check${st.status_id === doneStatusId ? " checked" : ""}`}
-                                      onClick={() => quickToggleSubtask(project.slug, mt.id, st)}
-                                      title="Quick-complete (jumps to Done)"
-                                    >
-                                      {st.status_id === doneStatusId ? "●" : "○"}
-                                    </button>
-                                    <span className="task-title">{st.name}</span>
+                                  <span className="task-expand spacer" />
+                                  <button
+                                    type="button"
+                                    className={`task-check${st.status_id === doneStatusId ? " checked" : ""}`}
+                                    onClick={() => quickToggleSubtask(project.slug, mt.id, st)}
+                                    title="Quick-complete (jumps to Done)"
+                                  >
+                                    {st.status_id === doneStatusId ? "●" : "○"}
+                                  </button>
+                                  <span className="task-title">{st.name}</span>
+                                  <div className="task-col-progress" />
+                                  <div className="task-col-status">
+                                    <StatusPill statuses={statuses} statusId={st.status_id} onChange={(s) => updateSubtaskStatus(project.slug, mt.id, st, s)} />
                                   </div>
-                                  <StatusPill statuses={statuses} statusId={st.status_id} onChange={(s) => updateSubtaskStatus(project.slug, mt.id, st, s)} />
-                                  <DeadlinePicker
-                                    value={st.deadline}
-                                    onChange={(d) => updateSubtaskDeadline(project.slug, mt.id, st, d)}
-                                    title="Subtask deadline"
-                                  />
+                                  <div className="task-col-date">
+                                    <DeadlinePicker
+                                      value={st.deadline}
+                                      onChange={(d) => updateSubtaskDeadline(project.slug, mt.id, st, d)}
+                                      title="Subtask deadline"
+                                    />
+                                  </div>
                                   <button className="btn btn-crit" onClick={() => deleteSubtask(project.slug, mt.id, st.id)}>Delete</button>
                                 </div>
                               ))}

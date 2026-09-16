@@ -642,14 +642,6 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
     return STATUS_ICON_CYCLE[(i + 1) % STATUS_ICON_CYCLE.length];
   }
 
-  function moveTaskStatus(index: number, dir: -1 | 1) {
-    const next = [...taskStatuses];
-    const target = index + dir;
-    if (target < 0 || target >= next.length) return;
-    [next[index], next[target]] = [next[target], next[index]];
-    setTaskStatuses(next);
-  }
-
   async function saveTaskStatuses(reassign?: Record<string, string>) {
     setTaskStatusesSaving(true);
     setTaskStatusesMsg(null);
@@ -1170,15 +1162,28 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
                 <span className="muted mono" style={{ fontSize: 11, minWidth: 60 }}>
                   {taskStatusUsage[s.id] || 0} task{(taskStatusUsage[s.id] || 0) === 1 ? "" : "s"}
                 </span>
-                <button type="button" className="btn" disabled={i === 0} onClick={() => moveTaskStatus(i, -1)} title="Move up">↑</button>
-                <button type="button" className="btn" disabled={i === taskStatuses.length - 1} onClick={() => moveTaskStatus(i, 1)} title="Move down">↓</button>
                 <button
                   type="button"
                   className="btn btn-crit"
                   disabled={taskStatuses.length <= 1}
-                  onClick={() => setTaskStatuses(taskStatuses.filter((_, j) => j !== i))}
+                  title={taskStatuses.length <= 1 ? "At least one status is required" : "Delete this status"}
+                  onClick={() => {
+                    if (taskStatuses.length <= 1) return;
+                    const count = taskStatusUsage[s.id] || 0;
+                    if (count === 0) {
+                      setTaskStatuses(taskStatuses.filter((_, j) => j !== i));
+                    } else {
+                      const remaining = taskStatuses.filter((_, j) => j !== i);
+                      setPendingReassign({
+                        statusId: s.id,
+                        statusName: s.name,
+                        count,
+                        chooseTo: remaining[0]?.id || "",
+                      });
+                    }
+                  }}
                 >
-                  Delete
+                  ×
                 </button>
               </div>
             ))}
@@ -1195,13 +1200,7 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
               >
                 + Add Status
               </button>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => setTaskStatuses([...DEFAULT_TASK_STATUSES])}
-              >
-                Reset to defaults
-              </button>
+
               <button
                 type="button"
                 className="btn btn-primary"
@@ -1214,14 +1213,14 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
             {pendingReassign && (
               <div className="settings-info" style={{ marginTop: 12 }}>
                 <div style={{ marginBottom: 8 }}>
-                  {pendingReassign.count} task(s) use "{pendingReassign.statusName}" — reassign to:
+                  {pendingReassign.count} task(s) use &quot;{pendingReassign.statusName}&quot; — reassign to:
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <select
                     value={pendingReassign.chooseTo}
                     onChange={(e) => setPendingReassign({ ...pendingReassign, chooseTo: e.target.value })}
                   >
-                    {taskStatuses.map((s) => (
+                    {taskStatuses.filter((s) => s.id !== pendingReassign.statusId).map((s) => (
                       <option key={s.id} value={s.id}>{s.name}</option>
                     ))}
                   </select>
@@ -1232,6 +1231,13 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
                     onClick={() => saveTaskStatuses({ [pendingReassign.statusId]: pendingReassign.chooseTo })}
                   >
                     Reassign &amp; delete
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => setPendingReassign(null)}
+                  >
+                    Cancel
                   </button>
                 </div>
               </div>

@@ -104,7 +104,10 @@ export default function App() {
         open={settingsOpen}
         firstRun={firstRunData}
         onClose={() => setSettingsOpen(false)}
-        onDataPathSaved={() => setFirstRunData(false)}
+        onDataPathSaved={() => {
+          setFirstRunData(false);
+          window.location.reload();
+        }}
       />
       <PageThemeDrawer open={pageEditOpen} page={view} onClose={() => setPageEditOpen(false)} />
       <div className="app-watermark" aria-hidden="true">{APP_WATERMARK}</div>

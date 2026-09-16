@@ -37,6 +37,7 @@ VAULT = Path(os.environ.get("VAULT_PATH", "/vault"))
 LATEX_DIR = VAULT / "70-LaTeX"
 WORK_DIR = Path("/tmp/latex-build")
 COMPILE_TIMEOUT = 120  # seconds
+BUNDLED_SUPPORT_DIR = Path(__file__).resolve().parent
 
 # Asset extensions that may live alongside a main.tex (images, bib, chapters as .tex are separate).
 ASSET_EXTS = {
@@ -107,9 +108,10 @@ def latexmk_engine_flag(source: str) -> str:
 
 
 _MISSING_TEX_RE = re.compile(
-    r"File [`']([^`']+\.(?:sty|cls|tex|def|fd|enc))[`'] not found",
+    r"File [`']([^`']+)[`'] not found",
     re.IGNORECASE,
 )
+_MISSING_FONT_RE = re.compile(r"I can't find file [`']([^`']+)[`']", re.IGNORECASE)
 _STY_TO_PKG = {
     "epsf.sty": "epsf",
     "graphicx.sty": "graphics",
@@ -123,13 +125,24 @@ _STY_TO_PKG = {
     "url.sty": "url",
     "amsmath.sty": "amsmath",
     "amssymb.sty": "amsfonts",
+    "fontawesome5.sty": "fontawesome5",
+    "tikzposter.cls": "tikzposter",
+    "beamerposter.sty": "beamerposter",
+    "pgfplots.sty": "pgfplots",
+    "lipsum.sty": "lipsum",
+    "phvr": "helvet",
+    "phvb": "helvet",
+    "phvbo": "helvet",
+    "phvro": "helvet",
 }
 
 
 def packages_from_log(log: str) -> list[str]:
     names = []
-    for fname in _MISSING_TEX_RE.findall(log):
-        names.append(_STY_TO_PKG.get(fname.lower(), Path(fname).stem))
+    missing = _MISSING_TEX_RE.findall(log) + _MISSING_FONT_RE.findall(log)
+    for fname in missing:
+        key = Path(fname).stem.lower()
+        names.append(_STY_TO_PKG.get(key, key))
     return list(dict.fromkeys(names))
 
 
@@ -139,19 +152,23 @@ async def tlmgr_install(packages: list[str]) -> list[str]:
         return []
     installed: list[str] = []
     for pkg in packages:
-        proc = await asyncio.create_subprocess_exec(
-            tlmgr,
-            "install",
-            pkg,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
+        proc = await asyncio.create_subprocess_exec(tlmgr, "install", pkg, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
         try:
-            await asyncio.wait_for(proc.communicate(), timeout=180)
+            _, _ = await asyncio.wait_for(proc.communicate(), timeout=180)
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
             continue
+        if proc.returncode != 0:
+            init = await asyncio.create_subprocess_exec(tlmgr, "init-usertree", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+            await asyncio.wait_for(init.communicate(), timeout=120)
+            proc = await asyncio.create_subprocess_exec(tlmgr, "--usermode", "install", pkg, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+            try:
+                await asyncio.wait_for(proc.communicate(), timeout=180)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+                continue
         if proc.returncode == 0:
             installed.append(pkg)
     return installed
@@ -238,6 +255,16 @@ async def compile_latex(payload: CompileRequest):
     job.mkdir(parents=True, exist_ok=True)
 
     try:
+        # The desktop bundle ships journal/poster support files next to this
+        # service. Put them on the compile job's search path so bundled
+        # templates work without requiring a separate TeX installation.
+        for support_name in ("aastex", "posters"):
+            support_dir = BUNDLED_SUPPORT_DIR / support_name
+            if support_dir.is_dir():
+                for support_file in support_dir.iterdir():
+                    if support_file.is_file():
+                        shutil.copy2(support_file, job / support_file.name)
+
         proj = project_root_for(stem)
         if proj is not None:
             # Mirror the project tree so relative \\input / \\includegraphics work.

@@ -505,6 +505,8 @@ export const api = {
     list: () => req<{ books: BookSummary[] }>("GET", "/api/books"),
     create: (body: { slug: string; title: string; authors: string[]; year: number | null; has_tracks: boolean }) =>
       req<{ ok: boolean; slug: string }>("POST", "/api/books", body),
+    delete: (slug: string) =>
+      req<{ ok: boolean; slug: string }>("DELETE", `/api/books/${encodeURIComponent(slug)}`),
     sections: (slug: string) =>
       req<{ book: BookFrontmatter; sections: { id: string; frontmatter: BookSectionFrontmatter }[] }>(
         "GET",

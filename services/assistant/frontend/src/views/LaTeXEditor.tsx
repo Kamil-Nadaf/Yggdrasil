@@ -29,6 +29,27 @@ import { downloadBlobUrl, downloadBase64 } from "../lib/download";
 const LATEX_LANG = StreamLanguage.define(stex);
 
 const DEFAULT_TEMPLATE = LATEX_TEMPLATES[0];
+const LATEX_TEMPLATE_SETTINGS_KEY = "yggdrasil:latex-template-settings";
+
+type CustomLatexTemplate = LatexTemplate & { custom: true };
+
+function loadTemplateSettings(): { hidden: string[]; custom: CustomLatexTemplate[]; defaultId?: string } {
+  try {
+    const raw = localStorage.getItem(LATEX_TEMPLATE_SETTINGS_KEY);
+    if (!raw) return { hidden: [], custom: [] };
+    const parsed = JSON.parse(raw) as { hidden?: unknown; custom?: unknown; defaultId?: unknown };
+    return {
+      hidden: Array.isArray(parsed.hidden) ? parsed.hidden.filter((id): id is string => typeof id === "string") : [],
+      custom: Array.isArray(parsed.custom) ? parsed.custom.filter((item): item is CustomLatexTemplate => (
+        Boolean(item) && typeof item === "object" && typeof (item as CustomLatexTemplate).id === "string" &&
+        typeof (item as CustomLatexTemplate).label === "string" && typeof (item as CustomLatexTemplate).source === "string"
+      )) : [],
+      defaultId: typeof parsed.defaultId === "string" ? parsed.defaultId : undefined,
+    };
+  } catch {
+    return { hidden: [], custom: [] };
+  }
+}
 
 const NEW_FILE_SOURCE = `\\documentclass[11pt]{article}
 \\usepackage[utf8]{inputenc}
@@ -426,8 +447,63 @@ export default function LaTeXEditor() {
   } | null>(null);
   const [historyBusy, setHistoryBusy] = useState(false);
   const [historyMsg, setHistoryMsg] = useState<string | null>(null);
-  const sourceRef = useRef(DEFAULT_TEMPLATE.source);
+  const [templateSettings, setTemplateSettings] = useState(loadTemplateSettings);
+  const [templateManagerOpen, setTemplateManagerOpen] = useState(false);
+  const [customTemplateLabel, setCustomTemplateLabel] = useState("");
+  const [customTemplateFilename, setCustomTemplateFilename] = useState("");
+  const [customTemplateSource, setCustomTemplateSource] = useState("");
+  const sourceRef = useRef("");
   const editorVisible = viewMode !== "pdf";
+  const availableTemplates = [
+    ...LATEX_TEMPLATES.filter((tpl) => !templateSettings.hidden.includes(tpl.id)),
+    ...templateSettings.custom,
+  ];
+  const defaultTemplate = availableTemplates.find((tpl) => tpl.id === templateSettings.defaultId)
+    || availableTemplates[0]
+    || DEFAULT_TEMPLATE;
+  if (!sourceRef.current) sourceRef.current = defaultTemplate.source;
+
+  function persistTemplateSettings(next: typeof templateSettings) {
+    setTemplateSettings(next);
+    localStorage.setItem(LATEX_TEMPLATE_SETTINGS_KEY, JSON.stringify(next));
+  }
+
+  function hideTemplate(id: string) {
+    if (id === defaultTemplate.id) return;
+    persistTemplateSettings({ ...templateSettings, hidden: [...new Set([...templateSettings.hidden, id])] });
+  }
+
+  function setDefaultTemplate(id: string) {
+    persistTemplateSettings({
+      ...templateSettings,
+      defaultId: id,
+      hidden: templateSettings.hidden.filter((hiddenId) => hiddenId !== id),
+    });
+  }
+
+  function restoreTemplate(id: string) {
+    persistTemplateSettings({ ...templateSettings, hidden: templateSettings.hidden.filter((hiddenId) => hiddenId !== id) });
+  }
+
+  function addCustomTemplate() {
+    const label = customTemplateLabel.trim();
+    const source = customTemplateSource.trim();
+    if (!label || !source) return;
+    const id = `custom-${Date.now()}`;
+    const custom: CustomLatexTemplate = {
+      id,
+      label,
+      description: "User template",
+      filename: customTemplateFilename.trim() || "custom-template",
+      source,
+      custom: true,
+    };
+    persistTemplateSettings({ ...templateSettings, custom: [...templateSettings.custom, custom] });
+    setCustomTemplateLabel("");
+    setCustomTemplateFilename("");
+    setCustomTemplateSource("");
+    setTemplateManagerOpen(false);
+  }
 
   function clearPdfUrl() {
     if (pdfObjectUrlRef.current) {
@@ -728,7 +804,7 @@ export default function LaTeXEditor() {
     setErrors([]);
     if (!name) {
       setFilename(todayFilename());
-      setSource(DEFAULT_TEMPLATE.source, { recordHistory: false });
+      setSource(defaultTemplate.source, { recordHistory: false });
       setDirty(false);
       return;
     }
@@ -1221,7 +1297,7 @@ export default function LaTeXEditor() {
         }
         canDownloadPdf={Boolean(pdfUrl)}
         canDownloadSource={Boolean(filename.trim() || selected)}
-        templates={LATEX_TEMPLATES.map((t) => ({ id: t.id, label: t.label }))}
+        templates={availableTemplates.map((t) => ({ id: t.id, label: t.label }))}
         onCompile={handleCompile}
         onSave={handleSave}
         onNewFile={handleNewFile}
@@ -1240,9 +1316,10 @@ export default function LaTeXEditor() {
         onViewMode={changeViewMode}
         onToggleFiles={() => setFilesOpen(filesCollapsed)}
         onTemplate={(id) => {
-          const tpl = LATEX_TEMPLATES.find((t) => t.id === id);
+          const tpl = availableTemplates.find((t) => t.id === id);
           if (tpl) applyTemplate(tpl);
         }}
+        onManageTemplates={() => setTemplateManagerOpen(true)}
         onHistoryRefresh={refreshHistory}
         onHistorySync={syncHistory}
         historyStatus={historyStatus}
@@ -1311,6 +1388,86 @@ export default function LaTeXEditor() {
           else void createFolderFromPrompt(v);
         }}
       />
+
+      {templateManagerOpen && (
+        <div className="latex-template-modal-backdrop" onClick={() => setTemplateManagerOpen(false)}>
+          <div className="card latex-template-modal" onClick={(event) => event.stopPropagation()}>
+            <h2 style={{ marginTop: 0 }}>Manage templates</h2>
+            <div className="muted" style={{ marginBottom: 12 }}>
+              Hide built-in templates that do not compile, or save your own source for later use.
+            </div>
+            <div className="latex-template-list">
+              {LATEX_TEMPLATES.map((tpl) => {
+                const hidden = templateSettings.hidden.includes(tpl.id);
+                const isDefault = tpl.id === defaultTemplate.id;
+                return (
+                  <div className="latex-template-row" key={tpl.id}>
+                    <span>{tpl.label}</span>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <button type="button" className="btn" disabled={isDefault || hidden} onClick={() => setDefaultTemplate(tpl.id)}>
+                        {isDefault ? "Default" : "Make default"}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={isDefault}
+                        onClick={() => {
+                          if (hidden) {
+                            restoreTemplate(tpl.id);
+                          } else if (window.confirm(`Delete the ${tpl.label} template? You can restore it later.`)) {
+                            hideTemplate(tpl.id);
+                          }
+                        }}
+                      >
+                        {hidden ? "Restore" : "Delete"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+              {templateSettings.custom.map((tpl) => (
+                <div className="latex-template-row" key={tpl.id}>
+                  <span>{tpl.label} <span className="muted mono">custom</span></span>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button type="button" className="btn" disabled={tpl.id === defaultTemplate.id} onClick={() => setDefaultTemplate(tpl.id)}>
+                      {tpl.id === defaultTemplate.id ? "Default" : "Make default"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={tpl.id === defaultTemplate.id}
+                      onClick={() => persistTemplateSettings({
+                        ...templateSettings,
+                        custom: templateSettings.custom.filter((item) => item.id !== tpl.id),
+                      })}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="latex-template-form">
+              <div className="slot-label">Add custom template</div>
+              <input value={customTemplateLabel} onChange={(event) => setCustomTemplateLabel(event.target.value)} placeholder="Template name" />
+              <input value={customTemplateFilename} onChange={(event) => setCustomTemplateFilename(event.target.value)} placeholder="Default filename (optional)" />
+              <textarea
+                value={customTemplateSource}
+                onChange={(event) => setCustomTemplateSource(event.target.value)}
+                placeholder="Paste your complete .tex source here"
+                rows={8}
+                className="mono"
+              />
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="button" className="btn btn-primary" disabled={!customTemplateLabel.trim() || !customTemplateSource.trim()} onClick={addCustomTemplate}>
+                  Add template
+                </button>
+                <button type="button" className="btn" onClick={() => setTemplateManagerOpen(false)}>Close</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <input
         ref={fileInputRef}

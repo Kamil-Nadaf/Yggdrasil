@@ -222,6 +222,22 @@ export default function BooksTab() {
     }
   }
 
+  async function handleDeleteBook() {
+    if (!slug || !bookFm) return;
+    const title = String(bookFm.title || slug);
+    if (!window.confirm(`Delete “${title}” and all of its sections? This cannot be undone.`)) return;
+    try {
+      await api.books.delete(slug);
+      setBookFm(null);
+      setSections([]);
+      setSelectedId(null);
+      await loadBooks();
+      flash(`Deleted ${title}`);
+    } catch (e) {
+      flash(e instanceof Error ? e.message : "Could not delete book");
+    }
+  }
+
   async function handleCreateSection() {
     if (!slug) return;
     const id = sectionNoteId(nsChapter, nsSection);
@@ -298,6 +314,9 @@ export default function BooksTab() {
             </select>
             <button className="btn" type="button" onClick={() => setShowNewBook((v) => !v)}>
               New book
+            </button>
+            <button className="btn" type="button" disabled={!bookFm} onClick={handleDeleteBook} title="Delete this book">
+              Delete
             </button>
           </div>
 

@@ -55,6 +55,8 @@ Copy-Item -Recurse (Join-Path $Frontend "dist") (Join-Path $DistFrontendDir "dis
 Copy-Item (JP $LatexSrc @("latex_service.py")) $DistLatex
 $AastexSrc = JP $LatexSrc @("aastex")
 if (Test-Path $AastexSrc) { Copy-Item -Recurse $AastexSrc (Join-Path $DistLatex "aastex") }
+$PostersSrc = JP $LatexSrc @("posters")
+if (Test-Path $PostersSrc) { Copy-Item -Recurse $PostersSrc (Join-Path $DistLatex "posters") }
 Copy-Item (JP $AssistantSrc @("requirements.txt")) (Join-Path $Dist "requirements.txt")
 Copy-Item (Join-Path $Root "LICENSE") (Join-Path $Dist "LICENSE")
 

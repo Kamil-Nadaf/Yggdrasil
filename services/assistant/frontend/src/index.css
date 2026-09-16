@@ -1616,6 +1616,49 @@ h2 { font-size: 15px; color: var(--accent); }
   background: #fff;
 }
 
+.latex-template-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.latex-template-modal {
+  width: min(680px, 100%);
+  max-height: min(760px, 90vh);
+  overflow: auto;
+}
+
+.latex-template-list {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 18px;
+}
+
+.latex-template-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.latex-template-form {
+  display: grid;
+  gap: 8px;
+}
+
+.latex-template-form textarea {
+  width: 100%;
+  min-height: 140px;
+  box-sizing: border-box;
+}
+
 .latex-error-log {
   background: rgba(248, 113, 113, 0.08);
   border-top: 1px solid var(--crit);

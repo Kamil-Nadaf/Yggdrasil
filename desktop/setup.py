@@ -139,6 +139,24 @@ def ensure_tinytex(progress: Progress) -> Path:
 
 ESSENTIAL_TEX_PACKAGES = (
     "latexmk",
+    "beamer",
+    "beamerposter",
+    "tikzposter",
+    "pgfplots",
+    "lipsum",
+    "fontawesome5",
+    "titlesec",
+    "tabularx",
+    "enumitem",
+    "eso-pic",
+    "bookmark",
+    "lastpage",
+    "changepage",
+    "paracol",
+    "needspace",
+    "charter",
+    "helvet",
+    "lmodern",
     "epsf",
     "graphics",
     "tools",
@@ -165,13 +183,22 @@ def ensure_tex_packages(progress: Progress) -> None:
         return
     progress("Adding LaTeX packages used by papers…")
     try:
-        subprocess.run(
+        result = subprocess.run(
             [str(tlmgr), "install", *ESSENTIAL_TEX_PACKAGES],
             check=False,
             capture_output=True,
             text=True,
             timeout=300,
         )
+        if result.returncode != 0:
+            subprocess.run([str(tlmgr), "init-usertree"], check=False, capture_output=True, text=True, timeout=120)
+            subprocess.run(
+                [str(tlmgr), "--usermode", "install", *ESSENTIAL_TEX_PACKAGES],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
     except Exception:
         progress("Some LaTeX packages can be added the first time you compile.")
 

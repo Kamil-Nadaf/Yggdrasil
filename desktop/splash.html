@@ -6,10 +6,10 @@
   <style>
     html, body { margin: 0; height: 100%; font-family: "IBM Plex Sans", system-ui, sans-serif; background: #f5f5f2; color: #1a1a1a; }
     .wrap { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px; box-sizing: border-box; }
-    h1 { font-family: "IBM Plex Serif", Georgia, serif; font-size: 28px; margin: 0 0 8px; }
+    h1 { font-family: "IBM Plex Serif", Georgia, serif; font-size: 34px; letter-spacing: 0.01em; margin: 0 0 18px; }
     p { margin: 0 0 20px; color: #5a5a5a; text-align: center; max-width: 440px; line-height: 1.5; }
-    .status { min-height: 1.4em; font-size: 14px; color: #3a322c; }
-    .bar { width: 320px; height: 6px; background: #d9d6d1; overflow: hidden; margin-top: 16px; }
+    .status { min-height: 1.4em; font-size: 14px; color: #3a322c; text-align: center; }
+    .bar { width: 320px; height: 5px; background: #d9d6d1; overflow: hidden; margin: 14px auto 0; }
     .bar span { display: block; width: 40%; height: 100%; background: #1a1a1a; animation: slide 1.2s ease-in-out infinite; }
     .err { color: #b5544a; white-space: pre-wrap; max-width: 460px; text-align: center; }
     .panel { display: none; width: 100%; max-width: 440px; text-align: left; }
@@ -28,8 +28,8 @@
     <h1>Yggdrasil</h1>
 
     <div id="boot" class="panel on">
-      <p>Setting up reading tools. This happens once, then the app opens by itself.</p>
-      <div class="status" id="status">Starting…</div>
+      <p>Installing</p>
+      <div class="status" id="status">Preparing Yggdrasil…</div>
       <div class="bar" id="bar"><span></span></div>
       <div class="err" id="err"></div>
     </div>

@@ -793,6 +793,16 @@ async def create_book(payload: BookCreate):
     return {"ok": True, "slug": slug}
 
 
+@app.delete("/api/books/{slug}")
+async def delete_book(slug: str):
+    folder = book_dir(slug)
+    book_path = folder / "_book.md"
+    if not book_path.is_file():
+        raise HTTPException(status_code=404, detail="Book not found")
+    shutil.rmtree(folder)
+    return {"ok": True, "slug": slug}
+
+
 @app.get("/api/books/{slug}/sections")
 async def list_book_sections(slug: str):
     path = book_md_path(slug)
@@ -1136,6 +1146,7 @@ async def ask(payload: AskQuery):
             blob = " ".join(
                 [
                     str(fm.get("title", "")),
+                    str(fm.get("abstract", "")),
                     *[str(fm.get(k, "")) for k in current_analysis_keys()],
                     post.content or "",
                 ]
@@ -1152,12 +1163,22 @@ async def ask(payload: AskQuery):
         else:
             results = hits
 
+    paper_abstracts = {
+        paper["citekey"]: str(paper["frontmatter"].get("abstract") or "").strip()
+        for paper in all_papers()
+    }
+    for result in results:
+        abstract = paper_abstracts.get(result.get("citekey", ""))
+        if abstract and abstract.lower() not in result["chunk"].lower():
+            result["chunk"] = f"{result['chunk']}\n\nPaper abstract:\n{abstract}"
+
     context = "\n\n---\n\n".join(
         f"[{r['citekey']}]: {r['chunk']}" for r in results
     )
     prompt = (
         "You are a research assistant. Answer the question using ONLY the "
-        "provided excerpts from the researcher's own reading notes. "
+        "provided excerpts from the researcher's own reading notes and the "
+        "papers' abstracts. "
         "Cite the citekey when quoting. If the excerpts don't contain the "
         "answer, say so — do not use outside knowledge.\n\n"
         f"QUESTION: {payload.question}\n\n"
@@ -3525,6 +3546,7 @@ async def search_notes(q: str, limit: int = 30):
         fm = post.metadata
         haystack_parts = [
             str(fm.get("title", "")),
+            str(fm.get("abstract", "")),
             " ".join(fm.get("tags") or []),
             " ".join(fm.get("authors") or []),
             *[str(fm.get(k, "")) for k in current_analysis_keys()],

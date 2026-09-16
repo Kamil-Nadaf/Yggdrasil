@@ -170,6 +170,7 @@ def index_file(path: Path, table):
     slot_bits = [str(fm.get(k, "")) for k in current_analysis_keys()]
     meta_text = " ".join(filter(None, [
         str(fm.get("title", "")),
+        str(fm.get("abstract", "")),
         *slot_bits,
         str(fm.get("explain_cold", "")),
         str(fm.get("sanity_check", "")),

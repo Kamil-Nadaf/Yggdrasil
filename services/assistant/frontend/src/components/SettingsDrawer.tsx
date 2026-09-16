@@ -555,6 +555,7 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
       body: JSON.stringify({ latexDir: path, userAccount: settings.userAccount }),
     });
     const data = (await resp.json().catch(() => ({}))) as SettingsSaveResult;
+    const pathChanged = Boolean(data.vaultPath && data.vaultPath !== info.vaultPath);
     if (data.vaultPath) {
       handleSettingChange("latexDir", data.vaultPath);
       setInfo((prev) => ({
@@ -563,7 +564,7 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
         dataPathChosen: data.ok !== false,
       }));
     }
-    if (data.ok !== false && (info.desktop || data.desktop)) {
+    if (pathChanged && data.ok !== false && (info.desktop || data.desktop)) {
       onDataPathSaved?.();
     }
     return data;

@@ -47,6 +47,7 @@ export function LatexMenuBar({
   onViewMode,
   onToggleFiles,
   onTemplate,
+  onManageTemplates,
   onHistoryRefresh,
   onHistorySync,
   historyStatus,
@@ -88,6 +89,7 @@ export function LatexMenuBar({
   onViewMode: (mode: LatexViewMode) => void;
   onToggleFiles: () => void;
   onTemplate: (id: string) => void;
+  onManageTemplates: () => void;
   onHistoryRefresh: () => void;
   onHistorySync: () => void;
   historyStatus: {
@@ -218,11 +220,15 @@ export function LatexMenuBar({
     { type: "item", label: "Subsubsection", onClick: () => onTool("subsubsection") },
   ];
 
-  const templateItems: MenuItem[] = templates.map((t) => ({
-    type: "item" as const,
-    label: t.label,
-    onClick: () => onTemplate(t.id),
-  }));
+  const templateItems: MenuItem[] = [
+    ...templates.map((t) => ({
+      type: "item" as const,
+      label: t.label,
+      onClick: () => onTemplate(t.id),
+    })),
+    { type: "sep" as const },
+    { type: "item" as const, label: "Manage templates…", onClick: onManageTemplates },
+  ];
 
   const historyPanel = (
     <div className="latex-history-panel">

@@ -35,6 +35,10 @@ def marker_path() -> Path:
     return support_dir() / "setup-complete.json"
 
 
+def packages_marker_path() -> Path:
+    return support_dir() / "tex-packages-installed.json"
+
+
 def tex_bin_dir() -> Path | None:
     roots = [
         Path("/Library/TeX/texbin"),
@@ -172,6 +176,8 @@ ESSENTIAL_TEX_PACKAGES = (
 
 
 def ensure_tex_packages(progress: Progress) -> None:
+    if packages_marker_path().exists():
+        return
     tex = tex_bin_dir()
     if not tex:
         return
@@ -201,6 +207,11 @@ def ensure_tex_packages(progress: Progress) -> None:
             )
     except Exception:
         progress("Some LaTeX packages can be added the first time you compile.")
+        return
+    try:
+        packages_marker_path().write_text("{}")
+    except Exception:
+        pass
 
 
 def ensure_aastex(progress: Progress, bundle: Path) -> None:

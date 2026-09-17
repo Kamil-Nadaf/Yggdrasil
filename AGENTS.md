@@ -45,8 +45,8 @@ A browser-based reading tool with **eight views**, navigated via a horizontal to
 | View (nav label) | Internal id | Purpose |
 |---|---|---|
 | **Dashboard** | `scores` | Habit check-in + GitHub-style heatmap + one progress bar per active main task (default landing view) |
-| **Daily ArXiv** | `search` | 3-panel Overleaf-style workflow: Daily Papers → Shortlisted → My List (reading pane), resizable via `react-resizable-panels` |
-| **Search** | `browse` | Direct arXiv search (keyword / author / title / arXiv ID-URL fields, paginated) without leaving the app; supports the same select-text→CERIC toolbar as Daily ArXiv |
+| **Daily Archive** | `search` | 3-panel Overleaf-style workflow: Daily Papers → Shortlisted → My List (reading pane), resizable via `react-resizable-panels` |
+| **Search** | `browse` | Direct arXiv search (keyword / author / title / arXiv ID-URL fields, paginated) without leaving the app; supports the same select-text→CERIC toolbar as Daily Archive |
 | **Notes** | `editor` | Fill 5 active-reading slots + Adversarial Question for a single paper; has an internal **Collection** tab listing all papers with filters + progress bars |
 | **Tasks** | `tasks` | Project → main task → subtask tree, collapsible per project (pinned "Daily Habits" first) + Kanban (To Do / Done, keyed off subtask `done`) via `@dnd-kit/core`; vault `80-Tasks/` |
 | **Graph** | `graph` | D3 force-directed graph of [[wikilink]] connections between notes |
@@ -114,7 +114,7 @@ yggdrasil/
                 │                                and Data Sync (Cloud/WebDAV) sections
                 └── views/
                     ├── ScoresView.tsx     (Dashboard)
-                    ├── ArxivSearch.tsx    (Daily ArXiv — 3-panel)
+                    ├── ArxivSearch.tsx    (Daily Archive — 3-panel)
                     ├── ArxivBrowser.tsx   (Search)
                     ├── Triage.tsx
                     ├── CERICEditor.tsx    (Editor + Collection tab)
@@ -614,7 +614,7 @@ project name, "x/y subtasks" if any) — drag between columns via
 `@dnd-kit/core`, writing `main_task.status`, the exact field the List
 view's pill reads/writes.
 
-### Daily ArXiv view (`ArxivSearch.tsx`, nav id `search`)
+### Daily Archive view (`ArxivSearch.tsx`, nav id `search`)
 
 3-panel resizable layout (`react-resizable-panels`, sizes persisted to
 `localStorage("yggdrasil:panel-sizes")`):
@@ -646,7 +646,7 @@ every paper by Bin-Bin Zhang" actually works, instead of a fuzzy 50-result cap. 
 `start`/`max_results` (hidden for the `id` field, since it's always exactly one
 result). Each result: category badge, title, up to 3 authors + "+N more" toggle,
 a 2-line clamped abstract preview with a "show full abstract" expand, and — same as
-Daily ArXiv — select any text to get the `[C][E][R][I][C]` toolbar via the shared
+Daily Archive — select any text to get the `[C][E][R][I][C]` toolbar via the shared
 `CericToolbar.tsx` hook. Actions: `↗ Open PDF` / `↗ Open arXiv` / `+ Add to Zotero`.
 Header (title, field tabs, search bar, result count) is centered; results render in
 a responsive CSS grid that fills the full window width, not a fixed-width column.
@@ -694,7 +694,7 @@ excerpt. Examine panel shown only when a gate-open paper is selected.
 ### LaTeX view (`LaTeXEditor.tsx`)
 
 3-pane resizable layout (file tree / CodeMirror editor / PDF preview), same
-`react-resizable-panels` pattern as Daily ArXiv. CodeMirror 6 with
+`react-resizable-panels` pattern as Daily Archive. CodeMirror 6 with
 `@codemirror/legacy-modes`' `stex` mode via `StreamLanguage` for LaTeX syntax
 highlighting. Toolbar: file picker, filename input, Save, Compile, Delete. Editor
 shows a `Line N, Col N` status bar. Preview pane shows the compiled PDF (base64 →

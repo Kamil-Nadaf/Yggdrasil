@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 import AbstractText from "../components/AbstractText";
 import { getActiveProviderPayload } from "../lib/aiProvider";
+import { resolveFont, DEFAULT_TITLE_FONT } from "../lib/fonts";
+import { loadLokiBrand, LOKI_BRAND_EVENT, type LokiBrand } from "../lib/lokiBrand";
 import {
   loadLokiState,
   saveLokiState,
@@ -22,6 +24,30 @@ const SKILLS: { id: LokiSkill; label: string; hint: string }[] = [
   { id: "neighbors", label: "Neighbors", hint: "Graph links with reasons" },
 ];
 
+function LokiTitle({
+  brand,
+  logoUrl,
+  className,
+  sized,
+}: {
+  brand: LokiBrand;
+  logoUrl: string | null;
+  className?: string;
+  /** Use the configured hero size (title font / logo height). Omit for a small, fixed nav-sized rendering. */
+  sized?: boolean;
+}) {
+  if (brand.titleMode === "logo" && logoUrl) {
+    const h = sized ? brand.logoHeight : Math.min(brand.logoHeight, 28);
+    return <img src={logoUrl} alt={brand.name} className={className} style={{ height: h, maxHeight: h, display: "block" }} />;
+  }
+  const fontSize = sized ? brand.fontSize : Math.min(brand.fontSize, 20);
+  return (
+    <span className={className} style={{ fontFamily: resolveFont(brand.fontId, DEFAULT_TITLE_FONT).stack, fontSize }}>
+      {brand.name}
+    </span>
+  );
+}
+
 function persist(next: LokiState) {
   saveLokiState(next);
   return next;
@@ -33,7 +59,21 @@ export default function AskView() {
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(false);
   const [projectName, setProjectName] = useState("");
+  const [brand, setBrand] = useState<LokiBrand>(() => loadLokiBrand());
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const threadRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function refreshBrand() {
+      setBrand(loadLokiBrand());
+      api.uploads.lokiLogo.get()
+        .then((r) => setLogoUrl(r.url ? `${r.url}?t=${Date.now()}` : null))
+        .catch(() => setLogoUrl(null));
+    }
+    refreshBrand();
+    window.addEventListener(LOKI_BRAND_EVENT, refreshBrand);
+    return () => window.removeEventListener(LOKI_BRAND_EVENT, refreshBrand);
+  }, []);
 
   const active = state.chats.find((c) => c.id === state.activeChatId) || null;
 
@@ -175,7 +215,7 @@ export default function AskView() {
       <aside className="loki-sidebar">
         <div className="loki-sidebar-top">
           <div className="loki-brand">
-            <div className="loki-brand-name">Loki</div>
+            <LokiTitle brand={brand} logoUrl={logoUrl} className="loki-brand-name" />
             <div className="loki-brand-sub muted">Master of your notes</div>
           </div>
           <button type="button" className="btn btn-primary loki-new" onClick={() => startChat(null)}>
@@ -244,8 +284,8 @@ export default function AskView() {
       <section className="loki-main">
         {empty ? (
           <div className="loki-hero">
-            <h1>Loki</h1>
-            <p className="muted">Ask your notes. Loki only answers from what you have written.</p>
+            <h1><LokiTitle brand={brand} logoUrl={logoUrl} sized /></h1>
+            <p className="muted">Ask your notes. {brand.name} only answers from what you have written.</p>
             <Composer
               draft={draft}
               setDraft={setDraft}
@@ -253,6 +293,7 @@ export default function AskView() {
               setSkill={setSkill}
               loading={loading}
               onSend={send}
+              assistantName={brand.name}
               wide
             />
           </div>
@@ -262,7 +303,7 @@ export default function AskView() {
               {active!.messages.map((msg) => (
                 <article key={msg.id} className={`loki-msg loki-msg--${msg.role}`}>
                   <div className="loki-msg-role mono">
-                    {msg.role === "user" ? "You" : "Loki"}
+                    {msg.role === "user" ? "You" : brand.name}
                     {msg.skill && msg.role === "assistant" ? ` · ${SKILLS.find((s) => s.id === msg.skill)?.label}` : ""}
                   </div>
                   <div className="loki-msg-body">
@@ -283,7 +324,7 @@ export default function AskView() {
                   </div>
                 </article>
               ))}
-              {loading && <div className="muted loki-thinking">Loki is reading your notes…</div>}
+              {loading && <div className="muted loki-thinking">{brand.name} is reading your notes…</div>}
             </div>
             <Composer
               draft={draft}
@@ -292,6 +333,7 @@ export default function AskView() {
               setSkill={setSkill}
               loading={loading}
               onSend={send}
+              assistantName={brand.name}
             />
           </>
         )}
@@ -307,6 +349,7 @@ function Composer({
   setSkill,
   loading,
   onSend,
+  assistantName,
   wide,
 }: {
   draft: string;
@@ -315,6 +358,7 @@ function Composer({
   setSkill: (s: LokiSkill) => void;
   loading: boolean;
   onSend: () => void;
+  assistantName: string;
   wide?: boolean;
 }) {
   return (
@@ -344,7 +388,7 @@ function Composer({
           }}
           placeholder={
             skill === "ask"
-              ? "Ask Loki about your notes…"
+              ? `Ask ${assistantName} about your notes…`
               : skill === "search"
                 ? "Search titles, tags, analysis slots…"
                 : skill === "neighbors"

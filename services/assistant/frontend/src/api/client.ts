@@ -19,6 +19,20 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
   return resp.json();
 }
 
+async function upload<T>(method: string, path: string, file: File): Promise<T> {
+  const form = new FormData();
+  form.append("file", file);
+  const resp = await fetch(BASE + path, { method, body: form });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+    const detail = Array.isArray(err.detail)
+      ? err.detail.map((d: { msg?: string } | string) => (typeof d === "string" ? d : d.msg || JSON.stringify(d))).join("; ")
+      : err.detail;
+    throw new Error(detail || "Upload failed");
+  }
+  return resp.json();
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────
 
 export interface PaperFrontmatter {
@@ -161,6 +175,8 @@ export interface ArxivPaper {
   pdf_url: string;
   categories: string[];
   submitted: string;
+  source?: string;
+  doi?: string;
 }
 
 export interface ArxivSearchResult {
@@ -170,6 +186,7 @@ export interface ArxivSearchResult {
 }
 
 export type ArxivSearchField = "all" | "author" | "title" | "id";
+export type AcademicSearchSource = "all" | "openalex" | "arxiv" | "europepmc";
 
 export interface ZoteroAddResult {
   status: "ok" | "error";
@@ -300,6 +317,25 @@ export const api = {
     req<{ note: string; neighbors: GraphNeighbor[] }>("POST", "/api/graph/neighbors", { note, limit }),
   graphRebuild: () =>
     req<{ ok: boolean; notes?: number; edges_written?: number; message?: string }>("POST", "/api/graph/rebuild"),
+
+  clientPrefs: {
+    get: () => req<{ prefs: Record<string, string> }>("GET", "/api/settings/client-prefs"),
+    save: (prefs: Record<string, string>) =>
+      req<{ ok: boolean }>("POST", "/api/settings/client-prefs", { prefs }),
+  },
+
+  uploads: {
+    fonts: {
+      list: () => req<{ fonts: { filename: string; url: string }[] }>("GET", "/api/uploads/fonts"),
+      add: (file: File) => upload<{ ok: boolean; filename: string; url: string }>("POST", "/api/uploads/fonts", file),
+      remove: (filename: string) => req<{ ok: boolean }>("DELETE", `/api/uploads/fonts/${encodeURIComponent(filename)}`),
+    },
+    lokiLogo: {
+      get: () => req<{ url: string | null }>("GET", "/api/uploads/loki-logo"),
+      set: (file: File) => upload<{ ok: boolean; url: string }>("POST", "/api/uploads/loki-logo", file),
+      remove: () => req<{ ok: boolean }>("DELETE", "/api/uploads/loki-logo"),
+    },
+  },
 
   analysisTags: {
     get: () =>
@@ -489,15 +525,15 @@ export const api = {
 
   arxiv: {
     topics: () => req<{ topics: { id: string; label: string; group?: string }[] }>("GET", "/api/arxiv/topics"),
-    daily: (max = 200, cat = "astro-ph.HE", refresh = false) =>
-      req<{ papers: ArxivPaper[]; cat: string; cached: boolean; warning?: string | null }>(
+    daily: (max = 200, cat = "astro-ph.HE", refresh = false, date?: string) =>
+      req<{ papers: ArxivPaper[]; cat: string; date: string | null; cached: boolean; warning?: string | null }>(
         "GET",
-        `/api/arxiv/daily?max=${max}&cat=${encodeURIComponent(cat)}&refresh=${refresh ? "true" : "false"}`
+        `/api/arxiv/daily?max=${max}&cat=${encodeURIComponent(cat)}&refresh=${refresh ? "true" : "false"}${date ? `&date=${encodeURIComponent(date)}` : ""}`
       ),
-    search: (q: string, field: ArxivSearchField = "all", start = 0, maxResults = 50) =>
+    search: (q: string, field: ArxivSearchField = "all", start = 0, maxResults = 50, source: AcademicSearchSource = "all") =>
       req<ArxivSearchResult>(
         "GET",
-        `/api/arxiv/search?q=${encodeURIComponent(q)}&field=${field}&start=${start}&max_results=${maxResults}`
+        `/api/arxiv/search?q=${encodeURIComponent(q)}&field=${field}&start=${start}&max_results=${maxResults}&source=${source}`
       ),
   },
 

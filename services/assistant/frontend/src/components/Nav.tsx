@@ -2,7 +2,7 @@ import type { View } from "../App";
 
 const ITEMS: { id: View; label: string }[] = [
   { id: "scores", label: "Dashboard" },
-  { id: "search", label: "Daily ArXiv" },
+  { id: "search", label: "Daily Archive" },
   { id: "browse", label: "Search" },
   { id: "editor", label: "Notes" },
   { id: "tasks", label: "Tasks" },

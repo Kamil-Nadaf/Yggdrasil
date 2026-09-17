@@ -75,7 +75,7 @@ import frontmatter
 import httpx
 import lancedb
 import pyarrow as pa
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -107,7 +107,14 @@ from task_statuses import (
     load_task_statuses,
 )
 from goals import load_goals, normalize_goals
-from arxiv_topics import ARXIV_TOPICS, is_valid_category, normalize_category, search_query_for
+from arxiv_topics import (
+    ARXIV_TOPICS,
+    is_valid_category,
+    normalize_category,
+    search_query_for,
+    is_openalex_topic,
+    get_topic_search_query,
+)
 from graph_links import (
     DEFAULT_SIMILARITY_THRESHOLD,
     cosine,
@@ -1618,6 +1625,169 @@ def _clean_arxiv_abstract(raw: str) -> str:
     return text.strip()
 
 
+def _invert_openalex_abstract(inverted_index: dict | None) -> str:
+    if not inverted_index or not isinstance(inverted_index, dict):
+        return ""
+    try:
+        max_idx = max((pos for positions in inverted_index.values() for pos in positions), default=-1)
+        if max_idx < 0:
+            return ""
+        words = [""] * (max_idx + 1)
+        for word, positions in inverted_index.items():
+            for p in positions:
+                if 0 <= p <= max_idx:
+                    words[p] = word
+        return " ".join(words).strip()
+    except Exception:
+        return ""
+
+
+def _openalex_work_to_paper(work: dict) -> dict:
+    raw_id = (work.get("id") or "").replace("https://openalex.org/", "")
+    doi = (work.get("doi") or "").replace("https://doi.org/", "")
+
+    authors = []
+    for authorship in work.get("authorships") or []:
+        author_name = (authorship.get("author") or {}).get("display_name")
+        if author_name:
+            authors.append(author_name)
+
+    abstract = _invert_openalex_abstract(work.get("abstract_inverted_index"))
+
+    categories = []
+    for concept in work.get("concepts") or []:
+        cname = concept.get("display_name")
+        if cname and cname not in categories:
+            categories.append(cname)
+
+    best_oa = work.get("best_oa_location") or {}
+    primary_loc = work.get("primary_location") or {}
+    open_access = work.get("open_access") or {}
+
+    pdf_url = best_oa.get("pdf_url") or primary_loc.get("pdf_url") or open_access.get("oa_url") or ""
+    landing_url = work.get("doi") or best_oa.get("landing_page_url") or primary_loc.get("landing_page_url") or work.get("id") or ""
+
+    paper_id = doi if doi else raw_id
+    submitted = work.get("publication_date") or str(work.get("publication_year") or "")
+
+    return {
+        "id": paper_id,
+        "title": re.sub(r"\s+", " ", work.get("title") or "").strip(),
+        "authors": authors,
+        "abstract": abstract,
+        "arxiv_url": landing_url,
+        "pdf_url": pdf_url,
+        "categories": categories[:6],
+        "submitted": submitted,
+        "source": "openalex",
+        "doi": doi,
+    }
+
+
+async def _fetch_openalex_daily(topic_query: str, max_results: int = 50, target_date: Optional[str] = None) -> list[dict]:
+    headers = {"User-Agent": "Yggdrasil/1.0 (mailto:academic-reader@yggdrasil.local)"}
+    filters = ["open_access.is_oa:true"]
+    if target_date:
+        filters.append(f"from_publication_date:{target_date}")
+        filters.append(f"to_publication_date:{target_date}")
+    params = {
+        "search": topic_query,
+        "filter": ",".join(filters),
+        "sort": "publication_date:desc",
+        "per_page": min(max_results, 100),
+    }
+    async with httpx.AsyncClient(follow_redirects=True, timeout=25.0) as client:
+        try:
+            resp = await client.get("https://api.openalex.org/works", params=params, headers=headers)
+            if resp.status_code == 200:
+                data = resp.json()
+                results = data.get("results") or []
+                return [_openalex_work_to_paper(w) for w in results if w.get("title")]
+        except Exception as e:
+            logger.warning(f"OpenAlex daily fetch error: {e}")
+    return []
+
+
+async def _fetch_openalex_search(query: str, field: str = "all", start: int = 0, max_results: int = 50) -> tuple[list[dict], int]:
+    headers = {"User-Agent": "Yggdrasil/1.0 (mailto:academic-reader@yggdrasil.local)"}
+    page = (start // max_results) + 1 if max_results > 0 else 1
+    per_page = min(max_results, 100)
+
+    q = query.strip()
+    params: dict[str, Any] = {
+        "per_page": per_page,
+        "page": page,
+        "sort": "relevance_score:desc",
+    }
+    if field == "author":
+        params["filter"] = f"raw_author_name.search:{q}"
+    elif field == "title":
+        params["filter"] = f"title.search:{q}"
+    elif field == "id" or "/" in q or q.startswith("10."):
+        doi_clean = q.replace("https://doi.org/", "").replace("http://doi.org/", "")
+        params["filter"] = f"doi:{doi_clean}"
+    else:
+        params["search"] = q
+
+    async with httpx.AsyncClient(follow_redirects=True, timeout=25.0) as client:
+        try:
+            resp = await client.get("https://api.openalex.org/works", params=params, headers=headers)
+            if resp.status_code == 200:
+                data = resp.json()
+                meta = data.get("meta") or {}
+                total = meta.get("count", 0)
+                results = data.get("results") or []
+                papers = [_openalex_work_to_paper(w) for w in results if w.get("title")]
+                return papers, total
+        except Exception as e:
+            logger.warning(f"OpenAlex search error: {e}")
+    return [], 0
+
+
+async def _fetch_europepmc_search(query: str, start: int = 0, max_results: int = 50) -> tuple[list[dict], int]:
+    page = (start // max_results) + 1 if max_results > 0 else 1
+    params = {
+        "query": f"{query} (OPEN_ACCESS:Y)",
+        "format": "json",
+        "pageSize": min(max_results, 100),
+        "page": page,
+        "sort": "P_PD_D desc",
+    }
+    async with httpx.AsyncClient(follow_redirects=True, timeout=25.0) as client:
+        try:
+            resp = await client.get("https://www.ebi.ac.uk/europepmc/webservices/rest/search", params=params)
+            if resp.status_code == 200:
+                data = resp.json()
+                total = data.get("hitCount", 0)
+                result_list = data.get("resultList", {}).get("result", [])
+                papers = []
+                for item in result_list:
+                    doi = item.get("doi", "")
+                    title = item.get("title", "").rstrip(".")
+                    abstract = item.get("abstractText", "")
+                    author_str = item.get("authorString", "")
+                    authors = [a.strip() for a in author_str.split(",") if a.strip()]
+                    pmcid = item.get("pmcid", "")
+                    pdf_url = f"https://europepmc.org/backend/ptpmcrender.fcgi?accid={pmcid}&blobtype=pdf" if pmcid else ""
+                    landing_url = f"https://europepmc.org/article/MED/{item.get('id')}" if item.get("id") else (f"https://doi.org/{doi}" if doi else "")
+                    papers.append({
+                        "id": doi or item.get("id") or item.get("pmcid") or "",
+                        "title": re.sub(r"\s+", " ", title).strip(),
+                        "authors": authors,
+                        "abstract": re.sub(r"\s+", " ", abstract).strip(),
+                        "arxiv_url": landing_url,
+                        "pdf_url": pdf_url,
+                        "categories": ["Europe PMC", "Open Access"],
+                        "submitted": str(item.get("pubYear", "")),
+                        "source": "europepmc",
+                        "doi": doi,
+                    })
+                return papers, total
+        except Exception as e:
+            logger.warning(f"Europe PMC search error: {e}")
+    return [], 0
+
+
 def _paper_from_ids(arxiv_id: str, title: str, authors: list[str], abstract: str, categories: list[str], submitted: str) -> dict:
     aid = (arxiv_id or "").split("v")[0] if arxiv_id else ""
     # keep version in id if present — frontend uses paper.id as citekey
@@ -1631,6 +1801,8 @@ def _paper_from_ids(arxiv_id: str, title: str, authors: list[str], abstract: str
         "pdf_url": f"https://arxiv.org/pdf/{full_id}" if full_id else "",
         "categories": categories,
         "submitted": submitted or "",
+        "source": "arxiv",
+        "doi": "",
     }
 
 
@@ -1732,7 +1904,42 @@ async def _fetch_arxiv_rss(cat: str) -> list[dict]:
     return []
 
 
-async def _fetch_daily_papers(category: str, max_results: int) -> list[dict]:
+ALL_FIELD_ARXIV_CATS = (
+    "physics.*", "math.*", "cs.*", "astro-ph.*", "cond-mat.*", "q-bio.*",
+    "q-fin.*", "stat.*", "eess.*", "econ.*", "hep-th", "hep-ph", "quant-ph", "gr-qc",
+)
+
+
+def _arxiv_date_range(target_date: str) -> str:
+    """arXiv submittedDate range for one calendar day, e.g. [20260917000000 TO 20260917235959]."""
+    d = target_date.replace("-", "")
+    return f"[{d}000000 TO {d}235959]"
+
+
+async def _fetch_daily_papers(category: str, max_results: int, target_date: Optional[str] = None) -> list[dict]:
+    if is_openalex_topic(category):
+        topic_query = get_topic_search_query(category)
+        papers = await _fetch_openalex_daily(topic_query, max_results, target_date)
+        if papers:
+            return papers
+
+    if target_date:
+        # A specific date is authoritative only via the search API — the RSS feed only
+        # ever reflects arXiv's latest "recent" announcement batch, not an arbitrary day.
+        if category == "all":
+            cat_query = "(" + " OR ".join(f"cat:{c}" for c in ALL_FIELD_ARXIV_CATS) + ")"
+        else:
+            cat_query = search_query_for(category)
+        papers, _total = await _fetch_arxiv(
+            {
+                "search_query": f"{cat_query} AND submittedDate:{_arxiv_date_range(target_date)}",
+                "sortBy": "submittedDate",
+                "sortOrder": "descending",
+                "max_results": max_results,
+            }
+        )
+        return papers
+
     if category == "all":
         chunks = await asyncio.gather(*[_fetch_arxiv_rss(c) for c in ALL_FIELD_FEEDS], return_exceptions=True)
         merged: list[dict] = []
@@ -1770,33 +1977,33 @@ async def _fetch_arxiv(params: dict) -> tuple[list[dict], int]:
     """
     last_exc: Exception | None = None
     last_kind = "network"
+    # Bounded to ~35s worst case (2 attempts × 15s timeout + backoff) — this is an
+    # interactive request from the UI, so a fast, clear failure beats a long hang.
     async with httpx.AsyncClient(follow_redirects=True) as client:
-        for attempt in range(3):
+        for attempt in range(2):
             try:
                 resp = await client.get(
                     "https://export.arxiv.org/api/query",
                     params=params,
-                    timeout=30.0,
+                    timeout=15.0,
                 )
                 if resp.status_code == 429:
                     last_kind = "rate_limit"
                     last_exc = httpx.HTTPStatusError("429", request=resp.request, response=resp)
-                    await asyncio.sleep(4.0 * (attempt + 1))
+                    await asyncio.sleep(3.0 * (attempt + 1))
                     continue
                 resp.raise_for_status()
                 return _parse_arxiv_atom(resp.text)
             except httpx.TimeoutException as e:
                 last_kind = "timeout"
                 last_exc = e
-                await asyncio.sleep(2.0)
+                await asyncio.sleep(1.0)
             except httpx.HTTPStatusError as e:
+                last_kind = "rate_limit" if getattr(e.response, "status_code", None) == 429 else "http"
                 last_exc = e
-                code = getattr(e.response, "status_code", None)
-                if code == 429:
-                    last_kind = "rate_limit"
-                    await asyncio.sleep(4.0 * (attempt + 1))
+                if getattr(e.response, "status_code", None) == 429:
+                    await asyncio.sleep(3.0 * (attempt + 1))
                     continue
-                last_kind = "http"
                 break
             except httpx.HTTPError as e:
                 last_kind = "network"
@@ -1821,34 +2028,38 @@ async def arxiv_topics():
 
 
 @app.get("/api/arxiv/daily")
-async def arxiv_daily(max: int = 200, cat: str = "astro-ph.HE", refresh: bool = False):
+async def arxiv_daily(max: int = 200, cat: str = "astro-ph.HE", refresh: bool = False, date: Optional[str] = None):
     """
-    Latest papers for an arXiv category (or all fields).
-    `refresh=true` bypasses the short in-memory cache (Update from web).
-    If a live refresh fails but we have a recent cache, return that with a warning
-    instead of an empty list.
+    Papers for an academic discipline or arXiv category, for a given calendar day.
+    `date` (YYYY-MM-DD) defaults to today; `refresh=true` bypasses the short in-memory cache.
     """
     max_results = min(max, 200)
     category = normalize_category(cat)
     if not is_valid_category(category):
-        raise HTTPException(status_code=400, detail=f"Invalid arXiv category: {cat}")
-    cache_key = f"{category}:{max_results}"
+        raise HTTPException(status_code=400, detail=f"Invalid topic/category: {cat}")
+    parsed_date = _parse_iso_date(date) if date else None
+    # "Today" keeps using the fast RSS/sorted-feed path (same as before date support was
+    # added) — the slow, rate-limit-prone arXiv search API is only worth paying for when
+    # the user deliberately picks a genuinely past date.
+    target_date = parsed_date if parsed_date and parsed_date != datetime.now().strftime("%Y-%m-%d") else None
+    cache_key = f"{category}:{max_results}:{target_date or 'latest'}"
     cached = _DAILY_CACHE.get(cache_key)
     if not refresh and cached and (time.time() - cached[0]) < _DAILY_CACHE_TTL:
-        return {"papers": cached[1], "cat": category, "cached": True, "warning": None}
+        return {"papers": cached[1], "cat": category, "date": target_date, "cached": True, "warning": None}
     try:
-        papers = await _fetch_daily_papers(category, max_results)
+        papers = await _fetch_daily_papers(category, max_results, target_date)
     except HTTPException as exc:
         if cached:
             return {
                 "papers": cached[1],
                 "cat": category,
+                "date": target_date,
                 "cached": True,
                 "warning": str(exc.detail),
             }
         raise
     _DAILY_CACHE[cache_key] = (time.time(), papers)
-    return {"papers": papers, "cat": category, "cached": False, "warning": None}
+    return {"papers": papers, "cat": category, "date": target_date, "cached": False, "warning": None}
 
 
 # New-style (Apr 2007+): 0704.0001 / 1501.00001 / 2401.12345v2
@@ -1867,46 +2078,87 @@ ARXIV_FIELD_PREFIX = {"author": "au", "title": "ti", "all": "all"}
 
 
 @app.get("/api/arxiv/search")
-async def arxiv_search(q: str, field: str = "all", start: int = 0, max_results: int = 50):
+async def arxiv_search(
+    q: str,
+    field: str = "all",
+    source: str = "all",
+    start: int = 0,
+    max_results: int = 50,
+):
     """
-    Field-targeted, paginated arXiv search.
-
-    `field` picks the arXiv query prefix — "author" (au:) and "title" (ti:) are
-    exact-field matches, so searching "Bin-Bin Zhang" as an author returns EVERY
-    paper by that author (paginated via `start`/`max_results`), not just whatever
-    a fuzzy `all:` full-text match happens to rank in the first 50 hits.
-
-    A bare arXiv ID or an arxiv.org URL is still resolved as an exact id_list
-    lookup regardless of `field` (used by "add by arXiv ID or link" flows).
-    Accepts both post-2007 IDs (2401.12345) and old-style archive IDs
-    (physics/0306138, hep-th/9901001).
+    Universal academic search across OpenAlex, arXiv, and Europe PMC.
     """
     q = q.strip()
     m = ARXIV_ID_RE.search(q)
-    if field == "id" or (m and (ARXIV_ID_RE.fullmatch(q) or "arxiv.org" in q)):
-        if not m:
-            raise HTTPException(
-                status_code=400,
-                detail=f'"{q}" doesn\'t look like an arXiv ID or URL '
-                       f"(expected e.g. 2401.12345 or physics/0306138)",
-            )
-        papers, total = await _fetch_arxiv({"id_list": m.group(0), "max_results": 1})
-        return {"papers": papers, "total": total, "start": 0}
-
-    prefix = ARXIV_FIELD_PREFIX.get(field, "all")
-    search_query = f'{prefix}:"{q}"' if prefix != "all" else f"all:{q}"
     max_results = max(1, min(max_results, 200))
 
-    papers, total = await _fetch_arxiv(
+    if field == "id" or (m and (ARXIV_ID_RE.fullmatch(q) or "arxiv.org" in q)):
+        if m:
+            papers, total = await _fetch_arxiv({"id_list": m.group(0), "max_results": 1})
+            return {"papers": papers, "total": total, "start": 0}
+
+    # Explicit single source
+    if source == "openalex":
+        papers, total = await _fetch_openalex_search(q, field, start, max_results)
+        return {"papers": papers, "total": total, "start": start}
+    if source == "europepmc":
+        papers, total = await _fetch_europepmc_search(q, start, max_results)
+        return {"papers": papers, "total": total, "start": start}
+    if source == "arxiv":
+        prefix = ARXIV_FIELD_PREFIX.get(field, "all")
+        search_query = f'{prefix}:"{q}"' if prefix != "all" else f"all:{q}"
+        papers, total = await _fetch_arxiv(
+            {
+                "search_query": search_query,
+                "sortBy": "relevance" if prefix == "all" else "submittedDate",
+                "sortOrder": "descending",
+                "start": max(0, start),
+                "max_results": max_results,
+            }
+        )
+        return {"papers": papers, "total": total, "start": start}
+
+    # "all" source: query OpenAlex (covers international, humanities, social sciences, Chinese papers, medicine, crossref DOIs) and arXiv
+    openalex_coro = _fetch_openalex_search(q, field, start, max_results)
+    prefix = ARXIV_FIELD_PREFIX.get(field, "all")
+    search_query = f'{prefix}:"{q}"' if prefix != "all" else f"all:{q}"
+    arxiv_coro = _fetch_arxiv(
         {
             "search_query": search_query,
             "sortBy": "relevance" if prefix == "all" else "submittedDate",
             "sortOrder": "descending",
             "start": max(0, start),
-            "max_results": max_results,
+            "max_results": min(max_results, 25),
         }
     )
-    return {"papers": papers, "total": total, "start": start}
+
+    results = await asyncio.gather(openalex_coro, arxiv_coro, return_exceptions=True)
+
+    oa_papers, oa_total = ([], 0)
+    ar_papers, ar_total = ([], 0)
+
+    if not isinstance(results[0], Exception) and results[0]:
+        oa_papers, oa_total = results[0]
+    if not isinstance(results[1], Exception) and results[1]:
+        ar_papers, ar_total = results[1]
+
+    # Combine and deduplicate
+    combined: list[dict] = []
+    seen_titles: set[str] = set()
+
+    for p in oa_papers + ar_papers:
+        title_key = re.sub(r"[^a-z0-9]", "", (p.get("title") or "").lower())
+        if title_key and title_key in seen_titles:
+            continue
+        if title_key:
+            seen_titles.add(title_key)
+        combined.append(p)
+
+    return {
+        "papers": combined[:max_results],
+        "total": max(oa_total + ar_total, len(combined)),
+        "start": start,
+    }
 
 
 # ── LaTeX (thin proxy to the internal `latex` container) ───────────────────────
@@ -2241,7 +2493,6 @@ async def post_habits(day: str, payload: HabitsPayload):
 
 # ── Tasks: project → main task → subtask (80-Tasks/{project-slug}/*.md) ───────
 
-TASK_NAME_RE = re.compile(r"^[A-Za-z0-9._ -]+$")
 PINNED_PROJECT_SLUG = "_daily-habits"
 
 
@@ -2386,8 +2637,8 @@ class ProjectCreate(BaseModel):
 @app.post("/api/task-projects")
 async def create_task_project(payload: ProjectCreate):
     name = payload.name.strip()
-    if not name or not TASK_NAME_RE.fullmatch(name):
-        raise HTTPException(status_code=400, detail="Invalid project name")
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required")
     slug = _slugify_project_name(name)
     d = project_dir(slug)
     if (d / "_project.md").exists():
@@ -2826,6 +3077,136 @@ async def update_settings(payload: SettingsPayload):
             "existingData": bool(load_manifest(VAULT)),
         }
     return {"ok": True, "message": "Settings received", "desktop": DESKTOP_MODE}
+
+
+class ClientPrefsPayload(BaseModel):
+    """Snapshot of client-side localStorage keys (theme, AI provider config, fonts, …).
+
+    Desktop WKWebView storage is unreliable across relaunches (per-launch identity is
+    not guaranteed stable), so the frontend mirrors these keys here as the durable
+    source of truth and rehydrates localStorage from this on boot.
+    """
+    prefs: dict[str, str] = {}
+
+
+@app.get("/api/settings/client-prefs")
+async def get_client_prefs():
+    return {"prefs": load_app_settings(VAULT).get("client_prefs") or {}}
+
+
+@app.post("/api/settings/client-prefs")
+async def save_client_prefs(payload: ClientPrefsPayload):
+    save_app_settings(VAULT, {**load_app_settings(VAULT), "client_prefs": payload.prefs})
+    return {"ok": True}
+
+
+# ── User-supplied uploads: custom fonts, Loki logo ─────────────────────────
+# Stored in the vault so they survive app reinstalls/rebuilds. We never bundle
+# or fetch third-party font/image files ourselves — only what the user uploads.
+
+FONT_CONTENT_TYPES = {
+    ".woff2": "font/woff2",
+    ".woff": "font/woff",
+    ".ttf": "font/ttf",
+    ".otf": "font/otf",
+}
+LOGO_CONTENT_TYPES = {
+    ".png": "image/png",
+    ".svg": "image/svg+xml",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+}
+
+
+def _uploads_dir(kind: str) -> Path:
+    d = VAULT / ".ygg-config" / "uploads" / kind
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _safe_upload_name(filename: str) -> str:
+    name = Path(filename or "").name
+    name = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-")
+    return name or "file"
+
+
+@app.get("/api/uploads/fonts")
+async def list_custom_fonts():
+    d = _uploads_dir("fonts")
+    out = []
+    for p in sorted(d.iterdir()):
+        if p.is_file() and p.suffix.lower() in FONT_CONTENT_TYPES:
+            out.append({"filename": p.name, "url": f"/api/uploads/fonts/file/{p.name}"})
+    return {"fonts": out}
+
+
+@app.post("/api/uploads/fonts")
+async def upload_custom_font(file: UploadFile = File(...)):
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in FONT_CONTENT_TYPES:
+        raise HTTPException(status_code=400, detail="Unsupported font type. Use .ttf, .otf, .woff, or .woff2.")
+    name = _safe_upload_name(file.filename)
+    dest = _uploads_dir("fonts") / name
+    dest.write_bytes(await file.read())
+    return {"ok": True, "filename": name, "url": f"/api/uploads/fonts/file/{name}"}
+
+
+@app.delete("/api/uploads/fonts/{filename}")
+async def delete_custom_font(filename: str):
+    dest = _uploads_dir("fonts") / _safe_upload_name(filename)
+    if dest.exists():
+        dest.unlink()
+    return {"ok": True}
+
+
+@app.get("/api/uploads/fonts/file/{filename}")
+async def get_custom_font_file(filename: str):
+    dest = _uploads_dir("fonts") / _safe_upload_name(filename)
+    if not dest.exists():
+        raise HTTPException(status_code=404, detail="Font not found")
+    return FileResponse(dest, media_type=FONT_CONTENT_TYPES.get(dest.suffix.lower(), "application/octet-stream"))
+
+
+@app.get("/api/uploads/loki-logo")
+async def get_loki_logo():
+    d = _uploads_dir("loki-logo")
+    for p in sorted(d.iterdir()):
+        if p.is_file() and p.suffix.lower() in LOGO_CONTENT_TYPES:
+            return {"url": f"/api/uploads/loki-logo/file/{p.name}"}
+    return {"url": None}
+
+
+@app.post("/api/uploads/loki-logo")
+async def upload_loki_logo(file: UploadFile = File(...)):
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in LOGO_CONTENT_TYPES:
+        raise HTTPException(status_code=400, detail="Unsupported image type. Use PNG, SVG, JPG, or WebP.")
+    d = _uploads_dir("loki-logo")
+    for p in list(d.iterdir()):
+        if p.is_file():
+            p.unlink()
+    name = "logo" + ext
+    dest = d / name
+    dest.write_bytes(await file.read())
+    return {"ok": True, "url": f"/api/uploads/loki-logo/file/{name}"}
+
+
+@app.delete("/api/uploads/loki-logo")
+async def delete_loki_logo():
+    d = _uploads_dir("loki-logo")
+    for p in list(d.iterdir()):
+        if p.is_file():
+            p.unlink()
+    return {"ok": True}
+
+
+@app.get("/api/uploads/loki-logo/file/{filename}")
+async def get_loki_logo_file(filename: str):
+    dest = _uploads_dir("loki-logo") / _safe_upload_name(filename)
+    if not dest.exists():
+        raise HTTPException(status_code=404, detail="Logo not found")
+    return FileResponse(dest, media_type=LOGO_CONTENT_TYPES.get(dest.suffix.lower(), "application/octet-stream"))
 
 
 @app.get("/api/settings/analysis-tags")

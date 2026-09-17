@@ -11,6 +11,22 @@ import {
   type PageId,
   type PageTheme,
 } from "../lib/theme";
+import { api } from "../api/client";
+import {
+  FONT_CATEGORIES,
+  getSelectableFonts,
+  refreshCustomFonts,
+  resolveFont,
+  DEFAULT_TITLE_FONT,
+} from "../lib/fonts";
+import {
+  loadLokiBrand,
+  saveLokiBrand,
+  announceLokiBrandChange,
+  MIN_TITLE_SIZE,
+  MAX_TITLE_SIZE,
+  type LokiBrand,
+} from "../lib/lokiBrand";
 
 interface Props {
   open: boolean;
@@ -40,10 +56,49 @@ function ColorField({
 
 export default function PageThemeDrawer({ open, page, onClose }: Props) {
   const [theme, setTheme] = useState<PageTheme>({});
+  const [brand, setBrand] = useState<LokiBrand>(() => loadLokiBrand());
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [logoBusy, setLogoBusy] = useState(false);
+  const [, forceFontsTick] = useState(0);
 
   useEffect(() => {
     if (open) setTheme(loadPageTheme(page));
   }, [open, page]);
+
+  useEffect(() => {
+    if (open && page === "ask") {
+      setBrand(loadLokiBrand());
+      refreshCustomFonts().then(() => forceFontsTick((v) => v + 1));
+      api.uploads.lokiLogo.get()
+        .then((r) => setLogoUrl(r.url ? `${r.url}?t=${Date.now()}` : null))
+        .catch(() => setLogoUrl(null));
+    }
+  }, [open, page]);
+
+  function patchBrand(next: Partial<LokiBrand>) {
+    const merged = { ...brand, ...next };
+    setBrand(merged);
+    saveLokiBrand(merged);
+  }
+
+  async function handleLogoUpload(file: File) {
+    setLogoBusy(true);
+    try {
+      const r = await api.uploads.lokiLogo.set(file);
+      // Cache-bust: the served path is fixed ("logo.<ext>"), so a same-name
+      // replacement would otherwise keep showing the browser's cached old image.
+      setLogoUrl(`${r.url}?t=${Date.now()}`);
+      announceLokiBrandChange();
+    } finally {
+      setLogoBusy(false);
+    }
+  }
+
+  async function handleLogoRemove() {
+    await api.uploads.lokiLogo.remove();
+    setLogoUrl(null);
+    announceLokiBrandChange();
+  }
 
   if (!open) return null;
 
@@ -149,6 +204,125 @@ export default function PageThemeDrawer({ open, page, onClose }: Props) {
                 </div>
               </div>
             </>
+          )}
+
+          {page === "ask" && (
+            <div className="settings-item">
+              <label>Loki identity</label>
+              <div className="settings-info" style={{ marginBottom: 8 }}>
+                Rename the assistant and choose how its title is shown on this page — a font, or your own logo image.
+              </div>
+              <label className="theme-color-field" style={{ marginBottom: 10 }}>
+                <span>Assistant name</span>
+                <input
+                  type="text"
+                  value={brand.name}
+                  onChange={(e) => patchBrand({ name: e.target.value })}
+                  placeholder="Loki"
+                  style={{ maxWidth: 220 }}
+                />
+              </label>
+
+              <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+                <button
+                  type="button"
+                  className={`btn${brand.titleMode === "text" ? " btn-primary" : ""}`}
+                  onClick={() => patchBrand({ titleMode: "text" })}
+                >
+                  Text + font
+                </button>
+                <button
+                  type="button"
+                  className={`btn${brand.titleMode === "logo" ? " btn-primary" : ""}`}
+                  onClick={() => patchBrand({ titleMode: "logo" })}
+                >
+                  Logo image
+                </button>
+              </div>
+
+              {brand.titleMode === "text" ? (
+                <label className="font-picker-field">
+                  <span>Title font</span>
+                  <select
+                    value={brand.fontId}
+                    onChange={(e) => patchBrand({ fontId: e.target.value })}
+                    style={{ fontFamily: resolveFont(brand.fontId, DEFAULT_TITLE_FONT).stack }}
+                  >
+                    {FONT_CATEGORIES.map((cat) => (
+                      <optgroup key={cat.id} label={cat.label}>
+                        {getSelectableFonts()
+                          .filter((f) => f.category === cat.id)
+                          .map((f) => (
+                            <option key={f.id} value={f.id} style={{ fontFamily: f.stack }}>
+                              {f.label}
+                            </option>
+                          ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                  <label className="theme-color-field" style={{ marginTop: 10 }}>
+                    <span>Size ({brand.fontSize}px)</span>
+                    <input
+                      type="range"
+                      min={MIN_TITLE_SIZE}
+                      max={MAX_TITLE_SIZE}
+                      value={brand.fontSize}
+                      onChange={(e) => patchBrand({ fontSize: Number(e.target.value) })}
+                    />
+                  </label>
+                  <div
+                    style={{
+                      fontFamily: resolveFont(brand.fontId, DEFAULT_TITLE_FONT).stack,
+                      fontSize: brand.fontSize,
+                      marginTop: 8,
+                    }}
+                  >
+                    {brand.name || "Loki"}
+                  </div>
+                  <div className="settings-info" style={{ marginTop: 6 }}>
+                    Need a specific brush/display font? Upload it under Appearance → Fonts → Custom fonts first, then
+                    pick it here.
+                  </div>
+                </label>
+              ) : (
+                <div>
+                  {logoUrl ? (
+                    <img
+                      src={logoUrl}
+                      alt={brand.name}
+                      style={{ height: brand.logoHeight, maxHeight: brand.logoHeight, display: "block", marginBottom: 8 }}
+                    />
+                  ) : (
+                    <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>No logo uploaded yet.</div>
+                  )}
+                  <label className="theme-color-field" style={{ marginBottom: 10 }}>
+                    <span>Size ({brand.logoHeight}px)</span>
+                    <input
+                      type="range"
+                      min={MIN_TITLE_SIZE}
+                      max={MAX_TITLE_SIZE}
+                      value={brand.logoHeight}
+                      onChange={(e) => patchBrand({ logoHeight: Number(e.target.value) })}
+                    />
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/png,image/svg+xml,image/jpeg,image/webp"
+                    disabled={logoBusy}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleLogoUpload(file);
+                      e.target.value = "";
+                    }}
+                  />
+                  {logoUrl && (
+                    <button type="button" className="btn" style={{ marginLeft: 8 }} onClick={handleLogoRemove}>
+                      Remove logo
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           )}
 
           {page === "latex" && (

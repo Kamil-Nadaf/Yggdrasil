@@ -1890,6 +1890,24 @@ h2 { font-size: 15px; color: var(--accent); }
   margin: 0;
 }
 
+.custom-font-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.custom-font-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+}
+
 .settings-radio {
   display: flex;
   flex-direction: column;
@@ -2275,6 +2293,16 @@ h2 { font-size: 15px; color: var(--accent); }
   color: var(--muted);
 }
 
+.arxiv-date-input {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  background: var(--surface, var(--bg-card, #1a1a24));
+  border: 1px solid var(--border, var(--border-color, #2d2d3d));
+  border-radius: 6px;
+  padding: 3px 6px;
+}
+
 .arxiv-count {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -2355,6 +2383,17 @@ h2 { font-size: 15px; color: var(--accent); }
   text-align: center;
   padding: 24px 10px;
   line-height: 1.6;
+}
+
+.arxiv-stale-notice {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin: 0 10px 8px;
 }
 
 /* Compact rows (Panel 1 / Panel 2) */

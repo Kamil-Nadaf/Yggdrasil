@@ -362,7 +362,7 @@ export default function CERICEditor({ citekey, onBack, onSelectPaper, onPaperDel
     return (
       <div>
         {tabBar}
-        <div className="muted">No paper selected — pick one from Collection or Daily ArXiv.</div>
+        <div className="muted">No paper selected — pick one from Collection or Daily Archive.</div>
       </div>
     );
   }
@@ -384,7 +384,7 @@ export default function CERICEditor({ citekey, onBack, onSelectPaper, onPaperDel
     <div>
       {tabBar}
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16 }}>
-        <button className="btn" onClick={onBack}>← Daily ArXiv</button>
+        <button className="btn" onClick={onBack}>← Daily Archive</button>
         <h1 style={{ margin: 0, flex: 1 }}>
           {fm.title || citekey}
         </h1>

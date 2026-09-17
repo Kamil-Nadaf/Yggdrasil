@@ -21,7 +21,7 @@ AI keys stay in the app’s local storage. Ollama is optional — LM Studio / Cl
 **Known v0 limitation:** TinyTeX auto-installs on first launch on Mac and Linux only.
 On Windows, install a LaTeX distribution yourself (e.g. [MiKTeX](https://miktex.org/download))
 and make sure `pdflatex`/`latexmk` are on PATH before opening the app — everything
-else (Dashboard, Notes, Tasks, Search, Graph, Daily ArXiv) works regardless.
+else (Dashboard, Notes, Tasks, Search, Graph, Daily Archive) works regardless.
 
 ## Build requirements
 

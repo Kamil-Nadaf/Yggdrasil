@@ -14,7 +14,7 @@ it in Electron or Tauri and changing the product. This pack does not do that.
 2. This folder (the `.tar.gz` you send them)
 3. About 8–12 GB disk for the first image build (LaTeX image is large)
 
-Ollama is **optional**. Without it, Daily ArXiv / Search / Notes / Tasks / Graph /
+Ollama is **optional**. Without it, Daily Archive / Search / Notes / Tasks / Graph /
 LaTeX still work. Ask (embeddings) and the indexer need a reachable Ollama.
 
 ## Start

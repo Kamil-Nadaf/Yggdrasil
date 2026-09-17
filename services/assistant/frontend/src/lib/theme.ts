@@ -22,7 +22,7 @@ export type PageId = "scores" | "search" | "browse" | "editor" | "tasks" | "grap
 
 export const PAGE_LABELS: Record<PageId, string> = {
   scores: "Dashboard",
-  search: "Daily ArXiv",
+  search: "Daily Archive",
   browse: "Search",
   editor: "Notes",
   tasks: "Tasks",

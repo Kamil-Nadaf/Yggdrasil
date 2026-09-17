@@ -1,17 +1,96 @@
-"""Official arXiv category taxonomy for the Daily ArXiv topic picker."""
+"""Universal Academic & arXiv category taxonomy for the Daily Papers topic picker."""
 from __future__ import annotations
 
 import re
 
-# id "" / "all" means every new listing (search_query=all:*)
+# Curated academic topic presets across all disciplines
 ARXIV_TOPICS: list[dict[str, str]] = [
     {"id": "all", "label": "All new papers (every field)", "group": "Start here"},
-    {"id": "physics.chem-ph", "label": "Chemical Physics", "group": "Chemistry & Earth"},
-    {"id": "cond-mat.mtrl-sci", "label": "Materials Science", "group": "Chemistry & Earth"},
-    {"id": "physics.geo-ph", "label": "Geophysics", "group": "Chemistry & Earth"},
-    {"id": "physics.ao-ph", "label": "Atmospheric & Oceanic Physics", "group": "Chemistry & Earth"},
-    {"id": "physics.flu-dyn", "label": "Fluid Dynamics", "group": "Chemistry & Earth"},
-    {"id": "physics.hist-ph", "label": "History & Philosophy of Physics", "group": "Chemistry & Earth"},
+    
+    # Chinese Academy of Social Sciences & NCPSSD (国家社科文献中心)
+    {"id": "chinese:ncpssd-philosophy", "label": "NCPSSD / CASS: Philosophy & Thought (哲学与思想)", "group": "NCPSSD / CASS (社科院)"},
+    {"id": "chinese:ncpssd-history", "label": "NCPSSD / CASS: History & Archaeology (历史与考古)", "group": "NCPSSD / CASS (社科院)"},
+    {"id": "chinese:ncpssd-literature", "label": "NCPSSD / CASS: Literature & Linguistics (文学与语言学)", "group": "NCPSSD / CASS (社科院)"},
+    {"id": "chinese:ncpssd-sociology", "label": "NCPSSD / CASS: Social Sciences & Law (社会学与法学)", "group": "NCPSSD / CASS (社科院)"},
+    {"id": "chinese:ncpssd-economics", "label": "NCPSSD / CASS: Economics & Politics (经济与政治学)", "group": "NCPSSD / CASS (社科院)"},
+
+    # Chinese Academy of Sciences (CAS / 中国科学院)
+    {"id": "chinese:cas-science-china", "label": "CAS: Science China & CAS Open Access (中国科学)", "group": "Chinese Academy of Sciences (中科院)"},
+    {"id": "chinese:cas-earth-geography", "label": "CAS: Earth & Geographic Sciences (地理与地球科学)", "group": "Chinese Academy of Sciences (中科院)"},
+    {"id": "chinese:cas-physics-math", "label": "CAS: Physics & Mathematics (数理科学)", "group": "Chinese Academy of Sciences (中科院)"},
+    {"id": "chinese:cas-life-medicine", "label": "CAS: Life Sciences & Bio-Medicine (生命科学与医学)", "group": "Chinese Academy of Sciences (中科院)"},
+    {"id": "chinese:cas-computing-tech", "label": "CAS: Computing & High Technology (信息与计算科学)", "group": "Chinese Academy of Sciences (中科院)"},
+
+    # China Academic Journals / CNKI (中国知网)
+    {"id": "chinese:cnki-humanities", "label": "CNKI / CAJ: Literature, History & Philosophy (知网文史哲)", "group": "China Academic Journals (CNKI)"},
+    {"id": "chinese:cnki-social-sciences", "label": "CNKI / CAJ: Social Sciences & Education (知网社科与教育)", "group": "China Academic Journals (CNKI)"},
+    {"id": "chinese:cnki-geography-env", "label": "CNKI / CAJ: Geography & Urban Planning (知网地理与环境)", "group": "China Academic Journals (CNKI)"},
+    {"id": "chinese:cnki-science-tech", "label": "CNKI / CAJ: Natural Sciences & Technology (知网自然科学)", "group": "China Academic Journals (CNKI)"},
+
+    # Psychology & Cognitive Sciences
+    {"id": "field:psychology", "label": "Psychology (all)", "group": "Psychology & Cognitive Sciences"},
+    {"id": "field:cognitive-psychology", "label": "Cognitive Psychology", "group": "Psychology & Cognitive Sciences"},
+    {"id": "field:neuropsychology", "label": "Neuropsychology & Behavioral Neuroscience", "group": "Psychology & Cognitive Sciences"},
+    {"id": "field:developmental-psychology", "label": "Developmental Psychology", "group": "Psychology & Cognitive Sciences"},
+    {"id": "field:social-psychology", "label": "Social & Personality Psychology", "group": "Psychology & Cognitive Sciences"},
+    {"id": "field:clinical-psychology", "label": "Clinical Psychology & Psychopathology", "group": "Psychology & Cognitive Sciences"},
+
+    # Linguistics & Language Sciences
+    {"id": "field:linguistics", "label": "Linguistics (all)", "group": "Linguistics & Language"},
+    {"id": "field:computational-linguistics", "label": "Computational Linguistics & NLP", "group": "Linguistics & Language"},
+    {"id": "field:psycholinguistics", "label": "Psycholinguistics & Neurolinguistics", "group": "Linguistics & Language"},
+    {"id": "field:sociolinguistics", "label": "Sociolinguistics & Language Evolution", "group": "Linguistics & Language"},
+    {"id": "field:syntax-semantics", "label": "Syntax, Semantics & Pragmatics", "group": "Linguistics & Language"},
+
+    # Philosophy & Ethics
+    {"id": "field:philosophy", "label": "Philosophy (all)", "group": "Philosophy & Ethics"},
+    {"id": "field:philosophy-of-mind", "label": "Philosophy of Mind & Consciousness", "group": "Philosophy & Ethics"},
+    {"id": "field:ethics", "label": "Ethics & Moral Philosophy", "group": "Philosophy & Ethics"},
+    {"id": "field:epistemology", "label": "Epistemology & Logic", "group": "Philosophy & Ethics"},
+    {"id": "field:chinese-philosophy", "label": "Chinese Philosophy & Thought (中国哲学与思想)", "group": "Philosophy & Ethics"},
+    {"id": "field:philosophy-of-science", "label": "Philosophy of Science", "group": "Philosophy & Ethics"},
+
+    # Geography & Earth Sciences
+    {"id": "field:geography", "label": "Geography (all)", "group": "Geography & Earth"},
+    {"id": "field:human-geography", "label": "Human & Urban Geography", "group": "Geography & Earth"},
+    {"id": "field:physical-geography", "label": "Physical Geography & Geomorphology", "group": "Geography & Earth"},
+    {"id": "field:gis-spatial", "label": "GIS & Spatial Analysis", "group": "Geography & Earth"},
+    {"id": "field:geopolitics", "label": "Geopolitics & Environmental Policy", "group": "Geography & Earth"},
+    {"id": "physics.geo-ph", "label": "Geophysics (arXiv)", "group": "Geography & Earth"},
+
+    # Social Sciences, History & Education
+    {"id": "field:sociology", "label": "Sociology (all)", "group": "Social Sciences & Humanities"},
+    {"id": "field:history", "label": "History (all)", "group": "Social Sciences & Humanities"},
+    {"id": "field:chinese-history", "label": "Chinese History & East Asian Studies (中国历史与东亚研究)", "group": "Social Sciences & Humanities"},
+    {"id": "field:political-science", "label": "Political Science & International Relations", "group": "Social Sciences & Humanities"},
+    {"id": "field:education", "label": "Education & Pedagogy", "group": "Social Sciences & Humanities"},
+    {"id": "field:anthropology", "label": "Anthropology & Archaeology", "group": "Social Sciences & Humanities"},
+
+    # Medicine & Life Sciences
+    {"id": "field:medicine", "label": "Medicine & Clinical Research", "group": "Medicine & Health"},
+    {"id": "field:neuroscience", "label": "Neuroscience", "group": "Medicine & Health"},
+    {"id": "field:public-health", "label": "Public Health & Epidemiology", "group": "Medicine & Health"},
+    {"id": "field:immunology", "label": "Immunology & Infectious Disease", "group": "Medicine & Health"},
+    {"id": "q-bio", "label": "Quantitative Biology (all arXiv)", "group": "Medicine & Health"},
+    {"id": "q-bio.BM", "label": "Biomolecules", "group": "Medicine & Health"},
+    {"id": "q-bio.CB", "label": "Cell Behavior", "group": "Medicine & Health"},
+    {"id": "q-bio.GN", "label": "Genomics", "group": "Medicine & Health"},
+    {"id": "q-bio.MN", "label": "Molecular Networks", "group": "Medicine & Health"},
+    {"id": "q-bio.NC", "label": "Neurons & Cognition", "group": "Medicine & Health"},
+    {"id": "q-bio.OT", "label": "Other Quantitative Biology", "group": "Medicine & Health"},
+    {"id": "q-bio.PE", "label": "Populations & Evolution", "group": "Medicine & Health"},
+    {"id": "q-bio.QM", "label": "Quantitative Methods", "group": "Medicine & Health"},
+    {"id": "q-bio.SC", "label": "Subcellular Processes", "group": "Medicine & Health"},
+    {"id": "q-bio.TO", "label": "Tissues & Organs", "group": "Medicine & Health"},
+
+    # Chemistry & Materials
+    {"id": "physics.chem-ph", "label": "Chemical Physics", "group": "Chemistry & Materials"},
+    {"id": "cond-mat.mtrl-sci", "label": "Materials Science", "group": "Chemistry & Materials"},
+    {"id": "physics.ao-ph", "label": "Atmospheric & Oceanic Physics", "group": "Chemistry & Materials"},
+    {"id": "physics.flu-dyn", "label": "Fluid Dynamics", "group": "Chemistry & Materials"},
+    {"id": "physics.hist-ph", "label": "History & Philosophy of Physics", "group": "Chemistry & Materials"},
+
+    # Astrophysics
     {"id": "astro-ph", "label": "Astrophysics (all)", "group": "Astrophysics"},
     {"id": "astro-ph.CO", "label": "Cosmology & Nongalactic Astrophysics", "group": "Astrophysics"},
     {"id": "astro-ph.EP", "label": "Earth & Planetary Astrophysics", "group": "Astrophysics"},
@@ -19,6 +98,8 @@ ARXIV_TOPICS: list[dict[str, str]] = [
     {"id": "astro-ph.HE", "label": "High Energy Astrophysical Phenomena", "group": "Astrophysics"},
     {"id": "astro-ph.IM", "label": "Instrumentation & Methods for Astrophysics", "group": "Astrophysics"},
     {"id": "astro-ph.SR", "label": "Solar & Stellar Astrophysics", "group": "Astrophysics"},
+
+    # Condensed Matter
     {"id": "cond-mat", "label": "Condensed Matter (all)", "group": "Condensed Matter"},
     {"id": "cond-mat.dis-nn", "label": "Disordered Systems & Neural Networks", "group": "Condensed Matter"},
     {"id": "cond-mat.mes-hall", "label": "Mesoscale & Nanoscale Physics", "group": "Condensed Matter"},
@@ -28,6 +109,8 @@ ARXIV_TOPICS: list[dict[str, str]] = [
     {"id": "cond-mat.stat-mech", "label": "Statistical Mechanics", "group": "Condensed Matter"},
     {"id": "cond-mat.str-el", "label": "Strongly Correlated Electrons", "group": "Condensed Matter"},
     {"id": "cond-mat.supr-con", "label": "Superconductivity", "group": "Condensed Matter"},
+
+    # Physics
     {"id": "gr-qc", "label": "General Relativity & Quantum Cosmology", "group": "Physics"},
     {"id": "hep-ex", "label": "High Energy Physics – Experiment", "group": "Physics"},
     {"id": "hep-lat", "label": "High Energy Physics – Lattice", "group": "Physics"},
@@ -61,6 +144,8 @@ ARXIV_TOPICS: list[dict[str, str]] = [
     {"id": "physics.soc-ph", "label": "Physics & Society", "group": "Physics"},
     {"id": "physics.space-ph", "label": "Space Physics", "group": "Physics"},
     {"id": "quant-ph", "label": "Quantum Physics", "group": "Physics"},
+
+    # Mathematics
     {"id": "math", "label": "Mathematics (all)", "group": "Mathematics"},
     {"id": "math.AG", "label": "Algebraic Geometry", "group": "Mathematics"},
     {"id": "math.AT", "label": "Algebraic Topology", "group": "Mathematics"},
@@ -94,6 +179,8 @@ ARXIV_TOPICS: list[dict[str, str]] = [
     {"id": "math.SP", "label": "Spectral Theory", "group": "Mathematics"},
     {"id": "math.ST", "label": "Statistics Theory", "group": "Mathematics"},
     {"id": "math.SG", "label": "Symplectic Geometry", "group": "Mathematics"},
+
+    # Computer Science
     {"id": "cs", "label": "Computer Science (all)", "group": "Computer Science"},
     {"id": "cs.AI", "label": "Artificial Intelligence", "group": "Computer Science"},
     {"id": "cs.AR", "label": "Hardware Architecture", "group": "Computer Science"},
@@ -135,46 +222,97 @@ ARXIV_TOPICS: list[dict[str, str]] = [
     {"id": "cs.SE", "label": "Software Engineering", "group": "Computer Science"},
     {"id": "cs.SI", "label": "Social & Information Networks", "group": "Computer Science"},
     {"id": "cs.SY", "label": "Systems & Control", "group": "Computer Science"},
-    {"id": "q-bio", "label": "Quantitative Biology (all)", "group": "Quantitative Biology"},
-    {"id": "q-bio.BM", "label": "Biomolecules", "group": "Quantitative Biology"},
-    {"id": "q-bio.CB", "label": "Cell Behavior", "group": "Quantitative Biology"},
-    {"id": "q-bio.GN", "label": "Genomics", "group": "Quantitative Biology"},
-    {"id": "q-bio.MN", "label": "Molecular Networks", "group": "Quantitative Biology"},
-    {"id": "q-bio.NC", "label": "Neurons & Cognition", "group": "Quantitative Biology"},
-    {"id": "q-bio.OT", "label": "Other Quantitative Biology", "group": "Quantitative Biology"},
-    {"id": "q-bio.PE", "label": "Populations & Evolution", "group": "Quantitative Biology"},
-    {"id": "q-bio.QM", "label": "Quantitative Methods", "group": "Quantitative Biology"},
-    {"id": "q-bio.SC", "label": "Subcellular Processes", "group": "Quantitative Biology"},
-    {"id": "q-bio.TO", "label": "Tissues & Organs", "group": "Quantitative Biology"},
-    {"id": "q-fin", "label": "Quantitative Finance (all)", "group": "Quantitative Finance"},
-    {"id": "q-fin.CP", "label": "Computational Finance", "group": "Quantitative Finance"},
-    {"id": "q-fin.EC", "label": "Economics", "group": "Quantitative Finance"},
-    {"id": "q-fin.GN", "label": "General Finance", "group": "Quantitative Finance"},
-    {"id": "q-fin.MF", "label": "Mathematical Finance", "group": "Quantitative Finance"},
-    {"id": "q-fin.PM", "label": "Portfolio Management", "group": "Quantitative Finance"},
-    {"id": "q-fin.PR", "label": "Pricing of Securities", "group": "Quantitative Finance"},
-    {"id": "q-fin.RM", "label": "Risk Management", "group": "Quantitative Finance"},
-    {"id": "q-fin.ST", "label": "Statistical Finance", "group": "Quantitative Finance"},
-    {"id": "q-fin.TR", "label": "Trading & Market Microstructure", "group": "Quantitative Finance"},
-    {"id": "stat", "label": "Statistics (all)", "group": "Statistics"},
-    {"id": "stat.AP", "label": "Applications", "group": "Statistics"},
-    {"id": "stat.CO", "label": "Computation", "group": "Statistics"},
-    {"id": "stat.ME", "label": "Methodology", "group": "Statistics"},
-    {"id": "stat.ML", "label": "Machine Learning", "group": "Statistics"},
-    {"id": "stat.OT", "label": "Other Statistics", "group": "Statistics"},
-    {"id": "stat.TH", "label": "Statistics Theory", "group": "Statistics"},
-    {"id": "eess", "label": "Electrical Engineering & Systems Science (all)", "group": "Engineering"},
-    {"id": "eess.AS", "label": "Audio & Speech Processing", "group": "Engineering"},
-    {"id": "eess.IV", "label": "Image & Video Processing", "group": "Engineering"},
-    {"id": "eess.SP", "label": "Signal Processing", "group": "Engineering"},
-    {"id": "eess.SY", "label": "Systems & Control", "group": "Engineering"},
-    {"id": "econ", "label": "Economics (all)", "group": "Economics"},
-    {"id": "econ.EM", "label": "Econometrics", "group": "Economics"},
-    {"id": "econ.GN", "label": "General Economics", "group": "Economics"},
-    {"id": "econ.TH", "label": "Theoretical Economics", "group": "Economics"},
+
+    # Economics & Finance
+    {"id": "econ", "label": "Economics (all)", "group": "Economics & Finance"},
+    {"id": "econ.EM", "label": "Econometrics", "group": "Economics & Finance"},
+    {"id": "econ.GN", "label": "General Economics", "group": "Economics & Finance"},
+    {"id": "econ.TH", "label": "Theoretical Economics", "group": "Economics & Finance"},
+    {"id": "q-fin", "label": "Quantitative Finance (all)", "group": "Economics & Finance"},
+    {"id": "q-fin.CP", "label": "Computational Finance", "group": "Economics & Finance"},
+    {"id": "q-fin.EC", "label": "Economics (q-fin)", "group": "Economics & Finance"},
+    {"id": "q-fin.GN", "label": "General Finance", "group": "Economics & Finance"},
+    {"id": "q-fin.MF", "label": "Mathematical Finance", "group": "Economics & Finance"},
+    {"id": "q-fin.PM", "label": "Portfolio Management", "group": "Economics & Finance"},
+    {"id": "q-fin.PR", "label": "Pricing of Securities", "group": "Economics & Finance"},
+    {"id": "q-fin.RM", "label": "Risk Management", "group": "Economics & Finance"},
+    {"id": "q-fin.ST", "label": "Statistical Finance", "group": "Economics & Finance"},
+    {"id": "q-fin.TR", "label": "Trading & Market Microstructure", "group": "Economics & Finance"},
+
+    # Statistics & Engineering
+    {"id": "stat", "label": "Statistics (all)", "group": "Statistics & Engineering"},
+    {"id": "stat.AP", "label": "Applications", "group": "Statistics & Engineering"},
+    {"id": "stat.CO", "label": "Computation", "group": "Statistics & Engineering"},
+    {"id": "stat.ME", "label": "Methodology", "group": "Statistics & Engineering"},
+    {"id": "stat.ML", "label": "Machine Learning", "group": "Statistics & Engineering"},
+    {"id": "stat.OT", "label": "Other Statistics", "group": "Statistics & Engineering"},
+    {"id": "stat.TH", "label": "Statistics Theory", "group": "Statistics & Engineering"},
+    {"id": "eess", "label": "Electrical Engineering & Systems Science (all)", "group": "Statistics & Engineering"},
+    {"id": "eess.AS", "label": "Audio & Speech Processing", "group": "Statistics & Engineering"},
+    {"id": "eess.IV", "label": "Image & Video Processing", "group": "Statistics & Engineering"},
+    {"id": "eess.SP", "label": "Signal Processing", "group": "Statistics & Engineering"},
+    {"id": "eess.SY", "label": "Systems & Control", "group": "Statistics & Engineering"},
 ]
 
-CAT_RE = re.compile(r"^[A-Za-z]+(?:-[A-Za-z]+)?(?:\.[A-Za-z0-9-]+)?$")
+CAT_RE = re.compile(r"^[A-Za-z]+(?:-[A-Za-z0-9]+)?(?:\.[A-Za-z0-9-]+)?$")
+FIELD_RE = re.compile(r"^(?:field|custom|chinese):[A-Za-z0-9._ -]+$", re.IGNORECASE)
+
+# Friendly mapping from field ids to search query keywords
+FIELD_QUERY_MAP: dict[str, str] = {
+    # Chinese Academy of Social Sciences & NCPSSD
+    "chinese:ncpssd-philosophy": "Chinese Academy of Social Sciences philosophy OR 中国社会科学院 哲学 OR 哲学研究",
+    "chinese:ncpssd-history": "Chinese Academy of Social Sciences history OR 中国社会科学院 历史学 OR 考古",
+    "chinese:ncpssd-literature": "Chinese Academy of Social Sciences literature linguistics OR 文学评论 OR 文学研究",
+    "chinese:ncpssd-sociology": "Chinese Academy of Social Sciences sociology law OR 社会学研究 OR 法学研究",
+    "chinese:ncpssd-economics": "Chinese Academy of Social Sciences economics political science OR 经济研究 OR 政治学",
+
+    # Chinese Academy of Sciences (CAS)
+    "chinese:cas-science-china": "Chinese Academy of Sciences Science China OR 中国科学院 中国科学 OR 科学通报",
+    "chinese:cas-earth-geography": "Chinese Academy of Sciences geography earth sciences OR 中国科学院 地理科学 OR 地理学报",
+    "chinese:cas-physics-math": "Chinese Academy of Sciences physics mathematics OR 中国科学院 物理学 数学",
+    "chinese:cas-life-medicine": "Chinese Academy of Sciences life sciences biology medicine OR 中国科学院 生命科学",
+    "chinese:cas-computing-tech": "Chinese Academy of Sciences computing technology information OR 中国科学院 计算所 自动化所",
+
+    # China Academic Journals / CNKI
+    "chinese:cnki-humanities": "China Academic Journals Literature History Philosophy OR 中国学术期刊 文史哲",
+    "chinese:cnki-social-sciences": "China Academic Journals Social Sciences Education OR 中国学术期刊 社会科学",
+    "chinese:cnki-geography-env": "China Academic Journals Geography Urban Planning Environment OR 中国学术期刊 地理",
+    "chinese:cnki-science-tech": "China Academic Journals Natural Sciences Technology Engineering OR 中国学术期刊 自然科学",
+
+    # Psychology & Cognitive Sciences
+    "field:psychology": "psychology",
+    "field:cognitive-psychology": "cognitive psychology",
+    "field:neuropsychology": "neuropsychology neuroscience",
+    "field:developmental-psychology": "developmental psychology child development",
+    "field:social-psychology": "social psychology personality",
+    "field:clinical-psychology": "clinical psychology psychopathology psychotherapy",
+    "field:linguistics": "linguistics language",
+    "field:computational-linguistics": "computational linguistics natural language processing",
+    "field:psycholinguistics": "psycholinguistics neurolinguistics",
+    "field:sociolinguistics": "sociolinguistics language variation",
+    "field:syntax-semantics": "syntax semantics pragmatics",
+    "field:philosophy": "philosophy",
+    "field:philosophy-of-mind": "philosophy of mind consciousness",
+    "field:ethics": "ethics moral philosophy",
+    "field:epistemology": "epistemology logic philosophical logic",
+    "field:chinese-philosophy": "chinese philosophy confucianism daoism",
+    "field:philosophy-of-science": "philosophy of science epistemology",
+    "field:geography": "geography spatial analysis",
+    "field:human-geography": "human geography urban geography",
+    "field:physical-geography": "physical geography geomorphology hydrology",
+    "field:gis-spatial": "GIS geographic information systems spatial analysis",
+    "field:geopolitics": "geopolitics political geography environmental policy",
+    "field:sociology": "sociology social structures",
+    "field:history": "history historiography",
+    "field:chinese-history": "chinese history east asian studies",
+    "field:political-science": "political science international relations",
+    "field:education": "education pedagogy educational psychology",
+    "field:anthropology": "anthropology archaeology",
+    "field:medicine": "clinical medicine healthcare",
+    "field:neuroscience": "neuroscience brain neural",
+    "field:public-health": "public health epidemiology",
+    "field:immunology": "immunology infectious disease immunology",
+}
 
 
 def normalize_category(raw: str) -> str:
@@ -184,10 +322,35 @@ def normalize_category(raw: str) -> str:
     return cat
 
 
-def is_valid_category(cat: str) -> bool:
-    if cat == "all":
+def is_openalex_topic(cat: str) -> bool:
+    norm = normalize_category(cat)
+    if norm.startswith("field:") or norm.startswith("custom:") or norm.startswith("chinese:"):
         return True
-    return bool(CAT_RE.fullmatch(cat))
+    return not bool(CAT_RE.fullmatch(norm)) and norm != "all"
+
+
+def get_topic_search_query(cat: str) -> str:
+    norm = normalize_category(cat)
+    if norm in FIELD_QUERY_MAP:
+        return FIELD_QUERY_MAP[norm]
+    if norm.startswith("field:"):
+        return norm[len("field:"):].replace("-", " ")
+    if norm.startswith("custom:"):
+        return norm[len("custom:"):].replace("-", " ")
+    if norm.startswith("chinese:"):
+        return norm[len("chinese:"):].replace("-", " ")
+    return norm
+
+
+def is_valid_category(cat: str) -> bool:
+    norm = normalize_category(cat)
+    if norm == "all":
+        return True
+    if bool(CAT_RE.fullmatch(norm)):
+        return True
+    if bool(FIELD_RE.fullmatch(norm)):
+        return True
+    return False
 
 
 def search_query_for(cat: str) -> str:

@@ -1,4 +1,6 @@
-export type FontCategory = "sans" | "serif" | "mono" | "display" | "script" | "blackletter";
+import { api } from "../api/client";
+
+export type FontCategory = "sans" | "serif" | "mono" | "display" | "script" | "blackletter" | "custom";
 
 export interface FontDef {
   id: string;
@@ -14,6 +16,7 @@ export const FONT_CATEGORIES: { id: FontCategory; label: string }[] = [
   { id: "display", label: "Display" },
   { id: "script", label: "Script" },
   { id: "blackletter", label: "Blackletter" },
+  { id: "custom", label: "Custom" },
 ];
 
 /** Installed catalog — user list plus a few extras suited to long-form reading. */
@@ -73,6 +76,13 @@ export interface AppFonts {
 }
 
 export function resolveFont(id: string, fallbackId: string): FontDef {
+  if (id?.startsWith(CUSTOM_FONT_PREFIX)) {
+    const filename = id.slice(CUSTOM_FONT_PREFIX.length);
+    const entry = customFontsCache.find((e) => e.filename === filename);
+    if (entry) {
+      return { id, label: entry.label, stack: `"${entry.family}", sans-serif`, category: "custom" };
+    }
+  }
   return FONT_BY_ID.get(id) || FONT_BY_ID.get(fallbackId) || APP_FONTS[0];
 }
 
@@ -100,4 +110,65 @@ export function applyAppFonts(fonts: AppFonts = loadAppFonts()) {
   const root = document.documentElement.style;
   root.setProperty("--font-sans", resolveFont(fonts.body, DEFAULT_BODY_FONT).stack);
   root.setProperty("--font-title", resolveFont(fonts.title, DEFAULT_TITLE_FONT).stack);
+}
+
+// ── Custom (user-uploaded) fonts ────────────────────────────────────────────
+// We never bundle or fetch third-party font files ourselves — only what the
+// user uploads via Settings, stored in their own vault and served locally.
+
+export const CUSTOM_FONT_PREFIX = "custom:";
+
+export interface CustomFontEntry {
+  filename: string;
+  url: string;
+  family: string;
+  label: string;
+}
+
+let customFontsCache: CustomFontEntry[] = [];
+
+function familyNameFor(filename: string): string {
+  const base = filename.replace(/\.[^.]+$/, "");
+  return `ygg-custom-${base}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+}
+
+function injectCustomFontFaces(entries: CustomFontEntry[]) {
+  let styleEl = document.getElementById("ygg-custom-fonts") as HTMLStyleElement | null;
+  if (!styleEl) {
+    styleEl = document.createElement("style");
+    styleEl.id = "ygg-custom-fonts";
+    document.head.appendChild(styleEl);
+  }
+  styleEl.textContent = entries
+    .map((e) => `@font-face { font-family: "${e.family}"; src: url("${e.url}"); font-display: swap; }`)
+    .join("\n");
+}
+
+export function getCustomFonts(): CustomFontEntry[] {
+  return customFontsCache;
+}
+
+export async function refreshCustomFonts(): Promise<CustomFontEntry[]> {
+  const { fonts } = await api.uploads.fonts.list();
+  customFontsCache = fonts.map((f) => ({
+    filename: f.filename,
+    url: f.url,
+    family: familyNameFor(f.filename),
+    label: f.filename.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " "),
+  }));
+  injectCustomFontFaces(customFontsCache);
+  return customFontsCache;
+}
+
+/** Curated + custom fonts, for pickers that should offer both. */
+export function getSelectableFonts(): FontDef[] {
+  return [
+    ...APP_FONTS,
+    ...customFontsCache.map((e) => ({
+      id: `${CUSTOM_FONT_PREFIX}${e.filename}`,
+      label: e.label,
+      stack: `"${e.family}", sans-serif`,
+      category: "custom" as FontCategory,
+    })),
+  ];
 }

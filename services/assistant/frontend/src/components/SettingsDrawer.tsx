@@ -34,12 +34,16 @@ import {
   FONT_CATEGORIES,
   loadAppFonts,
   saveAppFonts,
+  getSelectableFonts,
+  refreshCustomFonts,
   type AppFonts,
+  type CustomFontEntry,
 } from "../lib/fonts";
 import { APP_COPYRIGHT, APP_LICENSE, APP_OWNER } from "../lib/copyright";
 import { DEFAULT_ANALYSIS_TAGS, setCachedAnalysisTags, tagToKey } from "../lib/analysisTags";
 import { DEFAULT_TASK_STATUSES, setCachedTaskStatuses, STATUS_ICON_GLYPH, STATUS_ICON_CYCLE } from "../lib/taskStatuses";
 import type { TaskStatusDef, StatusIcon } from "../api/client";
+import { flushSettingsNow } from "../lib/settingsSync";
 
 interface McpConnection {
   id: string;
@@ -191,7 +195,34 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
   });
   const [modeTick, setModeTick] = useState(0);
   const [appFonts, setAppFonts] = useState<AppFonts>(() => loadAppFonts());
+  const [customFonts, setCustomFonts] = useState<CustomFontEntry[]>([]);
+  const [customFontBusy, setCustomFontBusy] = useState(false);
+  const [customFontMsg, setCustomFontMsg] = useState<string | null>(null);
   const [mcpConnections, setMcpConnections] = useState<McpConnection[]>(() => loadMcpConnections());
+
+  useEffect(() => {
+    if (open) refreshCustomFonts().then(setCustomFonts).catch(() => {});
+  }, [open]);
+
+  async function handleCustomFontUpload(file: File) {
+    setCustomFontBusy(true);
+    setCustomFontMsg(null);
+    try {
+      await api.uploads.fonts.add(file);
+      setCustomFonts(await refreshCustomFonts());
+      setCustomFontMsg(`Added "${file.name}"`);
+    } catch (e) {
+      setCustomFontMsg(e instanceof Error ? e.message : "Could not add font");
+    } finally {
+      setCustomFontBusy(false);
+      setTimeout(() => setCustomFontMsg(null), 4000);
+    }
+  }
+
+  async function handleCustomFontRemove(filename: string) {
+    await api.uploads.fonts.remove(filename);
+    setCustomFonts(await refreshCustomFonts());
+  }
 
   const [analysisTags, setAnalysisTags] = useState<string[]>([
     "Claim", "Evidence", "Reasoning", "Implications", "Context",
@@ -544,7 +575,8 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
   function saveAiProviders() {
     saveProviderStore(providerStore);
     setActiveProviderId(activeProvider);
-    setAiMsg("Saved in this browser only — never sent to the server except when you call Ask / Examine.");
+    flushSettingsNow();
+    setAiMsg("Saved — persisted so it survives app restarts.");
     setTimeout(() => setAiMsg(null), 4000);
   }
 
@@ -622,6 +654,7 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
       setActiveProviderId(activeProvider);
       localStorage.setItem(MCP_KEY, JSON.stringify(mcpConnections));
       applyTheme();
+      flushSettingsNow();
       try {
         const data = await persistServerSettings();
         if (data.ok === false) {
@@ -760,11 +793,11 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
                 <select
                   value={appFonts.body}
                   onChange={(e) => pickFont("body", e.target.value)}
-                  style={{ fontFamily: APP_FONTS.find((f) => f.id === appFonts.body)?.stack }}
+                  style={{ fontFamily: getSelectableFonts().find((f) => f.id === appFonts.body)?.stack }}
                 >
                   {FONT_CATEGORIES.map((cat) => (
                     <optgroup key={cat.id} label={cat.label}>
-                      {APP_FONTS.filter((f) => f.category === cat.id).map((f) => (
+                      {getSelectableFonts().filter((f) => f.category === cat.id).map((f) => (
                         <option key={f.id} value={f.id} style={{ fontFamily: f.stack }}>
                           {f.label}
                         </option>
@@ -778,11 +811,11 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
                 <select
                   value={appFonts.title}
                   onChange={(e) => pickFont("title", e.target.value)}
-                  style={{ fontFamily: APP_FONTS.find((f) => f.id === appFonts.title)?.stack }}
+                  style={{ fontFamily: getSelectableFonts().find((f) => f.id === appFonts.title)?.stack }}
                 >
                   {FONT_CATEGORIES.map((cat) => (
                     <optgroup key={cat.id} label={cat.label}>
-                      {APP_FONTS.filter((f) => f.category === cat.id).map((f) => (
+                      {getSelectableFonts().filter((f) => f.category === cat.id).map((f) => (
                         <option key={f.id} value={f.id} style={{ fontFamily: f.stack }}>
                           {f.label}
                         </option>
@@ -798,6 +831,37 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
                 The claim needs a specific observation, not a restatement of the abstract.
               </p>
             </div>
+
+            <div className="settings-info" style={{ marginTop: 12 }}>
+              Custom fonts — upload your own .ttf/.otf/.woff/.woff2 files (e.g. a brush or display font you own the
+              license for). They then appear above under "Custom" and can be used for Main text, Titles, or the Loki
+              page title in Edit page.
+            </div>
+            <div className="custom-font-list">
+              {customFonts.length === 0 ? (
+                <div className="muted" style={{ fontSize: 12 }}>No custom fonts added yet.</div>
+              ) : (
+                customFonts.map((f) => (
+                  <div key={f.filename} className="custom-font-row">
+                    <span style={{ fontFamily: `"${f.family}", sans-serif` }}>{f.label}</span>
+                    <button type="button" className="btn" onClick={() => handleCustomFontRemove(f.filename)}>
+                      Remove
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+            <input
+              type="file"
+              accept=".ttf,.otf,.woff,.woff2"
+              disabled={customFontBusy}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleCustomFontUpload(file);
+                e.target.value = "";
+              }}
+            />
+            {customFontMsg && <div className="settings-info" style={{ marginTop: 4 }}>{customFontMsg}</div>}
           </div>
 
           <div className="settings-item" style={{ marginTop: 14 }}>

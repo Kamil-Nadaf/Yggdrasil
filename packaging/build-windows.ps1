@@ -92,7 +92,7 @@ AI: set your API key in Settings (LM Studio / Claude / …). Ollama optional.
 
 Known v0 limitation: automatic LaTeX (TinyTeX) install is not wired up on
 Windows yet. Everything else (Dashboard, Notes, Tasks, Search, Graph, Daily
-ArXiv) works without it. To use the LaTeX Editor, install a LaTeX
+Archive) works without it. To use the LaTeX Editor, install a LaTeX
 distribution yourself (e.g. MiKTeX: https://miktex.org/download) and make
 sure pdflatex/latexmk are on your PATH before opening Yggdrasil.
 "@ | Set-Content -Encoding UTF8 (Join-Path $Dist "README.txt")

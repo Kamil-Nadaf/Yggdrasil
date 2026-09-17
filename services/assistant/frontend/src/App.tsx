@@ -12,6 +12,7 @@ import ArxivBrowser from "./views/ArxivBrowser";
 import TasksView from "./views/TasksView";
 import { applyTheme } from "./lib/theme";
 import { APP_WATERMARK } from "./lib/copyright";
+import { startSettingsSync } from "./lib/settingsSync";
 
 export type View = "editor" | "graph" | "ask" | "scores" | "latex" | "search" | "browse" | "tasks";
 
@@ -27,6 +28,8 @@ export default function App() {
   useEffect(() => {
     applyTheme(view);
   }, [view]);
+
+  useEffect(() => startSettingsSync(), []);
 
   useEffect(() => {
     fetch("/api/info")

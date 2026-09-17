@@ -38,6 +38,26 @@ def free_port() -> int:
         return int(sock.getsockname()[1])
 
 
+# The webview loads http://127.0.0.1:{port}, and browser localStorage (theme, API
+# keys, provider settings) is scoped per-origin including the port. A random port
+# each launch means a fresh, empty localStorage every time — so the app server
+# binds this fixed port by default, only falling back to a random one if it's
+# somehow already taken (e.g. another instance running).
+DEFAULT_APP_PORT = 47285
+
+
+def app_port() -> int:
+    override = os.environ.get("YGG_PORT")
+    if override:
+        return int(override)
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", DEFAULT_APP_PORT))
+            return DEFAULT_APP_PORT
+    except OSError:
+        return free_port()
+
+
 def wait_for_server(url: str, tries: int = 80) -> None:
     for _ in range(tries):
         try:
@@ -179,7 +199,7 @@ def boot(window) -> None:
                 "LATEX_PORT": str(latex_port),
             },
         )
-    port = int(os.environ.get("YGG_PORT", "0")) or free_port()
+    port = app_port()
     url = f"http://127.0.0.1:{port}"
 
     import uvicorn
@@ -239,7 +259,11 @@ def main() -> None:
         min_size=(960, 640),
         js_api=DesktopApi(),
     )
-    webview.start(boot, window)
+    storage_path = support_dir() / "webview-storage"
+    storage_path.mkdir(parents=True, exist_ok=True)
+    # private_mode=True is pywebview's default and silently drops cookies/localStorage
+    # (theme, API keys, provider settings) on every quit — must disable it explicitly.
+    webview.start(boot, window, private_mode=False, storage_path=str(storage_path))
 
 
 if __name__ == "__main__":

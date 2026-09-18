@@ -20,9 +20,44 @@ it once on your own machine (`uv` and Node 20+ are the only requirements; see
 bash packaging/build-macos-app.sh
 ```
 
-1. Open `release/Yggdrasil-*-mac.dmg`, drag **Yggdrasil** into Applications
-2. Open it. If macOS warns it's from an unidentified developer: right-click → Open → Open
-3. First launch installs LaTeX (TinyTeX) once — needs internet, one-time only
+#### Installing from the DMG
+
+1. Double-click the `.dmg` file. It opens a small window showing the **Yggdrasil** app icon.
+2. Drag **Yggdrasil** into your **Applications** folder (shortcut on the left side of the same window).
+3. Eject the DMG (click the arrow next to it in Finder's sidebar, or drag it to Trash).
+4. Open **Finder → Applications**, find **Yggdrasil**, and double-click it.
+
+#### If macOS blocks the app (security fixes)
+
+Because this app is built locally and not signed by a registered Apple Developer, macOS Gatekeeper will likely show a warning on the first launch. Here is how to get past each message:
+
+**A. "Yggdrasil cannot be opened because the developer cannot be verified"**
+
+1. Click **Cancel** on the warning dialog.
+2. Go to **System Settings → Privacy & Security**.
+3. Scroll down to the **Security** section. You will see a message:  
+   *"Yggdrasil was blocked from opening because it is not from an identified developer."*
+4. Click **Open Anyway**.
+5. A final confirmation dialog appears — click **Open**.
+
+> **Quick alternative:** Instead of double-clicking, you can right-click (or Control-click) the app icon and choose **Open**. This gives you the "Open" button immediately on the first launch.
+
+**B. "Yggdrasil is damaged and can't be opened. You should move it to the Trash."**
+
+The app is **not actually damaged** — it works fine on the machine that built it. macOS adds a `com.apple.quarantine` flag when an app is downloaded or moved from another computer, and Gatekeeper treats unsigned apps with that flag as "damaged." Removing the flag restores it.
+
+**Fix:** Open **Terminal** ( press Cmd+Space, type "Terminal", press Enter ) and run:
+
+```bash
+xattr -cr /Applications/Yggdrasil.app
+```
+
+Then try opening the app again from Applications.
+
+#### First launch
+
+- The first time you open Yggdrasil it installs **TinyTeX** (a minimal LaTeX distribution) — this requires an internet connection and takes a few minutes. It only happens once.
+- You will then be asked to choose a folder for your notes (vault). You can change this later in **Settings → Data**.
 
 ### Linux
 

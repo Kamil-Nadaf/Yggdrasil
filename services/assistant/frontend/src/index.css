@@ -478,12 +478,32 @@ body {
   flex-shrink: 0;
 }
 
-.nav-logo-img {
-  width: 32px;
-  height: 32px;
-  flex-shrink: 0;
+/* The logo (YggdrasilLogo component): the real /yggdrasil-logo.png stacked
+ * with a same-image mask tint. [data-logo-mode] on <html> (set from
+ * lib/logoTheme.ts) picks which layer shows — "original" leaves the artwork
+ * untouched; "accent"/"custom" show a single-colour tint of it instead. */
+.ygg-logo {
+  position: relative;
   display: block;
-  background-color: var(--accent);
+  flex-shrink: 0;
+}
+
+.ygg-logo .logo-original,
+.ygg-logo .logo-tint {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.ygg-logo .logo-original {
+  object-fit: contain;
+  opacity: 1;
+}
+
+.ygg-logo .logo-tint {
+  background-color: var(--logo-color, var(--accent));
   -webkit-mask-image: url(/yggdrasil-logo.png);
   mask-image: url(/yggdrasil-logo.png);
   -webkit-mask-size: contain;
@@ -492,6 +512,40 @@ body {
   mask-repeat: no-repeat;
   -webkit-mask-position: center;
   mask-position: center;
+  opacity: 0;
+}
+
+html[data-logo-mode="accent"] .ygg-logo .logo-original,
+html[data-logo-mode="custom"] .ygg-logo .logo-original {
+  opacity: 0;
+}
+
+html[data-logo-mode="accent"] .ygg-logo .logo-tint,
+html[data-logo-mode="custom"] .ygg-logo .logo-tint {
+  opacity: 1;
+}
+
+.logo-colour-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.logo-colour-preview {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--accent);
+}
+
+.logo-colour-controls {
+  flex: 1;
+  min-width: 0;
 }
 
 .nav-logo-text {
@@ -4001,6 +4055,107 @@ h2 { font-size: 15px; color: var(--accent); }
 .notes-md-preview {
   line-height: 1.7;
   background: var(--bg);
+}
+
+/* Editable markdown tables (live preview) — click a cell, no | --- | syntax */
+.md-table-widget {
+  margin: 12px 0;
+}
+
+.md-editable-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+
+.md-editable-table th,
+.md-editable-table td {
+  border: 1px solid var(--border);
+  padding: 0;
+}
+
+.md-table-cell-row {
+  display: flex;
+  align-items: center;
+}
+
+.md-editable-table input {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  padding: 6px 8px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.md-editable-table thead input {
+  font-weight: 600;
+}
+
+.md-editable-table input:focus {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.md-table-remove-btn {
+  flex-shrink: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 8px;
+  opacity: 0;
+}
+
+.md-editable-table tr:hover .md-table-remove-btn,
+.md-editable-table th:hover .md-table-remove-btn {
+  opacity: 1;
+}
+
+.md-table-remove-btn:hover {
+  color: var(--text);
+}
+
+.md-table-add-col-cell,
+.md-table-row-remove-cell {
+  width: 28px;
+  border: 0 !important;
+  text-align: center;
+}
+
+.md-table-add-btn {
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 4px;
+  width: 22px;
+  height: 22px;
+  line-height: 1;
+}
+
+.md-table-add-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.md-table-add-row-btn {
+  margin-top: 4px;
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.md-table-add-row-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
 }
 
 .notes-present-content {

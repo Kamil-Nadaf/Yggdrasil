@@ -1,4 +1,5 @@
 import type { View } from "../App";
+import YggdrasilLogo from "./YggdrasilLogo";
 
 const ITEMS: { id: View; label: string }[] = [
   { id: "scores", label: "Dashboard" },
@@ -23,7 +24,7 @@ export default function Nav({ current, onNavigate, onSettingsOpen, onPageEdit, p
   return (
     <nav className="app-nav">
       <div className="nav-brand">
-        <span className="nav-logo-img" aria-hidden="true" />
+        <YggdrasilLogo size={32} className="nav-logo-img" />
         <span className="nav-logo-text">YGGDRASIL</span>
       </div>
       <div className="nav-tabs">

@@ -274,7 +274,14 @@ async def compile_latex(payload: CompileRequest):
             source_path = job / f"{rel_inside}.tex"
             source_path.parent.mkdir(parents=True, exist_ok=True)
         else:
-            # Flat file at 70-LaTeX root — just the single .tex
+            # Flat file at 70-LaTeX root. Also mirror sibling asset files sitting
+            # next to it (bib/cls/bst/sty/images/…) so \bibliography, \includegraphics,
+            # and \documentclass{aa}-style custom classes resolve just like they do
+            # for a project-folder compile — a multi-file "select files" import that
+            # never created a subfolder still needs its companions on the search path.
+            for sibling in LATEX_DIR.iterdir():
+                if sibling.is_file() and sibling.suffix.lower() in ASSET_EXTS:
+                    shutil.copy2(sibling, job / sibling.name)
             bare = stem.split("/")[-1]
             source_path = job / f"{bare}.tex"
 

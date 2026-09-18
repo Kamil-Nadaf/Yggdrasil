@@ -1,23 +1,77 @@
-# Yggdrasil — CERIC Reading System
+# Yggdrasil
 
-A self-hosted Docker web app for daily paper reading and active knowledge building.
-Built around the **CERIC method**: Claim · Evidence · Reasoning · Implications · Context.
+A personal research app: paper reading (arXiv / OpenAlex / Europe PMC), notes,
+tasks, a knowledge graph, a LaTeX editor, and **Loki** — an AI assistant that
+answers only from what you've written. Built around the **CERIC method**:
+Claim · Evidence · Reasoning · Implications · Context.
 
-## Quick Start
+Runs as a native desktop app (Mac / Linux / Windows, no Docker) or as a
+self-hosted Docker web app.
+
+## Install
+
+Pick your OS. Each app is a local build — there's no download link, you build
+it once on your own machine (`uv` and Node 20+ are the only requirements; see
+[`packaging/DESKTOP.md`](packaging/DESKTOP.md) for details).
+
+### macOS
+
+```bash
+bash packaging/build-macos-app.sh
+```
+
+1. Open `release/Yggdrasil-*-mac.dmg`, drag **Yggdrasil** into Applications
+2. Open it. If macOS warns it's from an unidentified developer: right-click → Open → Open
+3. First launch installs LaTeX (TinyTeX) once — needs internet, one-time only
+
+### Linux
+
+```bash
+bash packaging/build-linux.sh
+```
+
+1. Extract `release/Yggdrasil-*-linux.tar.gz`
+2. Run `./Yggdrasil` from inside the extracted folder
+3. First launch installs LaTeX (TinyTeX) once — needs internet, one-time only
+
+### Windows
+
+Build on an actual Windows machine (cross-compiling isn't supported):
+
+```powershell
+powershell -File packaging/build-windows.ps1
+```
+
+1. Extract `release/Yggdrasil-*-windows.zip`
+2. Double-click `Yggdrasil.bat`
+3. LaTeX doesn't auto-install on Windows yet — install [MiKTeX](https://miktex.org/download)
+   yourself and make sure `pdflatex`/`latexmk` are on your PATH. Everything else
+   (Dashboard, Notes, Tasks, Search, Daily Archive, Graph, Loki) works without it.
+
+### First launch (all platforms)
+
+1. Choose a folder for your notes — anywhere you like, changeable later in
+   Settings → Data
+2. In Settings → AI Providers, add an API key (Claude / LM Studio / DeepSeek /
+   etc.) to use Loki and paper analysis — Ollama is optional, not required
+
+### Connect it to your coding agent
+
+Loki's notes/papers/tasks are also reachable from Claude Code, Cursor, or any
+MCP-aware IDE — see [`packaging/MCP.md`](packaging/MCP.md).
+
+---
+
+## Self-hosted (Docker)
+
+For a shared, always-on server instead of a local app on one machine.
 
 ### 1. Prerequisites
 
 - Docker + Docker Compose
-- Syncthing (already installed on all devices)
-- Tailscale (for remote access from iPad / other devices)
+- Tailscale (for remote access from other devices)
 
-### 2. Initialise the vault
-
-```bash
-VAULT_HOST_PATH=/data/grb-vault bash scripts/init-vault.sh
-```
-
-### 3. Configure
+### 2. Configure
 
 ```bash
 cp .env.example .env
@@ -27,7 +81,7 @@ cp .env.example .env
 #   ZOTERO_USER_ID + ZOTERO_API_KEY (optional)
 ```
 
-### 4. Start
+### 3. Start
 
 ```bash
 docker compose up -d
@@ -39,19 +93,18 @@ First run pulls the Ollama embedding model (~270 MB):
 docker exec yggdrasil-ollama ollama pull nomic-embed-text
 ```
 
-### 5. Access
+### 4. Access
 
-- **Browser (any device)**: `http://<mac-mini-tailscale-ip>:8000`
-- **Syncthing** syncs the vault folder to your Mac, Ubuntu, iPad
+- **Browser (any device)**: `http://<host-tailscale-ip>:8000`
 
 ---
 
 ## Daily Workflow
 
 ```
-06:30 CST: arXiv cron → Brief-YYYY-MM-DD.md + paper notes in 00-Inbox / 10-Papers
+Daily Archive: browse today's papers (arXiv / OpenAlex / Europe PMC)
      ↓
-Triage view: Read / Skip / Later each paper
+Triage: Read / Skip / Later each paper
      ↓ (verdict = Read)
 CERIC Editor: fill Claim, Evidence, Reasoning, Implications, Context
               write Adversarial Question → check aq_written
@@ -60,22 +113,10 @@ Gate opens → /examine button active
      ↓
 AI analysis appended as > [!ai] callout
      ↓
-Update Concept notes in 20-Concepts/
-Open new Questions in 30-Questions/
+Update Concept notes; open new Questions
      ↓ (weekly)
-Write Synthesis in 50-Syntheses/
+Write a Synthesis
 ```
-
----
-
-## Services
-
-| Container | Role |
-|-----------|------|
-| `yggdrasil-ollama` | nomic-embed-text embeddings |
-| `yggdrasil-arxiv-daily` | 06:30 CST arXiv fetch + Brief writer |
-| `yggdrasil-indexer` | Watchdog → chunk → embed → LanceDB |
-| `yggdrasil-assistant` | FastAPI API + React frontend |
 
 ---
 
@@ -87,12 +128,6 @@ Write Synthesis in 50-Syntheses/
 
 This is enforced server-side in `gate.py`. There is no bypass.
 The Gate is the integrity mechanism — it forces you to think before AI assists.
-
----
-
-## Environment Variables
-
-See `.env.example` for all variables with comments.
 
 ---
 
@@ -111,6 +146,6 @@ See `.env.example` for all variables with comments.
 
 ---
 
-## For Agents (Cursor / Copilot)
+## For Agents (Cursor / Copilot / Claude Code)
 
 See **AGENTS.md** for the full build specification.

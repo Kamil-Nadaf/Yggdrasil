@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type LatexFile } from "../api/client";
 import AbstractText from "../components/AbstractText";
+import EditableMarkdownPreview from "../components/EditableMarkdownPreview";
 import { WorkspaceLayout, WorkspacePanel, WorkspaceResizeHandle } from "../components/WorkspaceLayout";
 import { WorkspaceSidebar } from "../components/WorkspaceSidebar";
 import {
@@ -611,7 +612,15 @@ export default function MarkdownNotesTab({ section = "Quick Notes" }: { section?
         {(mode === "split" || mode === "view") && (
           <WorkspacePanel id="notes-preview" defaultSize={mode === "split" ? "50" : "100"} minSize="25" className="latex-panel">
             {selected || dirty ? (
-              <AbstractText text={stripFrontmatter(source)} className="notes-md-preview" />
+              <EditableMarkdownPreview
+                source={stripFrontmatter(source)}
+                onChange={(nextBody) => {
+                  const fm = source.match(/^---[\s\S]*?---\s*/);
+                  setSource((fm ? fm[0] : "") + nextBody);
+                  setDirty(true);
+                }}
+                className="notes-md-preview"
+              />
             ) : (
               <div className="latex-preview-empty">No preview — create or open a note.</div>
             )}

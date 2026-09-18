@@ -1,5 +1,5 @@
 fastapi==0.115.0
-uvicorn[standard]==0.30.6
+uvicorn[standard]==0.34.0
 python-frontmatter==1.1.0
 pyyaml==6.0.2
 lancedb==0.38.0
@@ -9,3 +9,4 @@ anthropic==0.34.2
 watchdog==4.0.2
 aiofiles==24.1.0
 python-multipart==0.0.12
+mcp==1.30.0

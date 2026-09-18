@@ -45,8 +45,8 @@ Write-Host "→ Assembling $Dist"
 if (Test-Path $Dist) { Remove-Item -Recurse -Force $Dist }
 New-Item -ItemType Directory -Force -Path $DistApp, $DistDesktop, $DistLatex, (Join-Path $Dist "feynman"), $DistVenv | Out-Null
 
-Copy-Item (JP $DesktopSrc @("launch.py")), (JP $DesktopSrc @("setup.py")), (JP $DesktopSrc @("splash.html")) $DistDesktop
-foreach ($f in @("main.py", "gate.py", "zotero.py", "data_manifest.py", "graph_links.py", "analysis_tags.py", "arxiv_topics.py", "task_statuses.py", "goals.py")) {
+Copy-Item (JP $DesktopSrc @("launch.py")), (JP $DesktopSrc @("setup.py")), (JP $DesktopSrc @("splash.html")), (JP $DesktopSrc @("yggdrasil-logo.png")) $DistDesktop
+foreach ($f in @("main.py", "gate.py", "zotero.py", "data_manifest.py", "graph_links.py", "analysis_tags.py", "arxiv_topics.py", "task_statuses.py", "goals.py", "mcp_server.py")) {
   Copy-Item (Join-Path $AssistantSrc $f) $DistApp
 }
 $DistFrontendDir = Join-Path $DistApp "frontend"

@@ -15,6 +15,7 @@ const PERSISTED_KEYS = [
   "yggdrasil:tactile-accent",
   "yggdrasil:theme-accents",
   "yggdrasil:custom-theme",
+  "yggdrasil:logo-colors",
   "yggdrasil:app-fonts",
   "yggdrasil:ai-providers",
   "yggdrasil:ai-active-provider",

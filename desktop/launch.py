@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -88,6 +89,57 @@ def default_data_path() -> Path:
     return Path.home() / "Documents" / "Yggdrasil"
 
 
+# Mirrors THEMES[].swatch.accent in services/assistant/frontend/src/lib/theme.ts —
+# the default accent per theme when the user hasn't picked a custom one.
+_DEFAULT_THEME_ACCENTS = {
+    "dark": "#4FC3F7",
+    "paper": "#000000",
+    "tactile": "#C97B4A",
+    "observatory": "#1a1a1a",
+    "manuscript": "#e8a020",
+    "custom": "#4FC3F7",
+}
+_HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def resolve_splash_color(vault: Path) -> str:
+    """Read the saved theme/logo colour from the vault settings so the splash
+    screen (shown before the app server starts) matches the in-app theme instead
+    of always using the hardcoded default accent."""
+    fallback = "#4FC3F7"
+    try:
+        settings_path = vault / ".ygg-config" / "settings.json"
+        if not settings_path.exists():
+            return fallback
+        data = json.loads(settings_path.read_text())
+        prefs = (data.get("client_prefs") or {})
+        theme_id = prefs.get("theme") or "paper"
+        accent = _DEFAULT_THEME_ACCENTS.get(theme_id, fallback)
+        accents_raw = prefs.get("yggdrasil:theme-accents")
+        if accents_raw:
+            accents = json.loads(accents_raw)
+            saved = accents.get(theme_id)
+            if isinstance(saved, str) and _HEX_RE.match(saved):
+                accent = saved
+        if theme_id == "custom":
+            custom_raw = prefs.get("yggdrasil:custom-theme")
+            if custom_raw:
+                custom = json.loads(custom_raw)
+                saved = custom.get("accent")
+                if isinstance(saved, str) and _HEX_RE.match(saved):
+                    accent = saved
+        logo_raw = prefs.get("yggdrasil:logo-colors")
+        if logo_raw:
+            logo = json.loads(logo_raw)
+            if logo.get("mode") == "custom":
+                color = logo.get("color")
+                if isinstance(color, str) and _HEX_RE.match(color):
+                    accent = color
+        return accent if _HEX_RE.match(accent) else fallback
+    except Exception:
+        return fallback
+
+
 def boot(window) -> None:
     bundle = bundle_dir()
     resources = resources_dir()
@@ -138,6 +190,10 @@ def boot(window) -> None:
         vault = Path(inspected["manifest"]["vault_path"]).expanduser()
         inspected = inspect_data_dir(vault)
     ensure_layout_safe(vault)
+    try:
+        window.evaluate_js(f"setAccentColor({json.dumps(resolve_splash_color(vault))})")
+    except Exception:
+        pass
     legacy_index = support / "lancedb"
     index_dir, _index_note = prepare_index(vault, legacy_index if legacy_index.exists() else None)
     recovered = bool(inspected.get("existingData"))
@@ -161,8 +217,16 @@ def boot(window) -> None:
         recovered = bool(inspected.get("existingData"))
 
     def progress(msg: str) -> None:
+        # setStatus() also fills one leaf of the splash logo per step.
         try:
             window.evaluate_js(f"setStatus({json.dumps(msg)})")
+        except Exception:
+            pass
+
+    def progress_done() -> None:
+        """Light the last leaf — setStatus() holds it back until setup really finishes."""
+        try:
+            window.evaluate_js("setProgress(1)")
         except Exception:
             pass
 
@@ -212,6 +276,7 @@ def boot(window) -> None:
     thread.start()
     wait_for_server(f"{url}/api/info")
     progress("Opening Yggdrasil…")
+    progress_done()
     window.load_url(url)
 
 

@@ -32,8 +32,8 @@ cat > "${APP}/Contents/Info.plist" << 'EOF'
   <key>CFBundleName</key><string>Yggdrasil</string>
   <key>CFBundleDisplayName</key><string>Yggdrasil</string>
   <key>CFBundleIdentifier</key><string>io.yggdrasil.app</string>
-  <key>CFBundleVersion</key><string>0.1.5</string>
-  <key>CFBundleShortVersionString</key><string>0.1.5</string>
+  <key>CFBundleVersion</key><string>0.2</string>
+  <key>CFBundleShortVersionString</key><string>0.2</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>Yggdrasil</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
@@ -59,6 +59,7 @@ chmod +x "${APP}/Contents/MacOS/Yggdrasil"
 cp "${ROOT}/desktop/launch.py" "${RES}/desktop/launch.py"
 cp "${ROOT}/desktop/setup.py" "${RES}/desktop/setup.py"
 cp "${ROOT}/desktop/splash.html" "${RES}/desktop/splash.html"
+cp "${ROOT}/desktop/yggdrasil-logo.png" "${RES}/desktop/yggdrasil-logo.png"
 cp "${ROOT}/services/assistant/main.py" "${APPDIR}/main.py"
 cp "${ROOT}/services/assistant/gate.py" "${APPDIR}/gate.py"
 cp "${ROOT}/services/assistant/zotero.py" "${APPDIR}/zotero.py"
@@ -68,6 +69,7 @@ cp "${ROOT}/services/assistant/analysis_tags.py" "${APPDIR}/analysis_tags.py"
 cp "${ROOT}/services/assistant/arxiv_topics.py" "${APPDIR}/arxiv_topics.py"
 cp "${ROOT}/services/assistant/task_statuses.py" "${APPDIR}/task_statuses.py"
 cp "${ROOT}/services/assistant/goals.py" "${APPDIR}/goals.py"
+cp "${ROOT}/services/assistant/mcp_server.py" "${APPDIR}/mcp_server.py"
 rm -rf "${APPDIR}/frontend"
 mkdir -p "${APPDIR}/frontend"
 cp -R "${FRONTEND}/dist" "${APPDIR}/frontend/dist"

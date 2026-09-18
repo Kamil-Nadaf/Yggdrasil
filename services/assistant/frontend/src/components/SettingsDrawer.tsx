@@ -29,6 +29,14 @@ import {
   type CustomTheme,
   type ThemeMode,
 } from "../lib/theme";
+import YggdrasilLogo from "./YggdrasilLogo";
+import {
+  loadLogoTheme,
+  saveLogoTheme,
+  applyLogoVars,
+  type LogoTheme,
+  type LogoColorMode,
+} from "../lib/logoTheme";
 import {
   APP_FONTS,
   FONT_CATEGORIES,
@@ -194,6 +202,7 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
     return loadThemeAccent(THEMES.some((t) => t.id === raw) ? raw : "custom");
   });
   const [modeTick, setModeTick] = useState(0);
+  const [logoTheme, setLogoThemeState] = useState<LogoTheme>(() => loadLogoTheme());
   const [appFonts, setAppFonts] = useState<AppFonts>(() => loadAppFonts());
   const [customFonts, setCustomFonts] = useState<CustomFontEntry[]>([]);
   const [customFontBusy, setCustomFontBusy] = useState(false);
@@ -533,6 +542,22 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
       return;
     }
     saveThemeAccent(settings.theme, hex);
+  }
+
+  function updateLogoTheme(patch: Partial<LogoTheme>) {
+    const next = { ...logoTheme, ...patch };
+    setLogoThemeState(next);
+    saveLogoTheme(next);
+    applyLogoVars(themeAccent, next);
+  }
+
+  /** Switching to Custom seeds the picker from whatever colour is on screen now. */
+  function pickLogoMode(mode: LogoColorMode) {
+    if (mode !== "custom") {
+      updateLogoTheme({ mode });
+      return;
+    }
+    updateLogoTheme({ mode, color: themeAccent });
   }
 
   function seedCustomFrom(id: "dark" | "paper" | "tactile") {
@@ -892,6 +917,49 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
                   onChange={(e) => pickThemeAccent(e.target.value)}
                 />
               </label>
+            </div>
+          </div>
+
+          <div className="settings-item" style={{ marginTop: 14 }}>
+            <label>Logo colour</label>
+            <div className="settings-info" style={{ marginBottom: 8 }}>
+              The Yggdrasil logo in the top bar and on the installer screen. "Original" is the artwork as designed;
+              the other modes apply a single-colour tint on top of it.
+            </div>
+            <div className="logo-colour-row">
+              <div className="logo-colour-preview">
+                <YggdrasilLogo size={56} />
+              </div>
+              <div className="logo-colour-controls">
+                <div className="theme-mode-toggle">
+                  {(
+                    [
+                      ["original", "Original"],
+                      ["accent", "Match accent"],
+                      ["custom", "Custom"],
+                    ] as const
+                  ).map(([mode, label]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={`theme-mode-btn${logoTheme.mode === mode ? " selected" : ""}`}
+                      onClick={() => pickLogoMode(mode)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {logoTheme.mode === "custom" && (
+                  <label className="theme-color-field" style={{ marginTop: 10 }}>
+                    <span>Tint</span>
+                    <input
+                      type="color"
+                      value={logoTheme.color}
+                      onChange={(e) => updateLogoTheme({ color: e.target.value })}
+                    />
+                  </label>
+                )}
+              </div>
             </div>
           </div>
 

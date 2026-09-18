@@ -22,7 +22,8 @@ mkdir -p "$DIST/app" "$DIST/desktop" "$DIST/latex" "$DIST/feynman" "$DIST/venv"
 cp "${ROOT}/desktop/launch.py" "$DIST/desktop/"
 cp "${ROOT}/desktop/setup.py" "$DIST/desktop/"
 cp "${ROOT}/desktop/splash.html" "$DIST/desktop/"
-for f in main.py gate.py zotero.py data_manifest.py graph_links.py analysis_tags.py arxiv_topics.py task_statuses.py goals.py; do
+cp "${ROOT}/desktop/yggdrasil-logo.png" "$DIST/desktop/"
+for f in main.py gate.py zotero.py data_manifest.py graph_links.py analysis_tags.py arxiv_topics.py task_statuses.py goals.py mcp_server.py; do
   cp "${ROOT}/services/assistant/$f" "$DIST/app/"
 done
 mkdir -p "$DIST/app/frontend"

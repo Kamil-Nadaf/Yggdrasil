@@ -1,4 +1,5 @@
 import { applyAppFonts } from "./fonts";
+import { applyLogoVars } from "./logoTheme";
 
 export interface ThemeDef {
   id: string;
@@ -547,12 +548,14 @@ export function applyTheme(pageId?: PageId) {
   } else {
     document.documentElement.removeAttribute("data-mode");
   }
+  const accent = loadThemeAccent(theme);
   if (theme === "custom") {
     applyCustomVars(loadCustomTheme());
   } else {
     clearInlineThemeVars();
-    document.documentElement.style.setProperty("--accent", loadThemeAccent(theme));
+    document.documentElement.style.setProperty("--accent", accent);
   }
+  applyLogoVars(accent);
   applyPageVars(currentPageId, theme);
   applyAppFonts();
   notifyTheme();

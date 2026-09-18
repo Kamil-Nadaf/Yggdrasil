@@ -1708,6 +1708,41 @@ async def _fetch_openalex_daily(topic_query: str, max_results: int = 50, target_
     return []
 
 
+async def _fetch_semantic_scholar_abstract(client: httpx.AsyncClient, doi: str) -> Optional[str]:
+    try:
+        resp = await client.get(
+            f"https://api.semanticscholar.org/graph/v1/paper/DOI:{doi}",
+            params={"fields": "abstract"},
+            timeout=6.0,
+        )
+        if resp.status_code != 200:
+            return None
+        abstract = resp.json().get("abstract")
+        return abstract.strip() if abstract else None
+    except httpx.HTTPError:
+        return None
+
+
+async def _backfill_missing_abstracts(papers: list[dict], limit: int = 12) -> None:
+    """Best-effort: OpenAlex omits abstracts for many paywalled journal papers
+    (Nature, etc.) even when the rest of the metadata is public. Semantic
+    Scholar's public API (no key required) frequently has the abstract via DOI
+    lookup — fill gaps in place so users can still read something before
+    opening the paper elsewhere."""
+    candidates = [p for p in papers if p.get("doi") and not (p.get("abstract") or "").strip()]
+    if not candidates:
+        return
+    candidates = candidates[:limit]
+    async with httpx.AsyncClient() as client:
+        found = await asyncio.gather(
+            *[_fetch_semantic_scholar_abstract(client, p["doi"]) for p in candidates],
+            return_exceptions=True,
+        )
+    for p, abstract in zip(candidates, found):
+        if isinstance(abstract, str) and abstract:
+            p["abstract"] = abstract
+
+
 async def _fetch_openalex_search(query: str, field: str = "all", start: int = 0, max_results: int = 50) -> tuple[list[dict], int]:
     headers = {"User-Agent": "Yggdrasil/1.0 (mailto:academic-reader@yggdrasil.local)"}
     page = (start // max_results) + 1 if max_results > 0 else 1
@@ -2100,9 +2135,11 @@ async def arxiv_search(
     # Explicit single source
     if source == "openalex":
         papers, total = await _fetch_openalex_search(q, field, start, max_results)
+        await _backfill_missing_abstracts(papers)
         return {"papers": papers, "total": total, "start": start}
     if source == "europepmc":
         papers, total = await _fetch_europepmc_search(q, start, max_results)
+        await _backfill_missing_abstracts(papers)
         return {"papers": papers, "total": total, "start": start}
     if source == "arxiv":
         prefix = ARXIV_FIELD_PREFIX.get(field, "all")
@@ -2154,8 +2191,10 @@ async def arxiv_search(
             seen_titles.add(title_key)
         combined.append(p)
 
+    page = combined[:max_results]
+    await _backfill_missing_abstracts(page)
     return {
-        "papers": combined[:max_results],
+        "papers": page,
         "total": max(oa_total + ar_total, len(combined)),
         "start": start,
     }
@@ -3951,6 +3990,24 @@ async def search_notes(q: str, limit: int = 30):
         if len(results) >= limit:
             break
     return {"results": results, "query": q}
+
+
+@app.get("/api/vault/file")
+async def get_vault_file(path: str):
+    """Read any vault file by its path relative to the vault root, as returned
+    by /api/search's `path` field. Used by the MCP server so external tools
+    (IDEs, coding agents) can pull full note/paper content after a search hit."""
+    rel = Path(path)
+    if rel.is_absolute() or ".." in rel.parts:
+        raise HTTPException(status_code=400, detail="Invalid path")
+    full = (VAULT / rel).resolve()
+    try:
+        full.relative_to(VAULT.resolve())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid path")
+    if not full.exists() or not full.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return {"path": str(rel), "content": full.read_text(errors="replace")}
 
 
 # ── Citation graph (Semantic Scholar, best-effort) + AI-adjacent suggestions ──

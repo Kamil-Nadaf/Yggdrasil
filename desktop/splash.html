@@ -4,33 +4,77 @@
   <meta charset="utf-8" />
   <title>Yggdrasil</title>
   <style>
+    :root { --accent: #4FC3F7; }
     html, body { margin: 0; height: 100%; font-family: "IBM Plex Sans", system-ui, sans-serif; background: #f5f5f2; color: #1a1a1a; }
     .wrap { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px; box-sizing: border-box; }
-    h1 { font-family: "IBM Plex Serif", Georgia, serif; font-size: 34px; letter-spacing: 0.01em; margin: 0 0 18px; }
+
+    /* The real logo shown beneath a theme-coloured tint of itself. The dim
+       base image stays visible so the mark never looks redrawn or incomplete;
+       only the colour overlay changes with the app theme. */
+    .mark { position: relative; width: 132px; height: 132px; margin-bottom: 14px; }
+    .mark img, .mark .mark-tint { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+    .mark-base { opacity: 0.28; filter: grayscale(0.4); }
+    .mark-tint {
+      background-color: var(--accent);
+      -webkit-mask-image: url(yggdrasil-logo.png);
+      mask-image: url(yggdrasil-logo.png);
+      -webkit-mask-size: contain;
+      mask-size: contain;
+      -webkit-mask-repeat: no-repeat;
+      mask-repeat: no-repeat;
+      -webkit-mask-position: center;
+      mask-position: center;
+    }
+
+    h1 { font-family: "IBM Plex Serif", Georgia, serif; font-size: 34px; letter-spacing: 0.06em; margin: 0 0 18px; }
     p { margin: 0 0 20px; color: #5a5a5a; text-align: center; max-width: 440px; line-height: 1.5; }
     .status { min-height: 1.4em; font-size: 14px; color: #3a322c; text-align: center; }
-    .bar { width: 320px; height: 5px; background: #d9d6d1; overflow: hidden; margin: 14px auto 0; }
-    .bar span { display: block; width: 40%; height: 100%; background: #1a1a1a; animation: slide 1.2s ease-in-out infinite; }
+    .count { margin-top: 8px; font-size: 12px; color: #9c978d; letter-spacing: 0.04em; }
     .err { color: #b5544a; white-space: pre-wrap; max-width: 460px; text-align: center; }
     .panel { display: none; width: 100%; max-width: 440px; text-align: left; }
     .panel.on { display: block; }
+    #boot { text-align: center; }
     label { display: block; font-size: 13px; color: #5a5a5a; margin-bottom: 6px; }
     input[type=text] { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #cfcac2; background: #fff; font-size: 14px; margin-bottom: 12px; }
     .row { display: flex; gap: 8px; flex-wrap: wrap; }
     button { border: 1px solid #1a1a1a; background: #1a1a1a; color: #f5f5f2; padding: 10px 14px; font-size: 14px; cursor: pointer; }
     button.secondary { background: transparent; color: #1a1a1a; }
-    .mark { position: fixed; right: 14px; bottom: 10px; font-size: 11px; color: #9c978d; }
-    @keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(320px); } }
+    .mark-note { position: fixed; right: 14px; bottom: 10px; font-size: 11px; color: #9c978d; }
+
+    /* Simple theme-coloured progress bar beneath the logo. */
+    .progress-track {
+      width: 220px;
+      height: 6px;
+      margin-bottom: 18px;
+      border: 1px solid #cfcac2;
+      border-radius: 3px;
+      background: #e8e6e1;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--accent);
+      transition: width 420ms ease;
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
+    <div class="mark">
+      <img class="mark-base" src="yggdrasil-logo.png" alt="" aria-hidden="true" />
+      <span class="mark-tint" aria-hidden="true"></span>
+    </div>
+
     <h1>Yggdrasil</h1>
 
+    <div class="progress-track" aria-hidden="true">
+      <div class="progress-fill" id="progressFill"></div>
+    </div>
+
     <div id="boot" class="panel on">
-      <p>Installing</p>
       <div class="status" id="status">Preparing Yggdrasil…</div>
-      <div class="bar" id="bar"><span></span></div>
+      <div class="count" id="count"></div>
       <div class="err" id="err"></div>
     </div>
 
@@ -45,14 +89,46 @@
       <div class="err" id="pickerErr"></div>
     </div>
   </div>
-  <div class="mark">© 2026 Kamil Nadaf · MIT License</div>
+  <div class="mark-note">© 2026 Kamil Nadaf · MIT License</div>
   <script>
+    // ── Progress ──────────────────────────────────────────────────────────────
+    // Install steps are conditional (LaTeX/Node may already be present), so the
+    // exact step count isn't known up front: each status message advances the
+    // fill a fixed amount, holding short of 100% until setProgress(1) reports
+    // we're really done.
+    var TOTAL_STEPS = 8;
+    var step = 0;
+
+    /** Set by Python (launch.py) at boot, from the saved app theme/logo colour,
+     * so the splash matches the theme picked inside the app on the previous run. */
+    function setAccentColor(hex) {
+      if (typeof hex === "string" && /^#[0-9a-fA-F]{6}$/.test(hex)) {
+        document.documentElement.style.setProperty("--accent", hex);
+      }
+    }
+
+    function paint(fraction) {
+      var pct = Math.max(0, Math.min(1, fraction));
+      document.getElementById("progressFill").style.width = (pct * 100) + "%";
+      var count = document.getElementById("count");
+      count.textContent = pct >= 1 ? "Ready" : Math.round(pct * 100) + "%";
+    }
+
+    /** Jump the fill to a fraction of full (0..1). */
+    function setProgress(fraction) {
+      paint(fraction);
+    }
+
     function setStatus(msg) {
       document.getElementById("status").textContent = msg;
+      // Advance one step, but leave the last sliver for setProgress(1).
+      step = Math.min(step + 1, TOTAL_STEPS - 1);
+      paint(step / TOTAL_STEPS);
     }
+
     function showError(msg) {
-      document.getElementById("bar").style.display = "none";
       document.getElementById("err").textContent = msg;
+      document.getElementById("count").textContent = "";
     }
     function showPicker(defaultPath) {
       document.getElementById("boot").classList.remove("on");
@@ -65,7 +141,6 @@
     function hidePicker() {
       document.getElementById("picker").classList.remove("on");
       document.getElementById("boot").classList.add("on");
-      document.getElementById("bar").style.display = "block";
     }
     document.getElementById("browse").onclick = async function () {
       try {

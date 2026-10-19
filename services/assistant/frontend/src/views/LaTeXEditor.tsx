@@ -25,6 +25,7 @@ import { WorkspaceSidebar } from "../components/WorkspaceSidebar";
 import { PreviewToolbar, useFullscreenPane, useZoom } from "../components/WorkspacePreviewPane";
 import { apiErrorMessage } from "../lib/apiError";
 import { downloadBlobUrl, downloadBase64 } from "../lib/download";
+import { imageExt, imageFileName, imageFilesFrom } from "../lib/pastedImages";
 
 const LATEX_LANG = StreamLanguage.define(stex);
 
@@ -453,6 +454,8 @@ export default function LaTeXEditor() {
   const [customTemplateFilename, setCustomTemplateFilename] = useState("");
   const [customTemplateSource, setCustomTemplateSource] = useState("");
   const sourceRef = useRef("");
+  // Always points at the latest closure so the CodeMirror paste/drop handlers (created once) see current state.
+  const imageInsertRef = useRef<(files: File[]) => void>(() => {});
   const editorVisible = viewMode !== "pdf";
   const availableTemplates = [
     ...LATEX_TEMPLATES.filter((tpl) => !templateSettings.hidden.includes(tpl.id)),
@@ -563,6 +566,39 @@ export default function LaTeXEditor() {
     view.focus();
     setDirty(true);
   }
+
+  /** Paste / drop images into the .tex editor: upload next to the document, insert a figure block. */
+  async function insertImages(files: File[]) {
+    const usable = files.filter((f) => ["png", "jpg"].includes(imageExt(f) ?? ""));
+    if (usable.length === 0) {
+      setSaveMsg({ text: "LaTeX figures must be PNG or JPG (or PDF/EPS via the upload button)", ok: false });
+      setTimeout(() => setSaveMsg(null), 3000);
+      return;
+    }
+    // Project files (MyPaper/main) compile with the whole project folder copied, so keep
+    // images in <project>/figures/. Flat root files only see sibling files, so keep them at the root.
+    const parts = filename.split("/");
+    const inProject = parts.length > 1;
+    const up = inProject ? "../".repeat(parts.length - 2) : "";
+    try {
+      for (let i = 0; i < usable.length; i++) {
+        const name = imageFileName(usable[i], i);
+        const uploadPath = inProject ? `${parts[0]}/figures/${name}` : name;
+        const refPath = inProject ? `${up}figures/${name}` : name;
+        await api.latex.uploadAsset(uploadPath, await fileToBase64(usable[i]));
+        const label = name.replace(/\.[^.]+$/, "").toLowerCase();
+        insertBlock(
+          `\\begin{figure}[ht]\n  \\centering\n  \\includegraphics[width=0.8\\linewidth]{${refPath}}\n  \\caption{Caption}\\label{fig:${label}}\n\\end{figure}\n`
+        );
+      }
+      refreshFiles();
+      setSaveMsg({ text: `Added ${usable.length} image${usable.length === 1 ? "" : "s"}`, ok: true });
+    } catch (e: unknown) {
+      setSaveMsg({ text: apiErrorMessage(e, "Image upload failed"), ok: false });
+    }
+    setTimeout(() => setSaveMsg(null), 2500);
+  }
+  imageInsertRef.current = (files) => void insertImages(files);
 
   function insertBlock(text: string) {
     const view = viewRef.current;
@@ -727,6 +763,26 @@ export default function LaTeXEditor() {
               ])
             ),
             LATEX_LANG,
+            EditorView.domEventHandlers({
+              paste(event) {
+                const images = imageFilesFrom(event.clipboardData);
+                if (images.length === 0) return false;
+                event.preventDefault();
+                imageInsertRef.current(images);
+                return true;
+              },
+              dragover(event) {
+                if (Array.from(event.dataTransfer?.types ?? []).includes("Files")) event.preventDefault();
+                return false;
+              },
+              drop(event) {
+                const images = imageFilesFrom(event.dataTransfer);
+                if (images.length === 0) return false;
+                event.preventDefault();
+                imageInsertRef.current(images);
+                return true;
+              },
+            }),
             editorTheme,
             syntaxHighlighting(latexHighlightStyle),
             EditorView.updateListener.of((update) => {

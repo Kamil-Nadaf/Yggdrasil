@@ -1,0 +1,115 @@
+name: Build & release desktop apps
+
+# Builds Yggdrasil natively on macOS, Windows and Linux (cross-compiling isn't
+# supported — see packaging/DESKTOP.md) and attaches the installers to a GitHub
+# Release so users download the one for their OS instead of building it.
+#
+# Cut a release:   git tag v0.3.0 && git push origin v0.3.0
+# Test the build:  Actions tab → "Build & release desktop apps" → Run workflow
+#                  (uploads the installers as workflow artifacts, no release).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS
+            os: macos-14
+            artifact: mac
+            paths: |
+              release/Yggdrasil-*-mac.dmg
+              release/Yggdrasil-*-mac.pkg
+          - label: Windows
+            os: windows-latest
+            artifact: windows
+            paths: |
+              release/Yggdrasil-*-windows.zip
+          - label: Linux
+            os: ubuntu-22.04
+            artifact: linux
+            paths: |
+              release/Yggdrasil-*-linux.tar.gz
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: services/assistant/frontend/package-lock.json
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Linux build dependencies (PyGObject / GTK)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config python3-dev libcairo2-dev libgirepository1.0-dev \
+            gir1.2-gtk-3.0 gir1.2-webkit2-4.1
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: bash packaging/build-macos-app.sh
+
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: bash packaging/build-linux.sh
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./packaging/build-windows.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yggdrasil-${{ matrix.artifact }}
+          path: ${{ matrix.paths }}
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List files
+        run: ls -lh dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          body: |
+            ## Download
+
+            | Your OS | File |
+            |---|---|
+            | macOS | `Yggdrasil-*-mac.pkg` (double-click, easiest) or `Yggdrasil-*-mac.dmg` |
+            | Windows | `Yggdrasil-*-windows.zip` → unzip → double-click `Yggdrasil.bat` |
+            | Linux | `Yggdrasil-*-linux.tar.gz` → extract → `./install.sh` |
+
+            The apps are not code-signed. On macOS, if Gatekeeper blocks the DMG
+            build, right-click → Open, or run `xattr -cr /Applications/Yggdrasil.app`.
+            See [INSTALL.md](https://github.com/${{ github.repository }}/blob/main/INSTALL.md).

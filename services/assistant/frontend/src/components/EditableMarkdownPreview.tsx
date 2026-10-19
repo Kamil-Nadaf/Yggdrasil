@@ -131,10 +131,12 @@ export default function EditableMarkdownPreview({
   source,
   onChange,
   className,
+  imageBase,
 }: {
   source: string;
   onChange: (next: string) => void;
   className?: string;
+  imageBase?: string;
 }) {
   const tables = findTables(source);
 
@@ -143,7 +145,7 @@ export default function EditableMarkdownPreview({
   }
 
   if (tables.length === 0) {
-    return <AbstractText text={source} className={className} />;
+    return <AbstractText text={source} className={className} imageBase={imageBase} />;
   }
 
   const segments: JSX.Element[] = [];
@@ -151,14 +153,14 @@ export default function EditableMarkdownPreview({
   tables.forEach((t, idx) => {
     if (t.start > cursor) {
       const chunk = source.slice(cursor, t.start);
-      if (chunk.trim()) segments.push(<AbstractText key={`text-${idx}`} text={chunk} />);
+      if (chunk.trim()) segments.push(<AbstractText key={`text-${idx}`} text={chunk} imageBase={imageBase} />);
     }
     segments.push(<TableWidget key={`table-${t.start}`} table={t} onCommit={handleCommit} />);
     cursor = t.end;
   });
   if (cursor < source.length) {
     const chunk = source.slice(cursor);
-    if (chunk.trim()) segments.push(<AbstractText key="text-last" text={chunk} />);
+    if (chunk.trim()) segments.push(<AbstractText key="text-last" text={chunk} imageBase={imageBase} />);
   }
 
   return <div className={className}>{segments}</div>;

@@ -8,6 +8,14 @@ Claim · Evidence · Reasoning · Implications · Context.
 Runs as a native desktop app (Mac / Linux / Windows, no Docker) or as a
 self-hosted Docker web app.
 
+## Download
+
+Grab the installer for your OS from the
+[latest release](https://github.com/Kamil-Nadaf/Yggdrasil/releases/latest):
+`.pkg` / `.dmg` (macOS), `.zip` (Windows), `.tar.gz` (Linux). Installers are built
+automatically by GitHub Actions (`.github/workflows/release.yml`) whenever a
+`v*` tag is pushed. Prefer to build it yourself? See below.
+
 ## Install
 
 Pick your OS. Each app is a local build — there's no download link, you build
@@ -20,16 +28,26 @@ it once on your own machine (`uv` and Node 20+ are the only requirements; see
 bash packaging/build-macos-app.sh
 ```
 
-#### Installing from the DMG
+The build produces two files. The **PKG installer** is the easiest way to share with friends.
+
+#### Recommended — PKG installer (no Terminal, no security hassle)
+
+Double-click the `.pkg` file and click **Continue → Install**. That's it.
+
+The installer copies Yggdrasil to `/Applications` and automatically clears the macOS quarantine flag, so Gatekeeper does **not** block it. Your friend can open it straight from Launchpad or Finder like any other app.
+
+#### Alternative — DMG (drag-and-drop)
+
+Use this if you prefer the classic Mac install experience or the PKG doesn't work for some reason.
 
 1. Double-click the `.dmg` file. It opens a small window showing the **Yggdrasil** app icon.
 2. Drag **Yggdrasil** into your **Applications** folder (shortcut on the left side of the same window).
 3. Eject the DMG (click the arrow next to it in Finder's sidebar, or drag it to Trash).
 4. Open **Finder → Applications**, find **Yggdrasil**, and double-click it.
 
-#### If macOS blocks the app (security fixes)
+#### If macOS blocks the app (DMG only)
 
-Because this app is built locally and not signed by a registered Apple Developer, macOS Gatekeeper will likely show a warning on the first launch. Here is how to get past each message:
+Because this app is built locally and not signed by a registered Apple Developer, macOS Gatekeeper may show a warning. The PKG installer avoids this entirely. If you used the DMG, here is how to get past each message:
 
 **A. "Yggdrasil cannot be opened because the developer cannot be verified"**
 
@@ -40,19 +58,19 @@ Because this app is built locally and not signed by a registered Apple Developer
 4. Click **Open Anyway**.
 5. A final confirmation dialog appears — click **Open**.
 
-> **Quick alternative:** Instead of double-clicking, you can right-click (or Control-click) the app icon and choose **Open**. This gives you the "Open" button immediately on the first launch.
+> **Quick alternative:** Right-click (or Control-click) the app icon and choose **Open**. This gives you the "Open" button immediately.
 
 **B. "Yggdrasil is damaged and can't be opened. You should move it to the Trash."**
 
-The app is **not actually damaged** — it works fine on the machine that built it. macOS adds a `com.apple.quarantine` flag when an app is downloaded or moved from another computer, and Gatekeeper treats unsigned apps with that flag as "damaged." Removing the flag restores it.
+The app is **not actually damaged** — it works fine on the machine that built it. macOS adds a `com.apple.quarantine` flag when an app is downloaded from another computer, and Gatekeeper treats unsigned apps with that flag as "damaged."
 
-**Fix:** Open **Terminal** ( press Cmd+Space, type "Terminal", press Enter ) and run:
+**Fix:** Open **Terminal** (Cmd+Space, type "Terminal", press Enter) and run:
 
 ```bash
 xattr -cr /Applications/Yggdrasil.app
 ```
 
-Then try opening the app again from Applications.
+Then try opening the app again.
 
 #### First launch
 
@@ -65,9 +83,35 @@ Then try opening the app again from Applications.
 bash packaging/build-linux.sh
 ```
 
-1. Extract `release/Yggdrasil-*-linux.tar.gz`
-2. Run `./Yggdrasil` from inside the extracted folder
+1. Extract the archive:
+   ```bash
+   tar -xzf release/Yggdrasil-*-linux.tar.gz
+   cd Yggdrasil-linux
+   ```
+2. **Recommended — install it** (adds Yggdrasil to your app menu):
+   ```bash
+   ./install.sh
+   ```
+   Then launch it from your app menu like any other program.  
+   Uninstall anytime with `~/.local/share/Yggdrasil/uninstall.sh`.
+
+   **Or run it portably** (no install, no app-menu entry):
+   ```bash
+   ./Yggdrasil
+   ```
 3. First launch installs LaTeX (TinyTeX) once — needs internet, one-time only
+
+> **Dependencies:** The installer checks for GTK/WebKit libraries and warns if they are missing. Install them first:
+> ```bash
+> # Ubuntu / Debian
+> sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-webkit2-4.1 pkg-config
+>
+> # Fedora
+> sudo dnf install python3-gobject gtk3 webkit2gtk3 pkgconfig
+>
+> # Arch
+> sudo pacman -S python-gobject gtk3 webkit2gtk pkgconf
+> ```
 
 ### Windows
 

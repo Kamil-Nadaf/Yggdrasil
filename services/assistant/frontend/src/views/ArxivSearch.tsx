@@ -241,7 +241,12 @@ export default function ArxivSearch() {
   function fetchDaily(refresh: boolean) {
     if (refresh) setRefreshing(true);
     else setDailyLoading(true);
-    api.arxiv.daily(200, topic, refresh, selectedDate)
+    // Only pin an explicit date when the user picked one other than today — arXiv's
+    // announce day can lag a paper's raw submittedDate by up to a day (submission
+    // deadline cutoff), so forcing today's exact date range here would exclude papers
+    // announced today but submitted yesterday. Omitting date for "today" lets the
+    // backend use the RSS "new" listing instead, which reflects true announce day.
+    api.arxiv.daily(200, topic, refresh, selectedDate === todayIso() ? undefined : selectedDate)
       .then((r) => {
         setDaily(r.papers || []);
         if (r.warning) {

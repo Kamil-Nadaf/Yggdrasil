@@ -15,6 +15,7 @@ import { PreviewToolbar, useFullscreenPane, useZoom } from "../components/Worksp
 import { markdownToLatexDocument } from "../lib/markdownToLatex";
 import { apiErrorMessage } from "../lib/apiError";
 import { downloadBase64 } from "../lib/download";
+import { fileToBase64, imageFileName, imageFilesFrom } from "../lib/pastedImages";
 
 type NotesViewMode = "editor" | "split" | "view" | "present";
 
@@ -343,6 +344,49 @@ export default function MarkdownNotesTab({ section = "Quick Notes" }: { section?
     input.click();
   }
 
+  /** Folder (inside the notes vault) of the open note; relative image links resolve against it. */
+  const noteDir = selected
+    ? selected.split("/").slice(0, -1).join("/")
+    : folderRel
+      ? `${rootFolder}/${folderRel}`
+      : rootFolder;
+
+  /** Save pasted / dropped images to <section>/assets/ and insert ![](relative/link) at the cursor. */
+  async function insertImages(files: File[]) {
+    if (files.length === 0) return;
+    const textarea = textareaRef.current;
+    const start = textarea?.selectionStart ?? source.length;
+    const end = textarea?.selectionEnd ?? source.length;
+    const depth = noteDir.split("/").length - rootFolder.split("/").length;
+    const up = "../".repeat(Math.max(0, depth));
+    try {
+      let snippet = "";
+      for (let i = 0; i < files.length; i++) {
+        const name = imageFileName(files[i], i);
+        await api.notes.uploadAsset(`${rootFolder}/assets/${name}`, await fileToBase64(files[i]));
+        snippet += `${i > 0 ? "\n" : ""}![${name.replace(/\.[^.]+$/, "")}](${up}assets/${name})`;
+      }
+      setSource((prev) => prev.slice(0, start) + snippet + prev.slice(end));
+      setDirty(true);
+      requestAnimationFrame(() => {
+        textarea?.focus();
+        textarea?.setSelectionRange(start + snippet.length, start + snippet.length);
+      });
+      flash(`Added ${files.length} image${files.length === 1 ? "" : "s"}`);
+    } catch (error) {
+      flash(error instanceof Error ? error.message : "Image upload failed", false);
+    }
+  }
+
+  function pickImages() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.multiple = true;
+    input.onchange = () => void insertImages(imageFilesFrom({ files: input.files } as unknown as DataTransfer));
+    input.click();
+  }
+
   async function shareNote() {
     if (!selected && !source) return;
     try {
@@ -591,6 +635,7 @@ export default function MarkdownNotesTab({ section = "Quick Notes" }: { section?
                   <button type="button" className="latex-fmt-btn" title="Bullet list" onClick={() => insert("- ")}>•≡</button>
                   <button type="button" className="latex-fmt-btn" title="Quote" onClick={() => insert("> ")}>”</button>
                   <button type="button" className="latex-fmt-btn" title="Link" onClick={() => insert("[", "](url)")}>🔗</button>
+                  <button type="button" className="latex-fmt-btn" title="Insert image (or paste / drop one into the editor)" onClick={() => pickImages()}>🖼</button>
                   <button type="button" className="latex-fmt-btn" title="Code block" onClick={() => insert("```\n", "\n```")}>{"</>"}</button>
                 </div>
                 {selected || dirty ? (
@@ -599,6 +644,21 @@ export default function MarkdownNotesTab({ section = "Quick Notes" }: { section?
                     className="notes-md-editor"
                     value={source}
                     onChange={(e) => { setSource(e.target.value); setDirty(true); }}
+                    onPaste={(e) => {
+                      const images = imageFilesFrom(e.clipboardData);
+                      if (images.length === 0) return;
+                      e.preventDefault();
+                      void insertImages(images);
+                    }}
+                    onDragOver={(e) => {
+                      if (Array.from(e.dataTransfer.types).includes("Files")) e.preventDefault();
+                    }}
+                    onDrop={(e) => {
+                      const images = imageFilesFrom(e.dataTransfer);
+                      if (images.length === 0) return;
+                      e.preventDefault();
+                      void insertImages(images);
+                    }}
                     spellCheck={false}
                   />
                 ) : (
@@ -620,6 +680,7 @@ export default function MarkdownNotesTab({ section = "Quick Notes" }: { section?
                   setDirty(true);
                 }}
                 className="notes-md-preview"
+                imageBase={noteDir}
               />
             ) : (
               <div className="latex-preview-empty">No preview — create or open a note.</div>

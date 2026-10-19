@@ -35,23 +35,46 @@ cp "${ROOT}/services/feynman/terminal_server.py" "$DIST/feynman/" 2>/dev/null ||
 cp "${ROOT}/services/assistant/requirements.txt" "$DIST/"
 cp "${ROOT}/LICENSE" "$DIST/LICENSE"
 
-echo "→ Creating bundled Python (3.12 — needed for pyarrow/lancedb wheels)"
-if ! command -v uv >/dev/null 2>&1; then
-  echo "ERROR: uv is required to build the desktop app (pins Python 3.12)."
-  echo "Install: curl -LsSf https://astral.sh/uv/install.sh | sh"
-  exit 1
+# ── Bundled Python (python-build-standalone) ─────────────────────────────
+PY_VER="3.12.5"
+PY_DATE="20240814"
+ARCH="$(uname -m)"
+if [ "$ARCH" = "x86_64" ]; then
+  PY_URL="https://github.com/indygreg/python-build-standalone/releases/download/${PY_DATE}/cpython-${PY_VER}+${PY_DATE}-x86_64-unknown-linux-gnu-install_only.tar.gz"
+elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+  PY_URL="https://github.com/indygreg/python-build-standalone/releases/download/${PY_DATE}/cpython-${PY_VER}+${PY_DATE}-aarch64-unknown-linux-gnu-install_only.tar.gz"
+else
+  echo "ERROR: Unsupported arch: $ARCH"; exit 1
 fi
-uv venv --python 3.12 "$DIST/venv"
+
+PY_CACHE="/tmp/ygg-py-linux-cache-${ARCH}"
+PY_TGZ="${PY_CACHE}/python.tar.gz"
+STANDALONE_PYTHON="${PY_CACHE}/python/bin/python3.12"
+
+mkdir -p "$PY_CACHE"
+# Validate cached binary is actually executable on this arch (wipe if stale/wrong)
+if [ -f "$STANDALONE_PYTHON" ] && ! "$STANDALONE_PYTHON" --version >/dev/null 2>&1; then
+  echo "→ Cached Python not executable on this arch — clearing cache..."
+  rm -rf "$PY_CACHE"
+  mkdir -p "$PY_CACHE"
+fi
+if [ ! -f "$STANDALONE_PYTHON" ]; then
+  echo "→ Downloading standalone Python ${PY_VER} for ${ARCH}..."
+  curl -fL "$PY_URL" -o "$PY_TGZ"
+  tar -xzf "$PY_TGZ" -C "$PY_CACHE"
+fi
+
+echo "→ Creating venv from standalone Python..."
+"$STANDALONE_PYTHON" -m venv "$DIST/venv"
+
+echo "→ Installing Python dependencies..."
+"$DIST/venv/bin/pip" install --upgrade pip --quiet
 
 if [ "$(uname -s)" = "Linux" ]; then
-  uv pip install --python "$DIST/venv/bin/python" -r "$DIST/requirements.txt" pywebview PyGObject
+  "$DIST/venv/bin/pip" install -r "$DIST/requirements.txt" pywebview PyGObject --quiet
 else
-  echo "→ Not running on Linux: this is a local sanity check only (paths/assembly/imports),"
-  echo "  not a real Linux build. Skipping PyGObject (pywebview's Linux GTK backend) since"
-  echo "  it needs Linux system libraries (pkg-config, cairo, gobject-introspection) that"
-  echo "  don't exist on this OS. Run this script on an actual Linux machine to produce the"
-  echo "  real distributable with a working app window."
-  uv pip install --python "$DIST/venv/bin/python" -r "$DIST/requirements.txt" pywebview
+  echo "→ Not Linux: skipping PyGObject. Run on Linux for real build."
+  "$DIST/venv/bin/pip" install -r "$DIST/requirements.txt" pywebview --quiet
 fi
 
 cat > "$DIST/Yggdrasil" << 'EOF'
@@ -65,21 +88,148 @@ exec "$DIR/venv/bin/python" "$DIR/desktop/launch.py"
 EOF
 chmod +x "$DIST/Yggdrasil"
 
+# --- .desktop file for app-menu integration ---
+mkdir -p "$DIST/share"
+cat > "$DIST/share/yggdrasil.desktop" << 'EOF'
+[Desktop Entry]
+Name=Yggdrasil
+Comment=Personal research app (papers, notes, tasks, graph, LaTeX)
+Exec="""HOME/.local/share/Yggdrasil/Yggdrasil"""
+Icon=yggdrasil
+Type=Application
+Categories=Office;Education;Science;
+Terminal=false
+StartupNotify=true
+EOF
+
+# --- install script ---
+cat > "$DIST/install.sh" << 'EOF'
+#!/usr/bin/env bash
+# Install Yggdrasil to ~/.local/share/ and add it to the app menu
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+INSTALL_DIR="$HOME/.local/share/Yggdrasil"
+DESKTOP_DIR="$HOME/.local/share/applications"
+ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
+
+echo "→ Checking system dependencies …"
+MISSING=()
+
+# Try importing the key GTK/GI modules that pywebview needs
+if ! python3 -c "import gi; gi.require_version('Gtk','3.0'); from gi.repository import Gtk, WebKit2" 2>/dev/null; then
+  MISSING+=("GTK / WebKit GI bindings")
+fi
+
+if ! command -v pkg-config >/dev/null 2>&1; then
+  MISSING+=("pkg-config")
+fi
+
+if [ ${#MISSING[@]} -gt 0 ]; then
+  echo ""
+  echo "⚠️  Some system libraries appear to be missing:"
+  printf '   - %s\n' "${MISSING[@]}"
+  echo ""
+  echo "Install them first, then run this script again."
+  echo ""
+  echo "  Ubuntu / Debian:"
+  echo "    sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-webkit2-4.1 pkg-config"
+  echo ""
+  echo "  Fedora:"
+  echo "    sudo dnf install python3-gobject gtk3 webkit2gtk3 pkgconfig"
+  echo ""
+  echo "  Arch:"
+  echo "    sudo pacman -S python-gobject gtk3 webkit2gtk pkgconf"
+  echo ""
+  read -rp "Continue anyway? [y/N] " ANSWER
+  if [[ ! "$ANSWER" =~ ^[Yy]$ ]]; then
+    exit 1
+  fi
+fi
+
+echo "→ Installing to $INSTALL_DIR …"
+rm -rf "$INSTALL_DIR"
+mkdir -p "$INSTALL_DIR"
+cp -R "$SCRIPT_DIR"/* "$INSTALL_DIR/"
+
+echo "→ Adding app-menu entry …"
+mkdir -p "$DESKTOP_DIR" "$ICON_DIR"
+sed "s|\"\"\"HOME\"\"\"|$HOME|g" "$SCRIPT_DIR/share/yggdrasil.desktop" > "$DESKTOP_DIR/yggdrasil.desktop"
+chmod +x "$DESKTOP_DIR/yggdrasil.desktop"
+cp "$SCRIPT_DIR/desktop/yggdrasil-logo.png" "$ICON_DIR/yggdrasil.png"
+
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
+fi
+
+echo ""
+echo "✓ Yggdrasil installed."
+echo "  Launch from your app menu, or run:  ~/.local/share/Yggdrasil/Yggdrasil"
+echo "  Uninstall anytime with:             ~/.local/share/Yggdrasil/uninstall.sh"
+EOF
+chmod +x "$DIST/install.sh"
+
+# --- uninstall script ---
+cat > "$DIST/uninstall.sh" << 'EOF'
+#!/usr/bin/env bash
+# Remove Yggdrasil from ~/.local/share/ and the app menu
+set -euo pipefail
+
+INSTALL_DIR="$HOME/.local/share/Yggdrasil"
+DESKTOP_FILE="$HOME/.local/share/applications/yggdrasil.desktop"
+ICON_FILE="$HOME/.local/share/icons/hicolor/256x256/apps/yggdrasil.png"
+
+echo "→ Removing Yggdrasil …"
+rm -rf "$INSTALL_DIR"
+rm -f "$DESKTOP_FILE"
+rm -f "$ICON_FILE"
+
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
+fi
+
+echo "✓ Yggdrasil uninstalled."
+EOF
+chmod +x "$DIST/uninstall.sh"
+
 cat > "$DIST/README.txt" << 'EOF'
 Yggdrasil (Linux)
 
 © 2026 Kamil Nadaf — MIT License (see LICENSE)
 
-Double-click or run: ./Yggdrasil
+Quick start
+-----------
+1. Run the installer (adds Yggdrasil to your app menu):
 
-First launch asks where to save your notes.
-Needs GTK/WebKit for the window (pywebview). On Ubuntu:
-  sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-webkit2-4.1
+     ./install.sh
+
+   Then launch it from your app menu like any other program.
+
+2. Or run it portably (no install, no app-menu entry):
+
+     ./Yggdrasil
+
+First launch
+------------
+- You will be asked where to save your notes (vault).
+- TinyTeX (LaTeX) installs automatically on first launch if not already
+  present — needs internet on that first run.
+
+System dependencies
+-------------------
+Yggdrasil needs GTK/WebKit system libraries for its window. The installer
+warns you if they are missing. Install them first:
+
+  Ubuntu / Debian:
+    sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-webkit2-4.1 pkg-config
+
+  Fedora:
+    sudo dnf install python3-gobject gtk3 webkit2gtk3 pkgconfig
+
+  Arch:
+    sudo pacman -S python-gobject gtk3 webkit2gtk pkgconf
 
 AI: set your API key in Settings (LM Studio / Claude / …). Ollama optional.
-
-LaTeX (TinyTeX) installs automatically on first launch if not already
-present (needs internet on that first run).
 EOF
 
 TAR="${OUT}/Yggdrasil-${STAMP}-linux.tar.gz"

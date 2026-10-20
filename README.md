@@ -8,133 +8,163 @@ Claim · Evidence · Reasoning · Implications · Context.
 Runs as a native desktop app (Mac / Linux / Windows, no Docker) or as a
 self-hosted Docker web app.
 
-## Download
-
-Grab the installer for your OS from the
-[latest release](https://github.com/Kamil-Nadaf/Yggdrasil/releases/latest):
-`.pkg` / `.dmg` (macOS), `.zip` (Windows), `.tar.gz` (Linux). Installers are built
-automatically by GitHub Actions (`.github/workflows/release.yml`) whenever a
-`v*` tag is pushed. Prefer to build it yourself? See below.
-
 ## Install
 
-Pick your OS. Each app is a local build — there's no download link, you build
-it once on your own machine (`uv` and Node 20+ are the only requirements; see
-[`packaging/DESKTOP.md`](packaging/DESKTOP.md) for details).
+Download the installer for your computer from the
+**[latest release](https://github.com/Kamil-Nadaf/Yggdrasil/releases/latest)**
+(scroll to **Assets**). No Docker, Python or Node needed.
+
+| Your computer | Download | Then |
+|---|---|---|
+| **macOS** | `Yggdrasil-…-mac.pkg` (easiest) or `…-mac.dmg` | Double-click → Continue → Install |
+| **Windows** | `Yggdrasil-…-windows.zip` | Unzip → double-click `Yggdrasil.bat` |
+| **Linux** | `Yggdrasil-…-linux.tar.gz` | Extract → `./install.sh` |
+
+The apps are not code-signed, so your OS may warn you the first time — the
+steps below show how to get past it.
 
 ### macOS
 
-```bash
-bash packaging/build-macos-app.sh
-```
+1. Download the `.pkg` from the release page.
+2. Double-click it and click **Continue → Install**. It installs Yggdrasil into
+   `/Applications` and clears macOS's quarantine flag for you.
+3. Open **Yggdrasil** from Launchpad or Finder.
 
-The build produces two files. The **PKG installer** is the easiest way to share with friends.
+**Prefer the `.dmg`?** Open it, drag **Yggdrasil** into **Applications**, eject the
+disk image, then open the app. If macOS blocks it:
 
-#### Recommended — PKG installer (no Terminal, no security hassle)
-
-Double-click the `.pkg` file and click **Continue → Install**. That's it.
-
-The installer copies Yggdrasil to `/Applications` and automatically clears the macOS quarantine flag, so Gatekeeper does **not** block it. Your friend can open it straight from Launchpad or Finder like any other app.
-
-#### Alternative — DMG (drag-and-drop)
-
-Use this if you prefer the classic Mac install experience or the PKG doesn't work for some reason.
-
-1. Double-click the `.dmg` file. It opens a small window showing the **Yggdrasil** app icon.
-2. Drag **Yggdrasil** into your **Applications** folder (shortcut on the left side of the same window).
-3. Eject the DMG (click the arrow next to it in Finder's sidebar, or drag it to Trash).
-4. Open **Finder → Applications**, find **Yggdrasil**, and double-click it.
-
-#### If macOS blocks the app (DMG only)
-
-Because this app is built locally and not signed by a registered Apple Developer, macOS Gatekeeper may show a warning. The PKG installer avoids this entirely. If you used the DMG, here is how to get past each message:
-
-**A. "Yggdrasil cannot be opened because the developer cannot be verified"**
-
-1. Click **Cancel** on the warning dialog.
-2. Go to **System Settings → Privacy & Security**.
-3. Scroll down to the **Security** section. You will see a message:  
-   *"Yggdrasil was blocked from opening because it is not from an identified developer."*
-4. Click **Open Anyway**.
-5. A final confirmation dialog appears — click **Open**.
-
-> **Quick alternative:** Right-click (or Control-click) the app icon and choose **Open**. This gives you the "Open" button immediately.
-
-**B. "Yggdrasil is damaged and can't be opened. You should move it to the Trash."**
-
-The app is **not actually damaged** — it works fine on the machine that built it. macOS adds a `com.apple.quarantine` flag when an app is downloaded from another computer, and Gatekeeper treats unsigned apps with that flag as "damaged."
-
-**Fix:** Open **Terminal** (Cmd+Space, type "Terminal", press Enter) and run:
-
-```bash
-xattr -cr /Applications/Yggdrasil.app
-```
-
-Then try opening the app again.
-
-#### First launch
-
-- The first time you open Yggdrasil it installs **TinyTeX** (a minimal LaTeX distribution) — this requires an internet connection and takes a few minutes. It only happens once.
-- You will then be asked to choose a folder for your notes (vault). You can change this later in **Settings → Data**.
-
-### Linux
-
-```bash
-bash packaging/build-linux.sh
-```
-
-1. Extract the archive:
-   ```bash
-   tar -xzf release/Yggdrasil-*-linux.tar.gz
-   cd Yggdrasil-linux
-   ```
-2. **Recommended — install it** (adds Yggdrasil to your app menu):
-   ```bash
-   ./install.sh
-   ```
-   Then launch it from your app menu like any other program.  
-   Uninstall anytime with `~/.local/share/Yggdrasil/uninstall.sh`.
-
-   **Or run it portably** (no install, no app-menu entry):
-   ```bash
-   ./Yggdrasil
-   ```
-3. First launch installs LaTeX (TinyTeX) once — needs internet, one-time only
-
-> **Dependencies:** The installer checks for GTK/WebKit libraries and warns if they are missing. Install them first:
-> ```bash
-> # Ubuntu / Debian
-> sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-webkit2-4.1 pkg-config
->
-> # Fedora
-> sudo dnf install python3-gobject gtk3 webkit2gtk3 pkgconfig
->
-> # Arch
-> sudo pacman -S python-gobject gtk3 webkit2gtk pkgconf
-> ```
+- *"cannot be opened because the developer cannot be verified"* → right-click the
+  app → **Open** → **Open**. (Or **System Settings → Privacy & Security → Open Anyway**.)
+- *"Yggdrasil is damaged and can't be opened"* → the app is fine; macOS just
+  flags unsigned downloads. Open **Terminal** and run:
+  ```bash
+  xattr -cr /Applications/Yggdrasil.app
+  ```
 
 ### Windows
 
-Build on an actual Windows machine (cross-compiling isn't supported):
+1. Download the `.zip` from the release page.
+2. Right-click it → **Extract All…** (don't run it from inside the zip).
+3. Open the extracted folder and double-click **`Yggdrasil.bat`**.
+   If Windows SmartScreen appears: **More info → Run anyway**.
+4. *(Only for the LaTeX editor)* install [MiKTeX](https://miktex.org/download)
+   and make sure `pdflatex` / `latexmk` are on your PATH. Everything else
+   works without it.
 
-```powershell
-powershell -File packaging/build-windows.ps1
-```
+### Linux
 
-1. Extract `release/Yggdrasil-*-windows.zip`
-2. Double-click `Yggdrasil.bat`
-3. LaTeX doesn't auto-install on Windows yet — install [MiKTeX](https://miktex.org/download)
-   yourself and make sure `pdflatex`/`latexmk` are on your PATH. Everything else
-   (Dashboard, Notes, Tasks, Search, Daily Archive, Graph, Loki) works without it.
+1. Download the `.tar.gz` from the release page.
+2. Install the GTK/WebKit libraries once:
+   ```bash
+   # Ubuntu / Debian
+   sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-webkit2-4.1 pkg-config
+   # Fedora
+   sudo dnf install python3-gobject gtk3 webkit2gtk3 pkgconfig
+   # Arch
+   sudo pacman -S python-gobject gtk3 webkit2gtk pkgconf
+   ```
+3. Extract and install:
+   ```bash
+   tar -xzf Yggdrasil-*-linux.tar.gz
+   cd Yggdrasil-linux
+   ./install.sh          # adds Yggdrasil to your app menu
+   ```
+   Or run it without installing: `./Yggdrasil`.
+   Uninstall anytime with `~/.local/share/Yggdrasil/uninstall.sh`.
 
 ### First launch (all platforms)
 
-1. Choose a folder for your notes — anywhere you like, changeable later in
-   Settings → Data
-2. In Settings → AI Providers, add an API key (Claude / LM Studio / DeepSeek /
-   etc.) to use Loki and paper analysis — Ollama is optional, not required
+1. Choose a folder for your notes (your "vault") — anywhere you like; change it
+   later in **Settings → Data**. Everything is stored as plain files there.
+2. On macOS/Linux the first launch installs **TinyTeX** (LaTeX) automatically —
+   needs internet, a few minutes, one time only.
+3. To use Loki and paper analysis, click the **gear icon → AI Providers**, pick a
+   provider (Claude, LM Studio, DeepSeek…), paste your API key and **Save**.
 
-### Connect it to your coding agent
+## How to use Yggdrasil
+
+The top bar has one tab per area:
+
+| Tab | What you do there |
+|---|---|
+| **Dashboard** | Today's overview: habits, active tasks, goals, reading score |
+| **Daily Archive** | Browse the day's new papers (arXiv / OpenAlex / Europe PMC) and triage each as **Read / Skip / Later** |
+| **Search** | Search across all your papers, notes and tasks |
+| **Notes** | Papers, collection, books and Markdown notes (see below) |
+| **Tasks** | A task board with statuses, dates and a completion history |
+| **Graph** | A map of how your papers, concepts and questions link together |
+| **Loki** | AI assistant that answers only from what you've written |
+| **LaTeX** | Overleaf-style editor for papers, letters and theses |
+
+### Reading a paper (the CERIC method)
+
+1. In **Daily Archive**, mark interesting papers **Read**.
+2. Open the paper in the **Notes → Editor** and fill the five slots:
+   **C**laim · **E**vidence · **R**easoning · **I**mplications · **C**ontext.
+3. Write an **Adversarial Question** — the strongest objection to the paper — and tick it.
+4. When all five slots and the question are done, the **Gate** opens and the AI
+   analysis button becomes available. It is deliberately locked until you have
+   thought it through yourself.
+
+### Markdown notes
+
+- **Notes → Quick Notes / Documentation / Meeting Minutes** — create files and
+  folders in the left panel; **Editor / Split / View / Present** switch the layout.
+- **Add images:** paste a screenshot (Ctrl/Cmd+V), drag a file in, or click the
+  picture button in the toolbar. Images are stored in an `assets` folder next to
+  the note.
+- **Save** writes the note; **Share** lets you share it.
+
+### LaTeX
+
+- **New file / folder** from the Files panel, or **File → Upload file or .zip
+  project…** to import an Overleaf project directly (a `.zip`, or a whole folder).
+- Write on the left, press **Recompile** for the PDF on the right.
+  **Editor / Split / PDF** change the layout.
+- **Add a figure:** click the picture button → tick images from your project
+  folders (sub-folders are included) → **Insert**. You can also paste or drop an
+  image straight into the editor. Insert it inside the document body; the
+  `graphicx` package is added for you.
+- **Click any file** in the sidebar (image, PDF, `.bib`, …) to preview it, then
+  **Insert in document** or **Download**.
+- **Tip:** use PDF or high-resolution PNG plots (`plt.savefig("fig.pdf", bbox_inches="tight")`)
+  rather than screenshots, so the figure has no window frame and stays sharp.
+
+### Loki
+
+Ask a question and Loki answers from your own notes, papers and tasks. Add an AI provider key first (see *First launch*).
+
+### Keep your notes safe
+
+**Settings → Data Sync** backs up your notes folder to a private GitHub repo or
+a WebDAV server. See [`GETTING-STARTED.md`](GETTING-STARTED.md) for every setting.
+
+## Build from source (optional)
+
+Only needed if you want to modify the app or build it yourself. Requirements:
+[`uv`](https://docs.astral.sh/uv/) and Node 20+ (see
+[`packaging/DESKTOP.md`](packaging/DESKTOP.md)). Build on the OS you are targeting:
+
+```bash
+bash packaging/build-macos-app.sh      # macOS  → release/*.pkg, *.dmg
+bash packaging/build-linux.sh          # Linux  → release/*.tar.gz
+powershell -File packaging/build-windows.ps1   # Windows → release/*.zip
+```
+
+### Publishing a release (maintainers)
+
+Installers are built for all three OSes by GitHub Actions
+(`.github/workflows/release.yml`). To publish:
+
+```bash
+git tag v0.3.0
+git push origin v0.3.0
+```
+
+Watch the **Actions** tab; when it's green the files appear under **Releases**.
+You can also run the workflow manually from the Actions tab to test the builds.
+
+## Connect it to your coding agent
 
 Loki's notes/papers/tasks are also reachable from Claude Code, Cursor, or any
 MCP-aware IDE — see [`packaging/MCP.md`](packaging/MCP.md).

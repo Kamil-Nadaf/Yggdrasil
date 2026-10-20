@@ -1,11 +1,13 @@
-name: Build & release desktop apps
+name: Release Yggdrasil
+
+run-name: Yggdrasil ${{ github.ref_name }} — build installers & publish release
 
 # Builds Yggdrasil natively on macOS, Windows and Linux (cross-compiling isn't
 # supported — see packaging/DESKTOP.md) and attaches the installers to a GitHub
 # Release so users download the one for their OS instead of building it.
 #
 # Cut a release:   git tag v0.3.0 && git push origin v0.3.0
-# Test the build:  Actions tab → "Build & release desktop apps" → Run workflow
+# Test the build:  Actions tab → "Release Yggdrasil" → Run workflow
 #                  (uploads the installers as workflow artifacts, no release).
 
 on:

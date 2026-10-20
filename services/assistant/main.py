@@ -76,7 +76,7 @@ import httpx
 import lancedb
 import pyarrow as pa
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -2269,6 +2269,30 @@ async def latex_get_file(filename: str):
 @app.delete("/api/latex/files/{filename:path}")
 async def latex_delete_file(filename: str):
     return await _proxy_latex("DELETE", f"/files/{filename}")
+
+
+@app.post("/api/latex/import-zip")
+async def latex_import_zip(payload: dict):
+    return await _proxy_latex("POST", "/import-zip", json=payload, timeout=120.0)
+
+
+@app.get("/api/latex/assets/{asset_path:path}")
+async def latex_get_asset(asset_path: str):
+    """Binary pass-through of a LaTeX project asset (image / PDF / text) for preview."""
+    from urllib.parse import quote
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(f"{LATEX_URL}/assets/{quote(asset_path)}", timeout=30.0)
+    except httpx.RequestError:
+        raise HTTPException(status_code=503, detail="LaTeX service unavailable")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail="Asset not found")
+    ctype = resp.headers.get("content-type", "application/octet-stream")
+    headers = {"Content-Disposition": "inline", "X-Content-Type-Options": "nosniff"}
+    if "svg" in ctype:
+        # Uploaded SVG is untrusted: never let it run script in the app origin.
+        headers["Content-Security-Policy"] = "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'"
+    return Response(content=resp.content, media_type=ctype, headers=headers)
 
 
 @app.post("/api/latex/assets")

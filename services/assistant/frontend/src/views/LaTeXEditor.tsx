@@ -23,6 +23,9 @@ import {
 import { WorkspaceLayout } from "../components/WorkspaceLayout";
 import { WorkspaceSidebar } from "../components/WorkspaceSidebar";
 import { PreviewToolbar, useFullscreenPane, useZoom } from "../components/WorkspacePreviewPane";
+import IconFigure from "../components/IconFigure";
+import LatexAssetViewer from "../components/LatexAssetViewer";
+import LatexFigurePicker from "../components/LatexFigurePicker";
 import { apiErrorMessage } from "../lib/apiError";
 import { downloadBlobUrl, downloadBase64 } from "../lib/download";
 import { imageExt, imageFileName, imageFilesFrom } from "../lib/pastedImages";
@@ -107,8 +110,8 @@ const latexHighlightStyle = HighlightStyle.define([
   { tag: t.invalid, color: "var(--crit)" },
 ]);
 
-const TEXT_UPLOAD_EXTS = [".tex", ".bib", ".txt", ".sty", ".cls", ".bst", ".csv", ".dat"];
-const BINARY_UPLOAD_EXTS = [".png", ".jpg", ".jpeg", ".pdf", ".eps", ".svg"];
+const TEXT_UPLOAD_EXTS = [".tex", ".bib", ".txt", ".sty", ".cls", ".bst", ".csv", ".dat", ".bbl", ".clo", ".def", ".cfg", ".ist", ".tikz", ".pgf", ".md", ".json"];
+const BINARY_UPLOAD_EXTS = [".png", ".jpg", ".jpeg", ".pdf", ".eps", ".svg", ".gif", ".tif", ".tiff", ".otf", ".ttf", ".zip"];
 const SKIP_UPLOAD_NAMES = new Set([".ds_store", "thumbs.db", "desktop.ini"]);
 
 type UploadItem = { file: File; relativePath: string };
@@ -125,7 +128,8 @@ function sanitizeRelPath(path: string): string {
   return path
     .replace(/\\/g, "/")
     .split("/")
-    .map((p) => p.trim())
+    // The backend only accepts [A-Za-z0-9._ -] in path segments; "fig (1).png" would otherwise abort the whole upload.
+    .map((p) => p.trim().replace(/[^A-Za-z0-9._ -]/g, "_"))
     .filter((p) => p && p !== "." && p !== "..")
     .join("/");
 }
@@ -208,22 +212,6 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
-/** B/W landscape figure icon. */
-function IconFigure() {
-  return (
-    <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
-      <rect x="2.5" y="5" width="19" height="14" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.6" />
-      <circle cx="8" cy="10.2" r="1.6" fill="currentColor" />
-      <path
-        d="M3.5 16.5 8 12.5l3 2.5 4.5-5.5 5 6.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
 
 function EditorPane({
   editorHostRef,
@@ -454,6 +442,8 @@ export default function LaTeXEditor() {
   const [customTemplateFilename, setCustomTemplateFilename] = useState("");
   const [customTemplateSource, setCustomTemplateSource] = useState("");
   const sourceRef = useRef("");
+  const [viewAsset, setViewAsset] = useState<string | null>(null);
+  const [figureOpen, setFigureOpen] = useState(false);
   // Always points at the latest closure so the CodeMirror paste/drop handlers (created once) see current state.
   const imageInsertRef = useRef<(files: File[]) => void>(() => {});
   const editorVisible = viewMode !== "pdf";
@@ -587,6 +577,7 @@ export default function LaTeXEditor() {
         const refPath = inProject ? `${up}figures/${name}` : name;
         await api.latex.uploadAsset(uploadPath, await fileToBase64(usable[i]));
         const label = name.replace(/\.[^.]+$/, "").toLowerCase();
+        ensureGraphicx();
         insertBlock(
           `\\begin{figure}[ht]\n  \\centering\n  \\includegraphics[width=0.8\\linewidth]{${refPath}}\n  \\caption{Caption}\\label{fig:${label}}\n\\end{figure}\n`
         );
@@ -600,14 +591,66 @@ export default function LaTeXEditor() {
   }
   imageInsertRef.current = (files) => void insertImages(files);
 
+  /** Path of an asset as \includegraphics must spell it from the open .tex file. */
+  function figureRelPath(assetName: string) {
+    const parts = filename.split("/");
+    const project = parts.length > 1 ? parts[0] : "";
+    const depth = parts.length > 2 ? parts.length - 2 : 0;
+    const inside = project && assetName.startsWith(`${project}/`) ? assetName.slice(project.length + 1) : assetName;
+    return "../".repeat(depth) + inside;
+  }
+
+  /** \includegraphics needs graphicx; add it after \documentclass when the preamble lacks it. */
+  function ensureGraphicx() {
+    const view = viewRef.current;
+    if (!view) return;
+    const text = view.state.doc.toString();
+    if (!/\\documentclass/.test(text) || /\\usepackage(\[[^\]]*\])?\{[^}]*graphicx[^}]*\}/.test(text)) return;
+    const m = /\\documentclass(\[[^\]]*\])?\{[^}]*\}[^\n]*/.exec(text);
+    if (!m) return;
+    const at = m.index + m[0].length;
+    view.dispatch({ changes: { from: at, insert: "\n\\usepackage{graphicx}" } });
+  }
+
+  function insertFigures(relPaths: string[]) {
+    ensureGraphicx();
+    const blocks = relPaths.map((rel) => {
+      const label = (rel.split("/").pop() || "figure").replace(/\.[^.]+$/, "").replace(/[^A-Za-z0-9]+/g, "-").toLowerCase();
+      return `\\begin{figure}[ht]\n  \\centering\n  \\includegraphics[width=0.8\\linewidth]{${rel}}\n  \\caption{Caption}\\label{fig:${label}}\n\\end{figure}\n`;
+    });
+    insertBlock(blocks.join("\n"));
+  }
+
+  function handleSelectAsset(name: string) {
+    setViewAsset(name);
+    if (viewMode === "editor") changeViewMode("split");
+  }
+
   function insertBlock(text: string) {
     const view = viewRef.current;
     if (!view) return;
+    const doc = view.state.doc;
     const sel = view.state.selection.main;
-    const prefix = sel.from > 0 && view.state.sliceDoc(sel.from - 1, sel.from) !== "\n" ? "\n" : "";
+    let from = sel.from;
+    let to = sel.to;
+    let prefix = "";
+    const line = doc.lineAt(from);
+    // Never split a line: if the cursor sits mid-line, drop the block on the next line.
+    if (from !== line.from) {
+      from = to = Math.max(line.to, sel.to);
+      prefix = "\n";
+    }
+    // Never land in the preamble: move to just after \begin{document}.
+    const m = /\\begin\{document\}/.exec(doc.toString());
+    if (m && from <= m.index) {
+      const bl = doc.lineAt(m.index);
+      from = to = bl.to;
+      prefix = "\n\n";
+    }
     view.dispatch({
-      changes: { from: sel.from, to: sel.to, insert: prefix + text },
-      selection: { anchor: sel.from + prefix.length + text.length },
+      changes: { from, to, insert: prefix + text },
+      selection: { anchor: from + prefix.length + text.length },
+      scrollIntoView: true,
     });
     view.focus();
     setDirty(true);
@@ -666,9 +709,7 @@ export default function LaTeXEditor() {
         wrapOrInsert("\\href{https://example.com}{", "}", "link text");
         break;
       case "figure":
-        insertBlock(
-          "\\begin{figure}[ht]\n  \\centering\n  \\includegraphics[width=0.8\\linewidth]{figure.pdf}\n  \\caption{Caption}\\label{fig:id}\n\\end{figure}\n"
-        );
+        setFigureOpen(true);
         break;
       case "table":
         insertBlock(
@@ -854,6 +895,7 @@ export default function LaTeXEditor() {
     : assets.filter((file) => !file.name.includes("/"));
 
   async function handleSelectFile(name: string) {
+    setViewAsset(null);
     setSelected(name);
     setSaveMsg(null);
     clearPdfUrl();
@@ -894,6 +936,7 @@ export default function LaTeXEditor() {
   }
 
   async function handleCompile() {
+    setViewAsset(null);
     setCompiling(true);
     setErrors([]);
     try {
@@ -941,6 +984,7 @@ export default function LaTeXEditor() {
     if (!window.confirm(`Delete asset ${name}?`)) return;
     try {
       await api.latex.deleteAsset(name);
+      if (viewAsset === name) setViewAsset(null);
       setSaveMsg({ text: `Deleted ${name}`, ok: true });
       refreshFiles();
     } catch {
@@ -1207,13 +1251,53 @@ export default function LaTeXEditor() {
     folderInputRef.current?.click();
   }
 
-  async function uploadItems(items: UploadItem[]) {
+  /** Import a project .zip (e.g. Overleaf "Download source") as its own project folder. */
+  async function importZipFile(file: File) {
+    setSaveMsg({ text: `Importing ${file.name}…`, ok: true });
+    try {
+      const r = await api.latex.importZip(file.name, await fileToBase64(file));
+      refreshFiles();
+      setCurrentFolder(r.project);
+      if (r.main) {
+        const stem = `${r.project}/${r.main}`;
+        const f = await api.latex.getFile(stem);
+        setFilename(stem);
+        setSelected(`${stem}.tex`);
+        setSource(f.source, { recordHistory: false });
+        setDirty(false);
+        clearPdfUrl();
+        setErrors([]);
+      }
+      const notes = [
+        r.renamed.length ? `${r.renamed.length} renamed` : "",
+        r.skipped_count ? `${r.skipped_count} unsupported skipped` : "",
+      ].filter(Boolean);
+      setSaveMsg({
+        text: `Imported "${r.project}" (${r.files} files${notes.length ? `, ${notes.join(", ")}` : ""})`,
+        ok: true,
+      });
+      if (r.renamed.length) console.info("Renamed on import:", r.renamed);
+      setTimeout(() => setSaveMsg(null), 6000);
+    } catch (e: unknown) {
+      setSaveMsg({ text: apiErrorMessage(e, `Could not import ${file.name}`), ok: false });
+    }
+  }
+
+  async function uploadItems(allItems: UploadItem[]) {
+    let items = allItems;
+    const zips = items.filter((i) => i.relativePath.toLowerCase().endsWith(".zip"));
+    if (zips.length > 0) {
+      for (const z of zips) await importZipFile(z.file);
+      items = items.filter((i) => !i.relativePath.toLowerCase().endsWith(".zip"));
+      if (items.length === 0) return;
+    }
     if (items.length === 0) {
       setSaveMsg({ text: "No supported files (.tex, .bib, images, …)", ok: false });
       return;
     }
 
     let uploaded = 0;
+    const failed: string[] = [];
     let lastTex: string | null = null;
     let projectRoot: string | null = null;
 
@@ -1247,9 +1331,8 @@ export default function LaTeXEditor() {
         }
         uploaded += 1;
       } catch {
-        setSaveMsg({ text: `Upload failed: ${rel}`, ok: false });
-        refreshFiles();
-        return;
+        // Keep going: one bad file shouldn't abort the rest of the project.
+        failed.push(rel);
       }
     }
 
@@ -1284,8 +1367,10 @@ export default function LaTeXEditor() {
     }
 
     setSaveMsg({
-      text: uploaded === 1 ? `Uploaded ${uploaded} file` : `Uploaded ${uploaded} files`,
-      ok: true,
+      text:
+        (uploaded === 1 ? `Uploaded ${uploaded} file` : `Uploaded ${uploaded} files`) +
+        (failed.length ? ` — ${failed.length} failed (${failed.slice(0, 3).join(", ")}${failed.length > 3 ? ", …" : ""})` : ""),
+      ok: failed.length === 0,
     });
   }
 
@@ -1397,6 +1482,8 @@ export default function LaTeXEditor() {
       onDelete={handleDelete}
       onDeleteFolder={handleDeleteFolder}
       onDeleteAsset={handleDeleteAsset}
+      onSelectAsset={handleSelectAsset}
+      selectedAsset={viewAsset ?? ""}
       onRequestRename={requestTreeRename}
       onNew={handleNewFile}
       onNewFolder={handleNewFolder}
@@ -1413,6 +1500,18 @@ export default function LaTeXEditor() {
   return (
     <>
       <LatexShareModal open={shareOpen} onClose={() => setShareOpen(false)} />
+      <LatexFigurePicker
+        open={figureOpen}
+        filename={filename}
+        assets={assets}
+        onClose={() => setFigureOpen(false)}
+        onInsert={insertFigures}
+        onUpload={() => {
+          const top = filename.includes("/") ? filename.split("/")[0] : "";
+          if (top) setCurrentFolder(top);
+          fileInputRef.current?.click();
+        }}
+      />
       <LatexPromptModal
         open={Boolean(prompt)}
         title={
@@ -1528,7 +1627,7 @@ export default function LaTeXEditor() {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".tex,.bib,.txt,.png,.jpg,.jpeg,.pdf,.eps,.svg,.sty,.cls,.bst,.csv"
+        accept=".zip,.tex,.bib,.txt,.png,.jpg,.jpeg,.pdf,.eps,.svg,.gif,.sty,.cls,.bst,.csv,.bbl"
         multiple
         style={{ display: "none" }}
         onChange={onUploadFile}
@@ -1579,6 +1678,13 @@ export default function LaTeXEditor() {
             minSize="25"
             className="latex-panel"
           >
+            {viewAsset ? (
+              <LatexAssetViewer
+                path={viewAsset}
+                onClose={() => setViewAsset(null)}
+                onInsert={(p) => insertFigures([figureRelPath(p)])}
+              />
+            ) : (
             <PreviewPane
               pdfUrl={pdfUrl}
               pdfName={filename.trim() || selected || "document"}
@@ -1587,6 +1693,7 @@ export default function LaTeXEditor() {
               pdfOnly={viewMode === "pdf"}
               onShowEditor={() => changeViewMode("split")}
             />
+            )}
           </Panel>
         )}
       </WorkspaceLayout>

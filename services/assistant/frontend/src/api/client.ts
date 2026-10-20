@@ -166,6 +166,11 @@ function encodeLatexPath(name: string): string {
   return name.split("/").map(encodeURIComponent).join("/");
 }
 
+/** URL that serves a LaTeX project asset (image / PDF / text) for inline preview. */
+export function latexAssetUrl(path: string): string {
+  return `/api/latex/assets/${encodeLatexPath(path)}`;
+}
+
 export interface ArxivPaper {
   id: string;
   title: string;
@@ -584,6 +589,15 @@ export const api = {
       req<{ ok: boolean }>("DELETE", `/api/latex/files/${encodeLatexPath(name)}`),
     uploadAsset: (path: string, content_b64: string) =>
       req<{ path: string; size: number }>("POST", "/api/latex/assets", { path, content_b64 }),
+    importZip: (name: string, content_b64: string) =>
+      req<{
+        project: string;
+        main: string | null;
+        files: number;
+        skipped_count: number;
+        skipped: string[];
+        renamed: string[];
+      }>("POST", "/api/latex/import-zip", { name, content_b64 }),
     deleteAsset: (path: string) =>
       req<{ ok: boolean }>("DELETE", `/api/latex/assets/${encodeLatexPath(path)}`),
     zip: (path: string) =>

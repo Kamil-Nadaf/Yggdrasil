@@ -51,6 +51,8 @@ export function WorkspaceSidebar({
   onNewFolder,
   onUploadFiles,
   onUploadFolder,
+  onSelectAsset,
+  selectedAsset = "",
   onDropFiles,
   onMoveIntoFolder,
   searchTerm,
@@ -73,6 +75,9 @@ export function WorkspaceSidebar({
   onNewFolder: () => void;
   onUploadFiles: () => void;
   onUploadFolder?: () => void;
+  /** Click an imported file (image / PDF / text) to preview it. */
+  onSelectAsset?: (name: string) => void;
+  selectedAsset?: string;
   onDropFiles?: (dataTransfer: DataTransfer) => void;
   onMoveIntoFolder?: (path: string, folder: string) => void;
   searchTerm: string;
@@ -301,7 +306,7 @@ export function WorkspaceSidebar({
             {assets.map((a) => (
               <div
                 key={a.name}
-                className="latex-tree-item latex-tree-asset"
+                className={`latex-tree-item latex-tree-asset${selectedAsset === a.name ? " active" : ""}`}
                 draggable={Boolean(onMoveIntoFolder)}
                 onDragStart={
                   onMoveIntoFolder
@@ -315,7 +320,9 @@ export function WorkspaceSidebar({
                   if (e.ctrlKey || e.metaKey) {
                     e.preventDefault();
                     requestRename(a.name, "asset");
+                    return;
                   }
+                  onSelectAsset?.(a.name);
                 }}
                 onContextMenu={(e) => openCtx(e, a.name, "asset")}
               >

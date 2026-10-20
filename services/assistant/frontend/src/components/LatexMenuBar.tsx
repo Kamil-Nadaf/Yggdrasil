@@ -120,7 +120,7 @@ export function LatexMenuBar({
     { type: "item", label: "New file", onClick: onNewFile },
     { type: "item", label: "New folder…", onClick: onNewFolder },
     { type: "sep" },
-    { type: "item", label: "Upload file…", onClick: onUploadFiles },
+    { type: "item", label: "Upload file or .zip project…", onClick: onUploadFiles },
     { type: "item", label: "Upload folder…", onClick: onUploadFolder },
     { type: "sep" },
     { type: "item", label: "Rename…", onClick: onStartRename },

@@ -13,6 +13,7 @@ import {
 import { LatexPromptModal } from "../components/LatexMenuBar";
 import { PreviewToolbar, useFullscreenPane, useZoom } from "../components/WorkspacePreviewPane";
 import { markdownToLatexDocument } from "../lib/markdownToLatex";
+import IconFigure from "../components/IconFigure";
 import { apiErrorMessage } from "../lib/apiError";
 import { downloadBase64 } from "../lib/download";
 import { fileToBase64, imageFileName, imageFilesFrom } from "../lib/pastedImages";
@@ -55,10 +56,12 @@ function wordCount(text: string): number {
 function PresentPane({
   source,
   title,
+  imageBase,
   onFlash,
 }: {
   source: string;
   title: string;
+  imageBase?: string;
   onFlash: (text: string, ok?: boolean) => void;
 }) {
   const { zoom, zoomIn, zoomOut, atMinZoom, atMaxZoom } = useZoom();
@@ -100,7 +103,7 @@ function PresentPane({
       <div className="notes-present-content">
         <div className="notes-present-scale" style={{ fontSize: `${15 * zoom}px` }}>
           {body.trim() ? (
-            <AbstractText text={body} className="notes-present-text" />
+            <AbstractText text={body} className="notes-present-text" imageBase={imageBase} />
           ) : (
             <div className="latex-preview-empty">Nothing to present yet.</div>
           )}
@@ -635,7 +638,7 @@ export default function MarkdownNotesTab({ section = "Quick Notes" }: { section?
                   <button type="button" className="latex-fmt-btn" title="Bullet list" onClick={() => insert("- ")}>•≡</button>
                   <button type="button" className="latex-fmt-btn" title="Quote" onClick={() => insert("> ")}>”</button>
                   <button type="button" className="latex-fmt-btn" title="Link" onClick={() => insert("[", "](url)")}>🔗</button>
-                  <button type="button" className="latex-fmt-btn" title="Insert image (or paste / drop one into the editor)" onClick={() => pickImages()}>🖼</button>
+                  <button type="button" className="latex-fmt-btn" title="Insert image (or paste / drop one into the editor)" onClick={() => pickImages()} aria-label="Insert image"><IconFigure /></button>
                   <button type="button" className="latex-fmt-btn" title="Code block" onClick={() => insert("```\n", "\n```")}>{"</>"}</button>
                 </div>
                 {selected || dirty ? (
@@ -689,7 +692,7 @@ export default function MarkdownNotesTab({ section = "Quick Notes" }: { section?
         )}
         {mode === "present" && (
           <WorkspacePanel id="notes-present" defaultSize="100" minSize="25" className="latex-panel">
-            <PresentPane source={source} title={filename.trim() || leafOf(selected) || section} onFlash={flash} />
+            <PresentPane source={source} title={filename.trim() || leafOf(selected) || section} imageBase={noteDir} onFlash={flash} />
           </WorkspacePanel>
         )}
       </WorkspaceLayout>

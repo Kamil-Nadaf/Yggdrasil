@@ -10,6 +10,8 @@ Routes:
   GET    /files/{filename}        read a saved .tex file's source
   DELETE /files/{filename}        delete a .tex file
   POST   /assets                  write a binary asset (png/pdf/bib/…) via base64
+  POST   /import-zip              extract an uploaded project .zip into its own folder
+  GET    /assets/{path}           serve an asset (image/pdf/text) for in-app preview
   DELETE /assets/{path}           delete a non-.tex asset
   GET    /zip/{path}              zip a project folder or single .tex (base64)
   POST   /rename                  move/rename a file or folder under 70-LaTeX/
@@ -30,7 +32,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 VAULT = Path(os.environ.get("VAULT_PATH", "/vault"))
@@ -43,6 +45,9 @@ BUNDLED_SUPPORT_DIR = Path(__file__).resolve().parent
 ASSET_EXTS = {
     ".png", ".jpg", ".jpeg", ".pdf", ".eps", ".svg",
     ".bib", ".bst", ".cls", ".sty", ".txt", ".csv", ".dat",
+    # Common in real-world / Overleaf projects
+    ".bbl", ".clo", ".def", ".cfg", ".ist", ".gif", ".tif", ".tiff",
+    ".tikz", ".pgf", ".otf", ".ttf", ".md", ".json",
 }
 
 app = FastAPI(title="Yggdrasil LaTeX Service")
@@ -442,6 +447,101 @@ async def upload_asset(payload: AssetUploadRequest):
     return {"path": f"70-LaTeX/{rel}", "size": len(data)}
 
 
+# ── Project .zip import ──────────────────────────────────────────────────────
+ZIP_MAX_FILES = 5000
+ZIP_MAX_BYTES = 300 * 1024 * 1024  # total uncompressed
+
+
+class ZipImportRequest(BaseModel):
+    name: str  # original zip filename, used to name the project folder
+    content_b64: str
+
+
+def _clean_segment(part: str) -> str:
+    """Make one path segment pass SAFE_NAME_RE (e.g. 'fig (1).png' → 'fig _1_.png')."""
+    cleaned = re.sub(r"[^A-Za-z0-9._ -]", "_", part).strip()
+    return cleaned.lstrip(".") or "_"
+
+
+@app.post("/import-zip")
+async def import_zip(payload: ZipImportRequest):
+    """
+    Extract an uploaded project .zip (e.g. an Overleaf download) into
+    70-LaTeX/<ProjectName>/. Drops __MACOSX/hidden files and unsupported
+    types, sanitises unsafe file names, strips a single wrapper folder, and
+    refuses zip-slip paths.
+    """
+    try:
+        raw = base64.b64decode(payload.content_b64, validate=False)
+        zf = zipfile.ZipFile(io.BytesIO(raw))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Not a valid .zip file: {exc}") from exc
+
+    infos = [i for i in zf.infolist() if not i.is_dir()]
+    if len(infos) > ZIP_MAX_FILES or sum(i.file_size for i in infos) > ZIP_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Zip is too large to import")
+
+    # Normalise member paths; skip junk and anything escaping the archive root.
+    members: list[tuple[zipfile.ZipInfo, list[str]]] = []
+    for info in infos:
+        parts = [p for p in info.filename.replace("\\", "/").split("/") if p not in ("", ".")]
+        if not parts or ".." in parts:
+            continue
+        if parts[0] == "__MACOSX" or any(p.startswith(".") for p in parts):
+            continue
+        members.append((info, parts))
+    if not members:
+        raise HTTPException(status_code=400, detail="Zip contains no files")
+
+    # Strip one wrapper folder (Project.zip → Project/…) so we don't nest twice.
+    if all(len(parts) > 1 for _, parts in members) and len({parts[0] for _, parts in members}) == 1:
+        members = [(i, parts[1:]) for i, parts in members]
+
+    stem = Path(payload.name).stem or "Imported"
+    project = _clean_segment(stem)
+    base_project, n = project, 2
+    while under_latex(project).exists():
+        project = f"{base_project}-{n}"
+        n += 1
+
+    written: list[str] = []
+    renamed: list[str] = []
+    skipped: list[str] = []
+    for info, parts in members:
+        clean = [_clean_segment(p) for p in parts]
+        rel = "/".join(clean)
+        suffix = Path(rel).suffix.lower()
+        if suffix != ".tex" and suffix not in ASSET_EXTS:
+            skipped.append("/".join(parts))
+            continue
+        if clean != parts:
+            renamed.append(f"{'/'.join(parts)} → {rel}")
+        target = under_latex(f"{project}/{rel}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(zf.read(info))
+        written.append(rel)
+
+    tex_files = sorted((w for w in written if w.lower().endswith(".tex")), key=lambda w: (w.count("/"), w))
+    main = None
+    for w in tex_files:
+        try:
+            if "\\documentclass" in (under_latex(f"{project}/{w}").read_text(errors="ignore")):
+                main = w
+                break
+        except OSError:
+            continue
+    main = main or (tex_files[0] if tex_files else None)
+
+    return {
+        "project": project,
+        "main": main[: -len(".tex")] if main else None,
+        "files": len(written),
+        "skipped": skipped[:50],
+        "skipped_count": len(skipped),
+        "renamed": renamed[:50],
+    }
+
+
 @app.post("/rename")
 async def rename_path(payload: RenameRequest):
     src = safe_rel_path(payload.src)
@@ -455,6 +555,26 @@ async def rename_path(payload: RenameRequest):
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     src_path.rename(dest_path)
     return {"ok": True, "src": src, "dest": dest}
+
+
+@app.get("/assets/{asset_path:path}")
+async def get_asset(asset_path: str):
+    """Serve an uploaded asset so the editor can preview images / PDFs / text files."""
+    rel = safe_rel_path(asset_path)
+    path = under_latex(rel)
+    if not path.exists() or not path.is_file() or path.suffix.lower() not in ASSET_EXTS:
+        raise HTTPException(status_code=404, detail=f"Asset not found: {rel}")
+    media = {
+        ".svg": "image/svg+xml", ".pdf": "application/pdf", ".eps": "application/postscript",
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+        ".tif": "image/tiff", ".tiff": "image/tiff",
+    }.get(path.suffix.lower(), "text/plain; charset=utf-8")
+    headers = {"Content-Disposition": "inline", "X-Content-Type-Options": "nosniff"}
+    if path.suffix.lower() == ".svg":
+        # Uploaded SVG is untrusted: never let it run script in the app origin.
+        # (Not applied to PDFs — Chrome refuses to render sandboxed PDFs.)
+        headers["Content-Security-Policy"] = "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'"
+    return FileResponse(path, media_type=media, headers=headers)
 
 
 @app.delete("/assets/{asset_path:path}")

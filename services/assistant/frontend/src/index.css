@@ -4380,3 +4380,36 @@ h2 { font-size: 15px; color: var(--accent); }
   height: auto;
   border-radius: 4px;
 }
+
+/* LaTeX: imported-file viewer + Overleaf-style figure picker */
+.latex-asset-viewer { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.latex-asset-viewer-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 8px 12px; border-bottom: 1px solid var(--border, rgba(0,0,0,.12));
+}
+.latex-asset-viewer-name { font-family: var(--font-mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.latex-asset-viewer-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.latex-asset-viewer-actions .btn { text-decoration: none; }
+.latex-asset-viewer-body { flex: 1; min-height: 0; overflow: auto; display: flex; background: var(--bg); }
+.latex-asset-viewer-body img.is-fit { max-width: 100%; max-height: 100%; margin: auto; object-fit: contain; cursor: zoom-in; }
+.latex-asset-viewer-body img.is-full { margin: 0; cursor: zoom-out; }
+.latex-asset-viewer-pdf { flex: 1; width: 100%; height: 100%; border: 0; }
+.latex-asset-viewer-body pre { margin: 0; padding: 14px; font: 12px/1.6 var(--font-mono); white-space: pre-wrap; width: 100%; }
+.latex-tree-asset { cursor: pointer; }
+.latex-tree-asset.active { background: var(--hover, rgba(0,0,0,.06)); }
+
+.latex-figure-picker { width: min(620px, 100%); }
+.latex-figure-picker-tools { display: flex; gap: 8px; margin-bottom: 10px; }
+.latex-figure-picker-tools input { flex: 1; }
+.latex-figure-picker-list { max-height: 46vh; overflow: auto; border: 1px solid var(--border, rgba(0,0,0,.12)); border-radius: 6px; }
+.latex-figure-group-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 6px 10px; font-size: 12px; background: var(--hover, rgba(0,0,0,.04)); position: sticky; top: 0;
+}
+.latex-figure-row { display: flex; align-items: center; gap: 10px; padding: 6px 10px; cursor: pointer; }
+.latex-figure-row:hover { background: var(--hover, rgba(0,0,0,.04)); }
+.latex-figure-thumb { width: 44px; height: 34px; object-fit: cover; border-radius: 3px; border: 1px solid var(--border, rgba(0,0,0,.12)); flex-shrink: 0; }
+.latex-figure-thumb--doc { display: flex; align-items: center; justify-content: center; font-size: 10px; }
+.latex-figure-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.latex-figure-size { font-size: 11px; }
+.latex-figure-picker-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }

@@ -71,7 +71,7 @@ echo "→ Installing Python dependencies..."
 "$DIST/venv/bin/pip" install --upgrade pip --quiet
 
 if [ "$(uname -s)" = "Linux" ]; then
-  "$DIST/venv/bin/pip" install -r "$DIST/requirements.txt" pywebview PyGObject --quiet
+  "$DIST/venv/bin/pip" install -r "$DIST/requirements.txt" pywebview "PyGObject<3.50" --quiet
 else
   echo "→ Not Linux: skipping PyGObject. Run on Linux for real build."
   "$DIST/venv/bin/pip" install -r "$DIST/requirements.txt" pywebview --quiet

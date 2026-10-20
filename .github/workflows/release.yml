@@ -108,7 +108,7 @@ jobs:
 
             | Your OS | File |
             |---|---|
-            | macOS | `Yggdrasil-*-mac.pkg` (double-click, easiest) or `Yggdrasil-*-mac.dmg` |
+            | macOS | `Yggdrasil-*-mac.pkg` or `Yggdrasil-*-mac.dmg` (unsigned: right-click → Open the first time) |
             | Windows | `Yggdrasil-*-windows.zip` → unzip → double-click `Yggdrasil.bat` |
             | Linux | `Yggdrasil-*-linux.tar.gz` → extract → `./install.sh` |
 

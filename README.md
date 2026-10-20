@@ -26,9 +26,17 @@ steps below show how to get past it.
 ### macOS
 
 1. Download the `.pkg` from the release page.
-2. Double-click it and click **Continue → Install**. It installs Yggdrasil into
-   `/Applications` and clears macOS's quarantine flag for you.
-3. Open **Yggdrasil** from Launchpad or Finder.
+2. **macOS will block it the first time** (the installer isn't signed by Apple),
+   with *"…can't be opened because Apple cannot check it for malicious software"*.
+   Click **Done** (not Move to Trash), then either:
+   - open **System Settings → Privacy & Security**, scroll down to *"Yggdrasil… was
+     blocked"* and click **Open Anyway** → **Open**; or
+   - right-click the `.pkg` → **Open** → **Open**; or
+   - in Terminal: `xattr -d com.apple.quarantine ~/Downloads/Yggdrasil-*-mac.pkg`
+3. Run the installer: **Continue → Install**. It puts Yggdrasil in `/Applications`
+   and clears the quarantine flag on the app.
+4. Open **Yggdrasil** from Launchpad or Finder. If it says the app is "damaged",
+   run `xattr -cr /Applications/Yggdrasil.app` in Terminal and try again.
 
 **Prefer the `.dmg`?** Open it, drag **Yggdrasil** into **Applications**, eject the
 disk image, then open the app. If macOS blocks it:

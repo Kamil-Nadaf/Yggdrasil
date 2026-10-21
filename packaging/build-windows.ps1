@@ -29,7 +29,6 @@ $LatexSrc = JP $Root @("services", "latex")
 $DistApp = Join-Path $Dist "app"
 $DistDesktop = Join-Path $Dist "desktop"
 $DistLatex = Join-Path $Dist "latex"
-$DistVenv = Join-Path $Dist "venv"
 
 if (-not $IsWindowsHost) {
   Write-Host "→ Not running on Windows: this is a local sanity check only (paths/assembly), not a real Windows build. Run this script on an actual Windows machine to produce the distributable zip."
@@ -43,7 +42,7 @@ npm run build
 
 Write-Host "→ Assembling $Dist"
 if (Test-Path $Dist) { Remove-Item -Recurse -Force $Dist }
-New-Item -ItemType Directory -Force -Path $DistApp, $DistDesktop, $DistLatex, (Join-Path $Dist "feynman"), $DistVenv | Out-Null
+New-Item -ItemType Directory -Force -Path $DistApp, $DistDesktop, $DistLatex, (Join-Path $Dist "feynman") | Out-Null
 
 Copy-Item (JP $DesktopSrc @("launch.py")), (JP $DesktopSrc @("setup.py")), (JP $DesktopSrc @("splash.html")), (JP $DesktopSrc @("yggdrasil-logo.png")) $DistDesktop
 foreach ($f in @("main.py", "gate.py", "zotero.py", "data_manifest.py", "graph_links.py", "analysis_tags.py", "arxiv_topics.py", "task_statuses.py", "goals.py", "mcp_server.py")) {
@@ -60,15 +59,27 @@ if (Test-Path $PostersSrc) { Copy-Item -Recurse $PostersSrc (Join-Path $DistLate
 Copy-Item (JP $AssistantSrc @("requirements.txt")) (Join-Path $Dist "requirements.txt")
 Copy-Item (Join-Path $Root "LICENSE") (Join-Path $Dist "LICENSE")
 
-Write-Host "→ Creating bundled Python (3.12 — needed for pyarrow/lancedb wheels)"
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-  Write-Host "ERROR: uv is required to build the desktop app (pins Python 3.12)."
-  Write-Host 'Install: powershell -c "irm https://astral.sh/uv/install.ps1 | iex"'
-  exit 1
+Write-Host "→ Bundling a relocatable standalone Python 3.12 (python-build-standalone)"
+# A venv (or `uv venv`) records the build machine's absolute Python path, so it
+# only works where it was built. The standalone distribution is self-contained
+# and can be unzipped anywhere, so we install packages straight into it.
+$PyVer = "3.12.5"
+$PyDate = "20240814"
+$PyUrl = "https://github.com/indygreg/python-build-standalone/releases/download/$PyDate/cpython-$PyVer+$PyDate-x86_64-pc-windows-msvc-install_only.tar.gz"
+$PyTgz = Join-Path ([System.IO.Path]::GetTempPath()) "ygg-python-windows.tar.gz"
+if (-not (Test-Path $PyTgz)) {
+  Invoke-WebRequest -Uri $PyUrl -OutFile $PyTgz
 }
-uv venv --python 3.12 $DistVenv
-$VenvPython = JP $DistVenv @($VenvBinDir, $VenvPythonName)
-uv pip install --python $VenvPython -r (Join-Path $Dist "requirements.txt") pywebview
+tar -xzf $PyTgz -C $Dist          # creates $Dist\python\
+if ($LASTEXITCODE -ne 0) { throw "Failed to extract standalone Python" }
+$VenvPython = JP $Dist @("python", "python.exe")
+if (-not (Test-Path $VenvPython)) { throw "Standalone Python missing: $VenvPython" }
+& $VenvPython -m pip install --upgrade pip --quiet
+& $VenvPython -m pip install -r (Join-Path $Dist "requirements.txt") pywebview --quiet
+if ($LASTEXITCODE -ne 0) { throw "pip install failed" }
+# Sanity check: the bundled interpreter can import the key packages.
+& $VenvPython -c "import fastapi, uvicorn, webview; print('bundle imports OK')"
+if ($LASTEXITCODE -ne 0) { throw "Bundled Python cannot import its dependencies" }
 
 @"
 @echo off
@@ -77,7 +88,7 @@ set YGG_RESOURCES=%DIR%app
 set YGG_BUNDLE=%DIR%
 set PYTHONUNBUFFERED=1
 cd /d "%DIR%desktop"
-"%DIR%venv\Scripts\python.exe" launch.py
+"%DIR%python\python.exe" launch.py
 "@ | Set-Content -Encoding ASCII (Join-Path $Dist "Yggdrasil.bat")
 
 @"

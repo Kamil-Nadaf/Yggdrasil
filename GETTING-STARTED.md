@@ -70,7 +70,7 @@ then add this to that tool's MCP config (e.g. Claude Code's `.mcp.json`):
 {
   "mcpServers": {
     "yggdrasil": {
-      "command": "/Applications/Yggdrasil.app/Contents/Resources/venv/bin/python",
+      "command": "/Applications/Yggdrasil.app/Contents/Resources/python/bin/python3",
       "args": ["/Applications/Yggdrasil.app/Contents/Resources/app/mcp_server.py"]
     }
   }
@@ -78,7 +78,7 @@ then add this to that tool's MCP config (e.g. Claude Code's `.mcp.json`):
 ```
 
 **Windows/Linux:** same shape, but `command` points at
-`venv\Scripts\python.exe` (Windows) or `venv/bin/python` (Linux) and `args`
+`python\python.exe` (Windows) or `python/bin/python3` (Linux) and `args`
 at `mcp_server.py`, both inside wherever you extracted the app.
 
 This gives your agent tools to search your notes, read papers, and see your

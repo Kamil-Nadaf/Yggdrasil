@@ -23,14 +23,14 @@ must be running** for it to answer anything.
 
 ## Config per client
 
-The `command` is the **Python inside the app's own bundled venv**, not your
+The `command` is the **Python bundled inside the app**, not your
 system Python — that's where `mcp` and the app's other dependencies live.
 
 | Platform | Python | Script |
 |---|---|---|
-| macOS (`Yggdrasil.app`) | `.../Yggdrasil.app/Contents/Resources/venv/bin/python` | `.../Yggdrasil.app/Contents/Resources/app/mcp_server.py` |
-| Linux (`Yggdrasil-linux/`) | `.../Yggdrasil-linux/venv/bin/python` | `.../Yggdrasil-linux/app/mcp_server.py` |
-| Windows (`Yggdrasil-windows\`) | `...\Yggdrasil-windows\venv\Scripts\python.exe` | `...\Yggdrasil-windows\app\mcp_server.py` |
+| macOS (`Yggdrasil.app`) | `.../Yggdrasil.app/Contents/Resources/python/bin/python3` | `.../Yggdrasil.app/Contents/Resources/app/mcp_server.py` |
+| Linux (`Yggdrasil-linux/`) | `.../Yggdrasil-linux/python/bin/python3` | `.../Yggdrasil-linux/app/mcp_server.py` |
+| Windows (`Yggdrasil-windows\`) | `...\Yggdrasil-windows\python\python.exe` | `...\Yggdrasil-windows\app\mcp_server.py` |
 | Local dev (repo checkout) | your `services/assistant` venv's `python` | `services/assistant/mcp_server.py` |
 
 `YGG_API_URL` defaults to `http://127.0.0.1:47285` (the desktop app's fixed
@@ -43,7 +43,7 @@ compose setup on port 8000.
 {
   "mcpServers": {
     "yggdrasil": {
-      "command": "/Applications/Yggdrasil.app/Contents/Resources/venv/bin/python",
+      "command": "/Applications/Yggdrasil.app/Contents/Resources/python/bin/python3",
       "args": ["/Applications/Yggdrasil.app/Contents/Resources/app/mcp_server.py"]
     }
   }

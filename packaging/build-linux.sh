@@ -17,7 +17,7 @@ npm run build
 
 echo "→ Assembling $DIST"
 rm -rf "$DIST"
-mkdir -p "$DIST/app" "$DIST/desktop" "$DIST/latex" "$DIST/feynman" "$DIST/venv"
+mkdir -p "$DIST/app" "$DIST/desktop" "$DIST/latex" "$DIST/feynman"
 
 cp "${ROOT}/desktop/launch.py" "$DIST/desktop/"
 cp "${ROOT}/desktop/setup.py" "$DIST/desktop/"
@@ -64,17 +64,19 @@ if [ ! -f "$STANDALONE_PYTHON" ]; then
   tar -xzf "$PY_TGZ" -C "$PY_CACHE"
 fi
 
-echo "→ Creating venv from standalone Python..."
-"$STANDALONE_PYTHON" -m venv "$DIST/venv"
+echo "→ Copying standalone Python into the bundle (relocatable; no venv)..."
+rm -rf "$DIST/python"
+cp -R "${PY_CACHE}/python" "$DIST/python"
+BPY="$DIST/python/bin/python3.12"
 
 echo "→ Installing Python dependencies..."
-"$DIST/venv/bin/pip" install --upgrade pip --quiet
+"$BPY" -m pip install --upgrade pip --quiet
 
 if [ "$(uname -s)" = "Linux" ]; then
-  "$DIST/venv/bin/pip" install -r "$DIST/requirements.txt" pywebview "PyGObject<3.50" --quiet
+  "$BPY" -m pip install -r "$DIST/requirements.txt" pywebview "PyGObject<3.50" --quiet
 else
   echo "→ Not Linux: skipping PyGObject. Run on Linux for real build."
-  "$DIST/venv/bin/pip" install -r "$DIST/requirements.txt" pywebview --quiet
+  "$BPY" -m pip install -r "$DIST/requirements.txt" pywebview --quiet
 fi
 
 cat > "$DIST/Yggdrasil" << 'EOF'
@@ -84,7 +86,7 @@ export YGG_RESOURCES="$DIR/app"
 export YGG_BUNDLE="$DIR"
 export PYTHONUNBUFFERED=1
 cd "$DIR/desktop"
-exec "$DIR/venv/bin/python" "$DIR/desktop/launch.py"
+exec "$DIR/python/bin/python3" "$DIR/desktop/launch.py"
 EOF
 chmod +x "$DIST/Yggdrasil"
 

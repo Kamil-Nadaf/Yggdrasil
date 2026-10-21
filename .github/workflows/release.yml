@@ -76,6 +76,25 @@ jobs:
         shell: pwsh
         run: ./packaging/build-windows.ps1
 
+      # Regression guard: the bundled Python must keep working after it is moved
+      # to a different folder (this is what a user's machine looks like). A venv
+      # with hard-coded build paths fails this check.
+      - name: Smoke test (relocated bundle)
+        shell: bash
+        run: |
+          set -e
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            cp -R release/Yggdrasil.app "$RUNNER_TEMP/Moved.app"
+            PY="$RUNNER_TEMP/Moved.app/Contents/Resources/python/bin/python3"
+          elif [ "$RUNNER_OS" = "Linux" ]; then
+            cp -R release/Yggdrasil-linux "$RUNNER_TEMP/moved"
+            PY="$RUNNER_TEMP/moved/python/bin/python3"
+          else
+            cp -R release/Yggdrasil-windows "$RUNNER_TEMP/moved"
+            PY="$RUNNER_TEMP/moved/python/python.exe"
+          fi
+          "$PY" -c "import fastapi, uvicorn, lancedb, pyarrow; print('relocated bundle OK')"
+
       - uses: actions/upload-artifact@v4
         with:
           name: yggdrasil-${{ matrix.artifact }}

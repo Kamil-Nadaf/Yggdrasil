@@ -10,7 +10,10 @@ APP="${OUT}/Yggdrasil.app"
 RES="${APP}/Contents/Resources"
 APPDIR="${RES}/app"
 PYDIR="${RES}/python"          # standalone Python lives here
-VENV="${RES}/venv"
+# NOTE: no venv. A venv symlinks to its build-time absolute path, which breaks as
+# soon as the app is installed anywhere else. We install packages straight into
+# the relocatable standalone Python instead.
+VENV="${PYDIR}"
 DMG="${OUT}/Yggdrasil-${STAMP}-mac.dmg"
 FRONTEND="${ROOT}/services/assistant/frontend"
 
@@ -87,8 +90,8 @@ RES="$DIR/../Resources"
 export YGG_RESOURCES="$RES/app"
 export YGG_BUNDLE="$RES"
 export PYTHONUNBUFFERED=1
-# Use bundled venv Python — fully self-contained, no system Python dependency
-exec "$RES/venv/bin/python3" "$RES/desktop/launch.py"
+# Bundled standalone Python — relocatable, no system Python dependency
+exec "$RES/python/bin/python3" "$RES/desktop/launch.py"
 EOF
 chmod +x "${APP}/Contents/MacOS/Yggdrasil"
 
@@ -140,12 +143,9 @@ if [ -f "$ARM_LIB" ] && [ -f "$X86_LIB" ]; then
   lipo -create "$ARM_LIB" "$X86_LIB" -output "${PYDIR}/lib/libpython3.12.dylib" 2>/dev/null || true
 fi
 
-echo "→ Creating venv from universal Python..."
-"${PYDIR}/bin/python3.12" -m venv "$VENV"
-
 echo "→ Installing Python dependencies..."
-"${VENV}/bin/pip" install --upgrade pip
-"${VENV}/bin/pip" install \
+"${PYDIR}/bin/python3.12" -m pip install --upgrade pip
+"${PYDIR}/bin/python3.12" -m pip install \
   -r "${ROOT}/services/assistant/requirements.txt" \
   pywebview \
   --no-cache-dir

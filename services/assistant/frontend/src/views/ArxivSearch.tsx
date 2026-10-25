@@ -181,6 +181,7 @@ export default function ArxivSearch() {
   const [refreshing, setRefreshing] = useState(false);
   const [filterText, setFilterText] = useState("");
   const [selectedDate, setSelectedDate] = useState(todayIso);
+  const [latestSubmitted, setLatestSubmitted] = useState("");
   const [topic, setTopic] = useState(loadTopic);
   const [customTopicInput, setCustomTopicInput] = useState("");
   const [customTopics, setCustomTopics] = useState(loadCustomTopics);
@@ -249,6 +250,7 @@ export default function ArxivSearch() {
     api.arxiv.daily(200, topic, refresh, selectedDate === todayIso() ? undefined : selectedDate)
       .then((r) => {
         setDaily(r.papers || []);
+        setLatestSubmitted(r.latest_submitted || "");
         if (r.warning) {
           showToast(r.warning, false);
         } else if (refresh) {
@@ -401,6 +403,13 @@ export default function ArxivSearch() {
             <span className="arxiv-count">{filteredDaily.length}{filterText ? `/${daily.length}` : ""}</span>
           </div>
           <div className="arxiv-search-bar" style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}>
+            {selectedDate === todayIso() && latestSubmitted && (
+              <div className="muted" style={{ fontSize: 12, lineHeight: 1.4 }}>
+                Newest paper available: {new Date(latestSubmitted).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}.
+                {Date.now() - new Date(latestSubmitted).getTime() > 30 * 3600 * 1000 &&
+                  " arXiv only publishes new papers Sunday–Thursday around 20:00 US Eastern time (and nothing on weekends), so anything submitted since is not available yet — Update will pick it up after the next announcement."}
+              </div>
+            )}
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
               <button
                 type="button"

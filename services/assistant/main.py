@@ -2020,7 +2020,8 @@ async def _fetch_daily_papers(category: str, max_results: int, target_date: Opti
     papers = await _fetch_arxiv_rss(category)
     if papers:
         return papers[:max_results]
-    # Fallback: query API (can 429)
+    # Fallback: query API (can 429). The RSS feed is empty on days with no announcement
+    # (weekends), so this is what shows the most recently announced papers then.
     papers, _total = await _fetch_arxiv(
         {
             "search_query": search_query_for(category),
@@ -2080,6 +2081,11 @@ async def _fetch_arxiv(params: dict) -> tuple[list[dict], int]:
     raise HTTPException(status_code=503, detail=msg) from last_exc
 
 
+def _latest_submitted(papers: list[dict]) -> str:
+    """Newest submission timestamp among the papers (ISO string), or ""."""
+    return max((p.get("submitted") or "" for p in papers), default="")
+
+
 _DAILY_CACHE: dict[str, tuple[float, list[dict]]] = {}
 _DAILY_CACHE_TTL = 180.0
 
@@ -2107,7 +2113,8 @@ async def arxiv_daily(max: int = 200, cat: str = "astro-ph.HE", refresh: bool = 
     cache_key = f"{category}:{max_results}:{target_date or 'latest'}"
     cached = _DAILY_CACHE.get(cache_key)
     if not refresh and cached and (time.time() - cached[0]) < _DAILY_CACHE_TTL:
-        return {"papers": cached[1], "cat": category, "date": target_date, "cached": True, "warning": None}
+        return {"papers": cached[1], "cat": category, "date": target_date, "cached": True, "warning": None,
+                "latest_submitted": _latest_submitted(cached[1])}
     try:
         papers = await _fetch_daily_papers(category, max_results, target_date)
     except HTTPException as exc:
@@ -2118,10 +2125,12 @@ async def arxiv_daily(max: int = 200, cat: str = "astro-ph.HE", refresh: bool = 
                 "date": target_date,
                 "cached": True,
                 "warning": str(exc.detail),
+                "latest_submitted": _latest_submitted(cached[1]),
             }
         raise
     _DAILY_CACHE[cache_key] = (time.time(), papers)
-    return {"papers": papers, "cat": category, "date": target_date, "cached": False, "warning": None}
+    return {"papers": papers, "cat": category, "date": target_date, "cached": False, "warning": None,
+            "latest_submitted": _latest_submitted(papers)}
 
 
 # New-style (Apr 2007+): 0704.0001 / 1501.00001 / 2401.12345v2

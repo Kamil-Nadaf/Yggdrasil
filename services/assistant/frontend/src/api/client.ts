@@ -531,7 +531,7 @@ export const api = {
   arxiv: {
     topics: () => req<{ topics: { id: string; label: string; group?: string }[] }>("GET", "/api/arxiv/topics"),
     daily: (max = 200, cat = "astro-ph.HE", refresh = false, date?: string) =>
-      req<{ papers: ArxivPaper[]; cat: string; date: string | null; cached: boolean; warning?: string | null }>(
+      req<{ papers: ArxivPaper[]; cat: string; date: string | null; cached: boolean; warning?: string | null; latest_submitted?: string }>(
         "GET",
         `/api/arxiv/daily?max=${max}&cat=${encodeURIComponent(cat)}&refresh=${refresh ? "true" : "false"}${date ? `&date=${encodeURIComponent(date)}` : ""}`
       ),

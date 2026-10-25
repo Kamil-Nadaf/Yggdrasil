@@ -353,6 +353,11 @@ def main() -> None:
     storage_path.mkdir(parents=True, exist_ok=True)
     # private_mode=True is pywebview's default and silently drops cookies/localStorage
     # (theme, API keys, provider settings) on every quit — must disable it explicitly.
+    try:
+        # Lets <a download> / blob links work as a last-resort path in the web view.
+        webview.settings["ALLOW_DOWNLOADS"] = True
+    except Exception:
+        pass
     webview.start(boot, window, private_mode=False, storage_path=str(storage_path))
 
 

@@ -35,13 +35,32 @@ export function downloadBlobUrl(url: string, filename: string) {
     return;
   }
   void (async () => {
+    let b64 = "";
     try {
       const blob = await (await fetch(url)).blob();
-      await save(filename, await blobToBase64(blob));
+      b64 = await blobToBase64(blob);
+      // 1) native "Save as…" dialog; returns "" if the user cancelled.
+      await save(filename, b64);
+      return;
     } catch (e) {
-      console.error("Native save failed, falling back to browser download", e);
-      anchorDownload(url, filename);
+      console.error("Native save dialog failed", e);
     }
+    try {
+      // 2) let the local server drop the file into ~/Downloads.
+      const res = await fetch("/api/desktop/save-download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename, b64 }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { path } = (await res.json()) as { path: string };
+      window.alert(`Saved to ${path}`);
+      return;
+    } catch (e) {
+      console.error("Server-side save failed", e);
+    }
+    // 3) last resort: browser-style download.
+    anchorDownload(url, filename);
   })();
 }
 

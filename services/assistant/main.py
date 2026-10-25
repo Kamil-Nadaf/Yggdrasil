@@ -983,6 +983,33 @@ class LocateQuery(BaseModel):
     limit: int = 5
 
 
+@app.post("/api/desktop/save-download")
+async def desktop_save_download(payload: dict):
+    """Desktop-app fallback for downloads: write the bytes into ~/Downloads.
+
+    Only available inside the desktop app (YGG_BUNDLE set); never in Docker."""
+    import base64
+
+    if not os.environ.get("YGG_BUNDLE"):
+        raise HTTPException(status_code=404, detail="Not available in this deployment")
+    name = Path(str(payload.get("filename") or "download")).name or "download"
+    try:
+        data = base64.b64decode(str(payload.get("b64") or ""), validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid file data")
+    if len(data) > 300 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large")
+    folder = Path.home() / "Downloads"
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / name
+    stem, suffix, n = target.stem, target.suffix, 1
+    while target.exists():
+        target = folder / f"{stem} ({n}){suffix}"
+        n += 1
+    target.write_bytes(data)
+    return {"path": str(target)}
+
+
 @app.post("/api/locate")
 async def locate(payload: LocateQuery):
     table = get_table()

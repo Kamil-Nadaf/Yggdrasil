@@ -2,7 +2,10 @@ fastapi==0.115.0
 uvicorn[standard]==0.34.0
 python-frontmatter==1.1.0
 pyyaml==6.0.2
-lancedb==0.38.0
+# lancedb stopped publishing macOS-Intel wheels after 0.25.3, so Intel Macs pin to it.
+# (We only use the core API: connect/open_table/create_table/search/add/delete.)
+lancedb==0.38.0; sys_platform != "darwin" or platform_machine != "x86_64"
+lancedb==0.25.3; sys_platform == "darwin" and platform_machine == "x86_64"
 pyarrow==17.0.0
 httpx==0.27.2
 anthropic==0.34.2

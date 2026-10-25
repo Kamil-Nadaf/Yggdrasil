@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Build a friend-installable Mac app (no Docker). Double-click → window.
-# Embeds a universal (arm64+x86_64) standalone Python — no system Python needed.
+# Embeds a relocatable standalone Python for THIS Mac's architecture — no system
+# Python needed. Run it on an Apple Silicon Mac for the arm64 build and on an
+# Intel Mac (or `arch -x86_64 bash …` under Rosetta) for the Intel build; CI does
+# both. Native wheels (pydantic, lancedb, numpy…) are per-architecture, so a
+# single "universal" bundle isn't possible without rebuilding every wheel.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -14,38 +18,28 @@ PYDIR="${RES}/python"          # standalone Python lives here
 # soon as the app is installed anywhere else. We install packages straight into
 # the relocatable standalone Python instead.
 VENV="${PYDIR}"
-DMG="${OUT}/Yggdrasil-${STAMP}-mac.dmg"
+case "$(uname -m)" in
+  arm64)  PBS_ARCH="aarch64"; ARCH_TAG="arm64" ;;
+  x86_64) PBS_ARCH="x86_64";  ARCH_TAG="intel" ;;
+  *) echo "Unsupported architecture: $(uname -m)"; exit 1 ;;
+esac
+DMG="${OUT}/Yggdrasil-${STAMP}-mac-${ARCH_TAG}.dmg"
 FRONTEND="${ROOT}/services/assistant/frontend"
 
-# ── Universal Python setup ──────────────────────────────────────────────────
-# Downloads python-build-standalone for arm64 + x86_64, creates a universal
-# binary via lipo, then builds the venv on top of it.
+# ── Standalone Python (python-build-standalone) ─────────────────────────────
 PY_VER="3.12.5"
 PY_DATE="20240814"
-PY_ARM64_URL="https://github.com/indygreg/python-build-standalone/releases/download/${PY_DATE}/cpython-${PY_VER}+${PY_DATE}-aarch64-apple-darwin-install_only.tar.gz"
-PY_X86_URL="https://github.com/indygreg/python-build-standalone/releases/download/${PY_DATE}/cpython-${PY_VER}+${PY_DATE}-x86_64-apple-darwin-install_only.tar.gz"
-PY_CACHE="/tmp/ygg-py-cache"
-PY_ARM64_TGZ="${PY_CACHE}/py-arm64.tar.gz"
-PY_X86_TGZ="${PY_CACHE}/py-x86.tar.gz"
-LIPO_PYTHON="${PY_CACHE}/python-universal/bin/python3.12"
+PY_URL="https://github.com/indygreg/python-build-standalone/releases/download/${PY_DATE}/cpython-${PY_VER}+${PY_DATE}-${PBS_ARCH}-apple-darwin-install_only.tar.gz"
+PY_CACHE="/tmp/ygg-py-cache-${ARCH_TAG}"
+PY_TGZ="${PY_CACHE}/python.tar.gz"
+PY_SRC="${PY_CACHE}/python"
 
-mkdir -p "${PY_CACHE}/py-arm64" "${PY_CACHE}/py-x86_64" "${PY_CACHE}/python-universal/bin"
-
-if [ ! -f "${LIPO_PYTHON}" ]; then
-  echo "→ Downloading standalone Python ${PY_VER} (arm64 + x86_64)..."
-  [ -f "$PY_ARM64_TGZ" ] || curl -fL "$PY_ARM64_URL" -o "$PY_ARM64_TGZ"
-  [ -f "$PY_X86_TGZ"   ] || curl -fL "$PY_X86_URL"   -o "$PY_X86_TGZ"
-
-  echo "→ Extracting..."
-  tar -xzf "$PY_ARM64_TGZ" -C "${PY_CACHE}/py-arm64"
-  tar -xzf "$PY_X86_TGZ"   -C "${PY_CACHE}/py-x86_64"
-
-  echo "→ Creating universal binary via lipo..."
-  lipo -create \
-    "${PY_CACHE}/py-arm64/python/bin/python3.12" \
-    "${PY_CACHE}/py-x86_64/python/bin/python3.12" \
-    -output "${LIPO_PYTHON}"
-  chmod +x "${LIPO_PYTHON}"
+mkdir -p "$PY_CACHE"
+if [ ! -x "${PY_SRC}/bin/python3.12" ]; then
+  echo "→ Downloading standalone Python ${PY_VER} (${PBS_ARCH})..."
+  curl -fL "$PY_URL" -o "$PY_TGZ"
+  rm -rf "$PY_SRC"
+  tar -xzf "$PY_TGZ" -C "$PY_CACHE"
 fi
 
 # ── Frontend ────────────────────────────────────────────────────────────────
@@ -70,8 +64,8 @@ cat > "${APP}/Contents/Info.plist" << 'EOF'
   <key>CFBundleName</key><string>Yggdrasil</string>
   <key>CFBundleDisplayName</key><string>Yggdrasil</string>
   <key>CFBundleIdentifier</key><string>io.yggdrasil.app</string>
-  <key>CFBundleVersion</key><string>0.2</string>
-  <key>CFBundleShortVersionString</key><string>0.2</string>
+  <key>CFBundleVersion</key><string>0.3.1</string>
+  <key>CFBundleShortVersionString</key><string>0.3.1</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>Yggdrasil</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
@@ -118,30 +112,11 @@ cp -R "${ROOT}/services/latex/aastex"            "${RES}/latex/aastex"
 cp -R "${ROOT}/services/latex/posters"           "${RES}/latex/posters"
 cp "${ROOT}/services/feynman/terminal_server.py" "${RES}/feynman/terminal_server.py"
 
-# ── Bundled Python venv (universal binary base) ─────────────────────────────
+# ── Bundled Python ──────────────────────────────────────────────────────────
 echo "→ Copying standalone Python into bundle (binary + shared libs)..."
-# Must copy the full python stdlib/lib tree — the binary links against libpython3.12.dylib
-# which lives in python/lib/; copying just the binary causes dyld to abort.
-# Strategy: copy full arm64 python dir as base, then lipo-replace just the executables.
+# The whole tree is copied: the binary links against lib/libpython3.12.dylib.
 rm -rf "$PYDIR"
-cp -R "${PY_CACHE}/py-arm64/python" "$PYDIR"
-
-# Replace each Mach-O executable with its universal counterpart via lipo
-for ARM_BIN in "${PY_CACHE}/py-arm64/python/bin/"*; do
-  BASENAME="$(basename "$ARM_BIN")"
-  X86_BIN="${PY_CACHE}/py-x86_64/python/bin/$BASENAME"
-  OUT_BIN="${PYDIR}/bin/$BASENAME"
-  if [ -f "$ARM_BIN" ] && [ -f "$X86_BIN" ] && [ -x "$ARM_BIN" ]; then
-    lipo -create "$ARM_BIN" "$X86_BIN" -output "$OUT_BIN" 2>/dev/null || cp "$ARM_BIN" "$OUT_BIN"
-  fi
-done
-
-# Also lipo libpython dylib so it runs on Intel Macs too
-ARM_LIB="${PY_CACHE}/py-arm64/python/lib/libpython3.12.dylib"
-X86_LIB="${PY_CACHE}/py-x86_64/python/lib/libpython3.12.dylib"
-if [ -f "$ARM_LIB" ] && [ -f "$X86_LIB" ]; then
-  lipo -create "$ARM_LIB" "$X86_LIB" -output "${PYDIR}/lib/libpython3.12.dylib" 2>/dev/null || true
-fi
+cp -R "$PY_SRC" "$PYDIR"
 
 echo "→ Installing Python dependencies..."
 "${PYDIR}/bin/python3.12" -m pip install --upgrade pip
@@ -150,10 +125,8 @@ echo "→ Installing Python dependencies..."
   pywebview \
   --no-cache-dir
 
-# Verify the venv python is a real binary (not a broken symlink)
-VENV_PYTHON="$(readlink -f "${VENV}/bin/python3" 2>/dev/null || echo "${VENV}/bin/python3")"
-file "$VENV_PYTHON"
-echo "→ Python arch: $(python3 -c 'import platform; print(platform.machine())' 2>/dev/null || lipo -archs "${VENV}/bin/python3.12" 2>/dev/null || echo unknown)"
+# Sanity: the bundled interpreter runs and has its dependencies.
+"${PYDIR}/bin/python3" -c "import platform, fastapi, uvicorn, webview; print('→ bundled Python OK:', platform.machine())"
 
 # ── Ad-hoc sign ─────────────────────────────────────────────────────────────
 if command -v codesign >/dev/null 2>&1; then
@@ -211,7 +184,7 @@ pkgbuild \
   --root "$PKG_ROOT" \
   --scripts "$PKG_SCRIPTS" \
   --identifier io.yggdrasil.app \
-  --version 0.2 \
+  --version 0.3.1 \
   "$PKG_UNSIGNED"
 
 DIST_XML="${OUT}/distribution.xml"
@@ -228,11 +201,11 @@ cat > "$DIST_XML" << EOF
     <choice id="yggdrasil" title="Yggdrasil" description="Install Yggdrasil to /Applications">
         <pkg-ref id="io.yggdrasil.app">Yggdrasil.pkg</pkg-ref>
     </choice>
-    <pkg-ref id="io.yggdrasil.app" version="0.2" onConclusion="none">Yggdrasil.pkg</pkg-ref>
+    <pkg-ref id="io.yggdrasil.app" version="0.3.1" onConclusion="none">Yggdrasil.pkg</pkg-ref>
 </installer-gui-script>
 EOF
 
-PKG="${OUT}/Yggdrasil-${STAMP}-mac.pkg"
+PKG="${OUT}/Yggdrasil-${STAMP}-mac-${ARCH_TAG}.pkg"
 rm -f "$PKG"
 productbuild \
   --distribution "$DIST_XML" \
@@ -248,6 +221,5 @@ echo "✓ Wrote $PKG"
 echo "  DMG size: $(du -h "$DMG" | awk '{print $1}')"
 echo "  PKG size: $(du -h "$PKG" | awk '{print $1}')"
 echo
-echo "Universal binary check:"
-lipo -archs "$APP/Contents/MacOS/Yggdrasil" 2>/dev/null || echo "  (launcher is shell script — check venv python)"
-lipo -archs "${VENV}/bin/python3.12" 2>/dev/null || true
+echo "Bundled Python architecture:"
+lipo -archs "${PYDIR}/bin/python3.12" 2>/dev/null || true

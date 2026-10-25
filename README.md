@@ -16,7 +16,8 @@ Download the installer for your computer from the
 
 | Your computer | Download | Then |
 |---|---|---|
-| **macOS** | `Yggdrasil-…-mac.pkg` (easiest) or `…-mac.dmg` | Double-click → Continue → Install |
+| **macOS — Apple Silicon** (M1/M2/M3/M4) | `Yggdrasil-…-mac-arm64.pkg` (or `.dmg`) | Open → Continue → Install |
+| **macOS — Intel** | `Yggdrasil-…-mac-intel.pkg` (or `.dmg`) | Open → Continue → Install |
 | **Windows** | `Yggdrasil-…-windows.zip` | Unzip → double-click `Yggdrasil.bat` |
 | **Linux** | `Yggdrasil-…-linux.tar.gz` | Extract → `./install.sh` |
 
@@ -25,7 +26,8 @@ steps below show how to get past it.
 
 ### macOS
 
-1. Download the `.pkg` from the release page.
+1. Not sure which Mac you have? Apple menu → **About This Mac**: *Chip: Apple M…* → download the
+   **arm64** file; *Processor: Intel…* → download the **intel** file.
 2. **macOS will block it the first time** (the installer isn't signed by Apple),
    with *"…can't be opened because Apple cannot check it for malicious software"*.
    Click **Done** (not Move to Trash), then either:
@@ -154,7 +156,7 @@ Only needed if you want to modify the app or build it yourself. Requirements:
 [`packaging/DESKTOP.md`](packaging/DESKTOP.md)). Build on the OS you are targeting:
 
 ```bash
-bash packaging/build-macos-app.sh      # macOS  → release/*.pkg, *.dmg
+bash packaging/build-macos-app.sh      # macOS  → release/*-mac-arm64.* or *-mac-intel.* (matches your Mac)
 bash packaging/build-linux.sh          # Linux  → release/*.tar.gz
 powershell -File packaging/build-windows.ps1   # Windows → release/*.zip
 ```

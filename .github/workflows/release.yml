@@ -27,12 +27,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: macOS
+          - label: macOS (Apple Silicon)
             os: macos-14
-            artifact: mac
+            artifact: mac-arm64
             paths: |
-              release/Yggdrasil-*-mac.dmg
-              release/Yggdrasil-*-mac.pkg
+              release/Yggdrasil-*-mac-arm64.dmg
+              release/Yggdrasil-*-mac-arm64.pkg
+          - label: macOS (Intel)
+            os: macos-15-intel
+            artifact: mac-intel
+            paths: |
+              release/Yggdrasil-*-mac-intel.dmg
+              release/Yggdrasil-*-mac-intel.pkg
           - label: Windows
             os: windows-latest
             artifact: windows
@@ -127,7 +133,8 @@ jobs:
 
             | Your OS | File |
             |---|---|
-            | macOS | `Yggdrasil-*-mac.pkg` or `Yggdrasil-*-mac.dmg` (unsigned: right-click → Open the first time) |
+            | macOS, Apple Silicon (M1/M2/M3/M4) | `Yggdrasil-*-mac-arm64.pkg` or `.dmg` |
+            | macOS, Intel | `Yggdrasil-*-mac-intel.pkg` or `.dmg` |
             | Windows | `Yggdrasil-*-windows.zip` → unzip → double-click `Yggdrasil.bat` |
             | Linux | `Yggdrasil-*-linux.tar.gz` → extract → `./install.sh` |
 

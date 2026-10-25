@@ -291,6 +291,31 @@ class DesktopApi:
             return str(result[0])
         return ""
 
+    def save_file(self, filename: str, b64: str) -> str:
+        """Native "Save as…" for downloads. WKWebView/WebView2 ignore <a download>
+        for blob URLs, so the frontend hands us the bytes instead.
+        Returns the saved path, or "" if the user cancelled."""
+        import base64
+        import webview
+
+        if not webview.windows:
+            return ""
+        safe = Path(filename or "download").name or "download"
+        dialog = getattr(getattr(webview, "FileDialog", None), "SAVE", None)
+        if dialog is None:
+            dialog = webview.SAVE_DIALOG
+        downloads = Path.home() / "Downloads"
+        result = webview.windows[0].create_file_dialog(
+            dialog,
+            directory=str(downloads if downloads.exists() else Path.home()),
+            save_filename=safe,
+        )
+        if not result:
+            return ""
+        target = Path(result if isinstance(result, str) else result[0])
+        target.write_bytes(base64.b64decode(b64))
+        return str(target)
+
     def confirm_data_path(self, path: str) -> bool:
         cleaned = (path or "").strip()
         if not cleaned:

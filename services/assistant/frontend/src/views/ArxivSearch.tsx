@@ -247,7 +247,7 @@ export default function ArxivSearch() {
     // deadline cutoff), so forcing today's exact date range here would exclude papers
     // announced today but submitted yesterday. Omitting date for "today" lets the
     // backend use the RSS "new" listing instead, which reflects true announce day.
-    api.arxiv.daily(200, topic, refresh, selectedDate === todayIso() ? undefined : selectedDate)
+    api.arxiv.daily(500, topic, refresh, selectedDate === todayIso() ? undefined : selectedDate)
       .then((r) => {
         setDaily(r.papers || []);
         setLatestSubmitted(r.latest_submitted || "");
@@ -397,12 +397,17 @@ export default function ArxivSearch() {
               value={selectedDate}
               max={todayIso()}
               onChange={(e) => setSelectedDate(e.target.value || todayIso())}
-              title="Show papers submitted on this date"
+              title="Show arXiv's listing for this date, as on arxiv.org (papers submitted in the 1–3 days before it)"
             />
             <div className="arxiv-panel-header-spacer" />
             <span className="arxiv-count">{filteredDaily.length}{filterText ? `/${daily.length}` : ""}</span>
           </div>
           <div className="arxiv-search-bar" style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}>
+            {selectedDate !== todayIso() && [0, 6].includes(new Date(`${selectedDate}T00:00:00`).getDay()) && (
+              <div className="muted" style={{ fontSize: 12, lineHeight: 1.4 }}>
+                arXiv publishes no listing on Saturdays or Sundays — pick a weekday.
+              </div>
+            )}
             {selectedDate === todayIso() && latestSubmitted && (
               <div className="muted" style={{ fontSize: 12, lineHeight: 1.4 }}>
                 Newest paper available: {new Date(latestSubmitted).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}.

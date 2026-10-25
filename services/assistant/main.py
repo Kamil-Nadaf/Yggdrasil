@@ -1972,6 +1972,43 @@ ALL_FIELD_ARXIV_CATS = (
 )
 
 
+def _us_dst(d: date) -> bool:
+    """True if US Eastern Daylight Time applies on this calendar date (2nd Sun Mar – 1st Sun Nov)."""
+    def nth_sunday(year: int, month: int, n: int) -> date:
+        first = date(year, month, 1)
+        return first + timedelta(days=(6 - first.weekday()) % 7 + 7 * (n - 1))
+
+    return nth_sunday(d.year, 3, 2) <= d < nth_sunday(d.year, 11, 1)
+
+
+def _et_1400_utc(d: date) -> datetime:
+    """14:00 US Eastern on calendar date `d`, as a naive UTC datetime — arXiv's submission cutoff."""
+    return datetime(d.year, d.month, d.day, 14, 0) + timedelta(hours=4 if _us_dst(d) else 5)
+
+
+def _announce_window(listing_date: str) -> Optional[tuple[str, str]]:
+    """
+    Submission window (UTC) of the papers arXiv lists under `listing_date` — i.e. the day
+    shown on arxiv.org/list/<cat>/new ("Fri, 23 Oct 2026"), which is NOT the day the papers
+    were submitted. Schedule (all US Eastern, cutoff 14:00):
+      listed Mon: submitted Thu 14:00 – Fri 14:00      listed Tue: Fri 14:00 – Mon 14:00
+      listed Wed: Mon 14:00 – Tue 14:00                listed Thu: Tue 14:00 – Wed 14:00
+      listed Fri: Wed 14:00 – Thu 14:00                Sat/Sun: no listing (returns None)
+    """
+    d = date.fromisoformat(listing_date)
+    wd = d.weekday()  # Mon=0 … Sun=6
+    if wd >= 5:
+        return None
+    if wd == 0:        # Mon
+        start, end = d - timedelta(days=4), d - timedelta(days=3)
+    elif wd == 1:      # Tue (spans the weekend)
+        start, end = d - timedelta(days=4), d - timedelta(days=1)
+    else:              # Wed–Fri
+        start, end = d - timedelta(days=2), d - timedelta(days=1)
+    fmt = "%Y%m%d%H%M%S"
+    return _et_1400_utc(start).strftime(fmt), (_et_1400_utc(end) - timedelta(seconds=1)).strftime(fmt)
+
+
 def _arxiv_date_range(target_date: str) -> str:
     """arXiv submittedDate range for one calendar day, e.g. [20260917000000 TO 20260917235959]."""
     d = target_date.replace("-", "")
@@ -1992,9 +2029,14 @@ async def _fetch_daily_papers(category: str, max_results: int, target_date: Opti
             cat_query = "(" + " OR ".join(f"cat:{c}" for c in ALL_FIELD_ARXIV_CATS) + ")"
         else:
             cat_query = search_query_for(category)
+        # `target_date` is the arXiv *listing* day (what arxiv.org shows as "Fri, 23 Oct"),
+        # so translate it into the submission window that listing covers.
+        window = _announce_window(target_date)
+        if window is None:
+            return []  # Saturday/Sunday: arXiv publishes no listing
         papers, _total = await _fetch_arxiv(
             {
-                "search_query": f"{cat_query} AND submittedDate:{_arxiv_date_range(target_date)}",
+                "search_query": f"{cat_query} AND submittedDate:[{window[0]} TO {window[1]}]",
                 "sortBy": "submittedDate",
                 "sortOrder": "descending",
                 "max_results": max_results,
@@ -2101,7 +2143,7 @@ async def arxiv_daily(max: int = 200, cat: str = "astro-ph.HE", refresh: bool = 
     Papers for an academic discipline or arXiv category, for a given calendar day.
     `date` (YYYY-MM-DD) defaults to today; `refresh=true` bypasses the short in-memory cache.
     """
-    max_results = min(max, 200)
+    max_results = min(max, 500)
     category = normalize_category(cat)
     if not is_valid_category(category):
         raise HTTPException(status_code=400, detail=f"Invalid topic/category: {cat}")

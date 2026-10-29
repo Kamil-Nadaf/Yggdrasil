@@ -7,6 +7,7 @@ const ITEMS: { id: View; label: string }[] = [
   { id: "browse", label: "Search" },
   { id: "editor", label: "Notes" },
   { id: "tasks", label: "Tasks" },
+  { id: "calendar", label: "Calendar" },
   { id: "graph", label: "Graph" },
   { id: "ask", label: "Loki" },
   { id: "latex", label: "LaTeX" },

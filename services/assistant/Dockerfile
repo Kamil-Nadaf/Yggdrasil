@@ -23,7 +23,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy API source
-COPY gate.py zotero.py main.py data_manifest.py graph_links.py analysis_tags.py arxiv_topics.py task_statuses.py goals.py ./
+COPY gate.py zotero.py main.py data_manifest.py graph_links.py analysis_tags.py arxiv_topics.py task_statuses.py goals.py notifications.py ./
 
 # Copy built frontend from stage 1
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist

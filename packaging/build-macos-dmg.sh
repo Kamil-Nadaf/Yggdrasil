@@ -28,6 +28,7 @@ cat > "${APP}/Contents/Info.plist" << 'EOF'
   <key>CFBundleShortVersionString</key><string>1.0</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>Yggdrasil</string>
+  <key>CFBundleIconFile</key><string>Yggdrasil</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>NSHighResolutionCapable</key><true/>
 </dict>
@@ -35,6 +36,7 @@ cat > "${APP}/Contents/Info.plist" << 'EOF'
 EOF
 
 cp "${ROOT}/packaging/macos-launcher.sh" "${APP}/Contents/MacOS/Yggdrasil"
+cp "${ROOT}/desktop/icons/Yggdrasil.icns" "${APP}/Contents/Resources/Yggdrasil.icns"
 chmod +x "${APP}/Contents/MacOS/Yggdrasil"
 
 rsync -a \

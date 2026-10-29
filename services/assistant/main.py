@@ -107,6 +107,13 @@ from task_statuses import (
     load_task_statuses,
 )
 from goals import load_goals, normalize_goals
+from notifications import (
+    build_message,
+    due_reminders,
+    notify_desktop,
+    parse_deadline,
+    prune_sent,
+)
 from arxiv_topics import (
     ARXIV_TOPICS,
     is_valid_category,
@@ -4043,10 +4050,176 @@ async def _weekly_digest_loop():
             pass  # never let a background digest tick crash the app
 
 
+# ── Calendar + deadline reminders ──────────────────────────────────────────────
+# The calendar is a read-only view over the task deadlines already stored in
+# 80-Tasks/. Reminders are desktop-only: the desktop launcher sets YGG_DESKTOP=1,
+# and a native notification is shown for items due today, tomorrow or overdue.
+# Dedupe state lives next to the desktop config (device-local, not synced), so
+# two machines never both fire for the same item.
+
+_REMINDER_EVERY_SECONDS = 15 * 60
+
+
+def _is_desktop() -> bool:
+    return os.environ.get("YGG_DESKTOP") == "1"
+
+
+def _notify_state_path() -> Path:
+    cfg = os.environ.get("YGG_CONFIG_PATH")
+    if cfg:
+        return Path(cfg).parent / "notifications.json"
+    return VAULT / ".ygg-config" / "notifications.json"
+
+
+def _notify_load() -> dict:
+    path = _notify_state_path()
+    data: dict = {}
+    if path.exists():
+        try:
+            data = json.loads(path.read_text())
+        except Exception:
+            data = {}
+    return {"enabled": bool(data.get("enabled", True)), "sent": dict(data.get("sent") or {})}
+
+
+def _notify_save(state: dict) -> None:
+    path = _notify_state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, indent=2))
+
+
+def _desktop_icon() -> Optional[Path]:
+    """Icon for native notifications: .ico on Windows, PNG elsewhere (Linux).
+    Launchers set YGG_BUNDLE to the folder that holds desktop/."""
+    bundle = os.environ.get("YGG_BUNDLE")
+    if not bundle:
+        return None
+    name = "yggdrasil.ico" if os.name == "nt" else "yggdrasil-512.png"
+    path = Path(bundle) / "desktop" / name
+    return path if path.exists() else None
+
+
+def _calendar_item(kind: str, row: dict, project: dict, main_task_id: str, main_task_name: str) -> dict:
+    return {
+        "kind": kind,
+        "id": row["id"],
+        "name": row["name"],
+        "deadline": parse_deadline(row["deadline"]).isoformat(),
+        "status_id": row["status_id"],
+        "done": row["status_id"] == "done",
+        "project_slug": project["slug"],
+        "project_name": project["name"],
+        "main_task_id": main_task_id,
+        "main_task_name": main_task_name,
+    }
+
+
+def _collect_calendar_items() -> list[dict]:
+    """Every main task and subtask that has a valid deadline, across all projects."""
+    _ensure_pinned_project()
+    out: list[dict] = []
+    for d in sorted(tasks_dir().iterdir()):
+        if not d.is_dir():
+            continue
+        project = _project_from_dir(d)
+        if not project:
+            continue
+        mains: dict[str, dict] = {}
+        for p in sorted(d.glob("mt-*.md")):
+            mt = _main_task_from_post(d, p.stem, frontmatter.load(str(p)))
+            mains[mt["id"]] = mt
+            if parse_deadline(mt["deadline"]):
+                out.append(_calendar_item("main", mt, project, mt["id"], mt["name"]))
+        for p in sorted(d.glob("st-*.md")):
+            st = _subtask_from_post(d, p.stem, frontmatter.load(str(p)))
+            if not parse_deadline(st["deadline"]):
+                continue
+            parent = mains.get(st["main_task_id"]) or {}
+            out.append(
+                _calendar_item(
+                    "subtask",
+                    st,
+                    project,
+                    parent.get("id") or st["main_task_id"] or "",
+                    parent.get("name", ""),
+                )
+            )
+    out.sort(key=lambda i: (i["deadline"], i["name"].lower()))
+    return out
+
+
+@app.get("/api/tasks/calendar")
+async def tasks_calendar():
+    """Main tasks and subtasks with a deadline — feeds the Calendar view."""
+    return {"items": _collect_calendar_items()}
+
+
+class NotificationSettings(BaseModel):
+    enabled: bool
+
+
+@app.get("/api/notifications/settings")
+async def get_notification_settings():
+    return {"enabled": _notify_load()["enabled"], "desktop": _is_desktop()}
+
+
+@app.post("/api/notifications/settings")
+async def save_notification_settings(payload: NotificationSettings):
+    state = _notify_load()
+    state["enabled"] = payload.enabled
+    _notify_save(state)
+    return {"enabled": payload.enabled, "desktop": _is_desktop()}
+
+
+@app.post("/api/notifications/test")
+async def test_notification():
+    if not _is_desktop():
+        return {"desktop": False, "sent": False}
+    sent = notify_desktop(
+        "Yggdrasil — reminders are on",
+        "You'll get a heads-up for tasks due today, tomorrow or overdue.",
+        icon=_desktop_icon(),
+    )
+    return {"desktop": True, "sent": sent}
+
+
+def _run_deadline_reminders(today: Optional[date] = None) -> int:
+    """One pass: notify about deadlines not shown yet. Returns how many new
+    reminders were shown (0 when everything due was already notified). Does
+    nothing outside the desktop app or when reminders are switched off."""
+    if not _is_desktop():
+        return 0
+    state = _notify_load()
+    if not state["enabled"]:
+        return 0
+    today = today or datetime.now().date()
+    reminders, keys = due_reminders(_collect_calendar_items(), today, state["sent"])
+    sent = prune_sent(state["sent"], today)
+    if reminders:
+        title, body = build_message(reminders)
+        if notify_desktop(title, body, icon=_desktop_icon()):
+            for key in keys:
+                sent[key] = today.isoformat()
+    state["sent"] = sent
+    _notify_save(state)
+    return len(reminders)
+
+
+async def _deadline_reminder_loop():
+    await asyncio.sleep(20)  # let the window and vault settle before the first check
+    while True:
+        try:
+            await asyncio.to_thread(_run_deadline_reminders)
+        except Exception:
+            pass
+        await asyncio.sleep(_REMINDER_EVERY_SECONDS)
+
+
 @app.on_event("startup")
 async def _start_background_loops():
     asyncio.create_task(_autosync_loop())
     asyncio.create_task(_weekly_digest_loop())
+    asyncio.create_task(_deadline_reminder_loop())
 
 
 # ── Full-text search over your own notes (not vector search — exact substring,

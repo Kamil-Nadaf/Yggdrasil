@@ -259,6 +259,26 @@ export interface ActiveMainTask {
   subtask_total: number;
 }
 
+/** A main task or subtask with a deadline — one entry on the Calendar view. */
+export interface CalendarItem {
+  kind: "main" | "subtask";
+  id: string;
+  name: string;
+  deadline: string; // YYYY-MM-DD
+  status_id: string;
+  done: boolean;
+  project_slug: string;
+  project_name: string;
+  main_task_id: string;
+  main_task_name: string;
+}
+
+export interface NotificationSettings {
+  enabled: boolean;
+  /** true only in the desktop app — native reminders can't run in a browser or Docker. */
+  desktop: boolean;
+}
+
 export type AiProviderConfig = {
   provider: string;
   api_key?: string;
@@ -494,11 +514,18 @@ export const api = {
 
   tasks: {
     activeSummary: () => req<{ active: ActiveMainTask[] }>("GET", "/api/tasks/active-summary"),
+    calendar: () => req<{ items: CalendarItem[] }>("GET", "/api/tasks/calendar"),
     completedByDay: (start: string, end: string) =>
       req<{ days: { date: string; count: number }[] }>(
         "GET",
         `/api/tasks/completed-by-day?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
       ),
+  },
+
+  notifications: {
+    settings: () => req<NotificationSettings>("GET", "/api/notifications/settings"),
+    save: (enabled: boolean) => req<NotificationSettings>("POST", "/api/notifications/settings", { enabled }),
+    test: () => req<{ desktop: boolean; sent: boolean }>("POST", "/api/notifications/test"),
   },
 
   taskStatuses: {

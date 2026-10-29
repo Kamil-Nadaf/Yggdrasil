@@ -1,8 +1,10 @@
 """Desktop launcher: first-run tool install, local sidecars, then the app window."""
 from __future__ import annotations
 
+import base64
 import json
 import os
+import platform
 import re
 import socket
 import subprocess
@@ -140,6 +142,71 @@ def resolve_splash_color(vault: Path) -> str:
         return fallback
 
 
+# Windows only: the app ships as a plain folder with no installer, so the first
+# launch creates a Desktop and Start Menu shortcut carrying the logo. It is
+# refreshed on every launch, so the shortcuts keep working after the folder moves.
+_SHORTCUT_PS = r"""
+$shell = New-Object -ComObject WScript.Shell
+$dirs = @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))
+foreach ($dir in $dirs) {
+  if (-not $dir -or -not (Test-Path $dir)) { continue }
+  $link = $shell.CreateShortcut((Join-Path $dir 'Yggdrasil.lnk'))
+  $link.TargetPath = $env:YGG_LNK_TARGET
+  $link.WorkingDirectory = $env:YGG_LNK_WORKDIR
+  $link.WindowStyle = 7
+  $link.Description = 'Yggdrasil'
+  if ($env:YGG_LNK_ICON -and (Test-Path $env:YGG_LNK_ICON)) { $link.IconLocation = $env:YGG_LNK_ICON }
+  $link.Save()
+}
+"""
+
+
+def _powershell_args(script: str) -> list[str]:
+    """Run a script without shell quoting: -EncodedCommand takes base64 of UTF-16LE."""
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    return ["powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand", encoded]
+
+
+def ensure_windows_shortcuts(bundle: Path) -> None:
+    if platform.system() != "Windows":
+        return
+    target = bundle / "Yggdrasil.bat"
+    if not target.exists():
+        return
+
+    def run() -> None:
+        env = {
+            **os.environ,
+            "YGG_LNK_TARGET": str(target),
+            "YGG_LNK_WORKDIR": str(bundle),
+            "YGG_LNK_ICON": str(bundle / "desktop" / "yggdrasil.ico"),
+        }
+        try:
+            subprocess.run(
+                _powershell_args(_SHORTCUT_PS),
+                env=env,
+                timeout=60,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=0x08000000,  # CREATE_NO_WINDOW
+            )
+        except Exception:
+            pass
+
+    # Off the boot path: PowerShell start-up takes a moment and the window should not wait for it.
+    threading.Thread(target=run, daemon=True).start()
+
+
+def window_icon() -> str | None:
+    """Icon for the window / taskbar. macOS takes its icon from the .app bundle instead."""
+    system = platform.system()
+    if system == "Darwin":
+        return None
+    name = "yggdrasil.ico" if system == "Windows" else "yggdrasil-512.png"
+    path = bundle_dir() / "desktop" / name
+    return str(path) if path.exists() else None
+
+
 def boot(window) -> None:
     bundle = bundle_dir()
     resources = resources_dir()
@@ -147,6 +214,7 @@ def boot(window) -> None:
     config_path = support / "config.json"
     os.environ["YGG_DESKTOP"] = "1"
     os.environ["YGG_CONFIG_PATH"] = str(config_path)
+    ensure_windows_shortcuts(bundle)
     sys.path.insert(0, str(resources))
     from data_manifest import (
         APP_VERSION,
@@ -358,7 +426,13 @@ def main() -> None:
         webview.settings["ALLOW_DOWNLOADS"] = True
     except Exception:
         pass
-    webview.start(boot, window, private_mode=False, storage_path=str(storage_path))
+    webview.start(
+        boot,
+        window,
+        private_mode=False,
+        storage_path=str(storage_path),
+        icon=window_icon(),
+    )
 
 
 if __name__ == "__main__":

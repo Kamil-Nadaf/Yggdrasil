@@ -23,7 +23,8 @@ cp "${ROOT}/desktop/launch.py" "$DIST/desktop/"
 cp "${ROOT}/desktop/setup.py" "$DIST/desktop/"
 cp "${ROOT}/desktop/splash.html" "$DIST/desktop/"
 cp "${ROOT}/desktop/yggdrasil-logo.png" "$DIST/desktop/"
-for f in main.py gate.py zotero.py data_manifest.py graph_links.py analysis_tags.py arxiv_topics.py task_statuses.py goals.py mcp_server.py; do
+cp "${ROOT}/desktop/icons/yggdrasil-512.png" "$DIST/desktop/"
+for f in main.py gate.py zotero.py data_manifest.py graph_links.py analysis_tags.py arxiv_topics.py task_statuses.py goals.py notifications.py mcp_server.py; do
   cp "${ROOT}/services/assistant/$f" "$DIST/app/"
 done
 mkdir -p "$DIST/app/frontend"
@@ -113,7 +114,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INSTALL_DIR="$HOME/.local/share/Yggdrasil"
 DESKTOP_DIR="$HOME/.local/share/applications"
-ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
+ICON_DIR="$HOME/.local/share/icons/hicolor/512x512/apps"
 
 echo "→ Checking system dependencies …"
 MISSING=()
@@ -158,8 +159,11 @@ echo "→ Adding app-menu entry …"
 mkdir -p "$DESKTOP_DIR" "$ICON_DIR"
 sed "s|\"\"\"HOME\"\"\"|$HOME|g" "$SCRIPT_DIR/share/yggdrasil.desktop" > "$DESKTOP_DIR/yggdrasil.desktop"
 chmod +x "$DESKTOP_DIR/yggdrasil.desktop"
-cp "$SCRIPT_DIR/desktop/yggdrasil-logo.png" "$ICON_DIR/yggdrasil.png"
+cp "$SCRIPT_DIR/desktop/yggdrasil-512.png" "$ICON_DIR/yggdrasil.png"
 
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+  gtk-update-icon-cache -q -t -f "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+fi
 if command -v update-desktop-database >/dev/null 2>&1; then
   update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
 fi
@@ -179,7 +183,7 @@ set -euo pipefail
 
 INSTALL_DIR="$HOME/.local/share/Yggdrasil"
 DESKTOP_FILE="$HOME/.local/share/applications/yggdrasil.desktop"
-ICON_FILE="$HOME/.local/share/icons/hicolor/256x256/apps/yggdrasil.png"
+ICON_FILE="$HOME/.local/share/icons/hicolor/512x512/apps/yggdrasil.png"
 
 echo "→ Removing Yggdrasil …"
 rm -rf "$INSTALL_DIR"

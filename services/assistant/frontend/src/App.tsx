@@ -10,11 +10,12 @@ import LaTeXEditor from "./views/LaTeXEditor";
 import ArxivSearch from "./views/ArxivSearch";
 import ArxivBrowser from "./views/ArxivBrowser";
 import TasksView from "./views/TasksView";
+import CalendarView from "./views/CalendarView";
 import { applyTheme } from "./lib/theme";
 import { APP_WATERMARK } from "./lib/copyright";
 import { startSettingsSync } from "./lib/settingsSync";
 
-export type View = "editor" | "graph" | "ask" | "scores" | "latex" | "search" | "browse" | "tasks";
+export type View = "editor" | "graph" | "ask" | "scores" | "latex" | "search" | "browse" | "tasks" | "calendar";
 
 export default function App() {
   const [view, setView] = useState<View>("scores");
@@ -96,6 +97,7 @@ export default function App() {
             onFocusConsumed={() => setTaskFocus(null)}
           />
         )}
+        {view === "calendar" && <CalendarView onOpenTask={openTask} />}
         {view === "graph" && <GraphView onOpenEditor={openEditor} />}
         {view === "ask" && <AskView />}
         {view === "scores" && <ScoresView onOpenTask={openTask} />}

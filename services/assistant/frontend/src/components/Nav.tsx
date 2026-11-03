@@ -3,8 +3,7 @@ import YggdrasilLogo from "./YggdrasilLogo";
 
 const ITEMS: { id: View; label: string }[] = [
   { id: "scores", label: "Dashboard" },
-  { id: "search", label: "Daily Archive" },
-  { id: "browse", label: "Search" },
+  { id: "papers", label: "Papers" },
   { id: "editor", label: "Notes" },
   { id: "tasks", label: "Tasks" },
   { id: "calendar", label: "Calendar" },

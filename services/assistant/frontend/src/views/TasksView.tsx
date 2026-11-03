@@ -1,3 +1,4 @@
+import SubTabs from "../components/SubTabs";
 import { useCallback, useEffect, useState } from "react";
 import {
   DndContext,
@@ -280,12 +281,17 @@ export default function TasksView({
 
   return (
     <div className="tasks-view">
+      <SubTabs
+        label="Tasks"
+        value={mode}
+        onChange={setMode}
+        tabs={[
+          { id: "list", label: "List" },
+          { id: "kanban", label: "Kanban" },
+        ]}
+      />
       <div className="tasks-header">
         <h1 style={{ margin: 0 }}>Tasks</h1>
-        <div className="browser-field-tabs">
-          <button className={`btn${mode === "list" ? " btn-primary" : ""}`} onClick={() => setMode("list")}>List</button>
-          <button className={`btn${mode === "kanban" ? " btn-primary" : ""}`} onClick={() => setMode("kanban")}>Kanban</button>
-        </div>
         {mode === "list" && (
           <>
             <button className="btn btn-primary" onClick={() => setNewProjectOpen(true)}>+ New Project</button>

@@ -13,18 +13,18 @@ export const THEMES: ThemeDef[] = [
   { id: "tactile", label: "Tactile", swatch: { bg: "#EAE3D8", surface: "#F3EEE4", text: "#3A322C", accent: "#C97B4A" } },
   { id: "observatory", label: "Observatory", swatch: { bg: "#f0f0e8", surface: "#e8e8dc", text: "#141414", accent: "#1a1a1a" } },
   { id: "manuscript", label: "Manuscript", swatch: { bg: "#fdf6e3", surface: "#fff8e8", text: "#3d2e14", accent: "#e8a020" } },
+  { id: "notebook", label: "Field Notebook", swatch: { bg: "#f3e5c3", surface: "#f9efd6", text: "#16130f", accent: "#5b3f8c" } },
   { id: "custom", label: "Custom", swatch: { bg: "#1B1B1B", surface: "#2A2A2A", text: "#F2F2F2", accent: "#E8B86D" } },
 ];
 
 export const DEFAULT_THEME = "paper";
-export const BUILTIN_THEMES = new Set(["dark", "paper", "tactile", "observatory", "manuscript"]);
+export const BUILTIN_THEMES = new Set(["dark", "paper", "tactile", "observatory", "manuscript", "notebook"]);
 
-export type PageId = "scores" | "search" | "browse" | "editor" | "tasks" | "calendar" | "graph" | "ask" | "latex";
+export type PageId = "scores" | "papers" | "editor" | "tasks" | "calendar" | "graph" | "ask" | "latex";
 
 export const PAGE_LABELS: Record<PageId, string> = {
   scores: "Dashboard",
-  search: "Daily Archive",
-  browse: "Search",
+  papers: "Papers",
   editor: "Notes",
   tasks: "Tasks",
   calendar: "Calendar",
@@ -173,6 +173,34 @@ export const MANUSCRIPT_DARK_PRESET: CustomTheme = {
   fontFamily: "Palatino, 'Palatino Linotype', Georgia, serif",
 };
 
+/** Field Notebook — hand-drawn paper. Real surfaces are derived from the accent
+ * in index.css (color-mix); these hex values are fallbacks for JS consumers. */
+export const NOTEBOOK_PRESET: CustomTheme = {
+  bg: "#f3e5c3",
+  surface: "#f9efd6",
+  border: "#4a3a66",
+  text: "#16130f",
+  muted: "#6b5f4a",
+  accent: "#5b3f8c",
+  ok: "#4f6b2f",
+  gate: "#b4561a",
+  crit: "#a8321f",
+  fontFamily: "'IM Fell English', Georgia, serif",
+};
+
+export const NOTEBOOK_DARK_PRESET: CustomTheme = {
+  bg: "#1f1a14",
+  surface: "#2a231a",
+  border: "#7a6a8f",
+  text: "#f1e6cb",
+  muted: "#b5a583",
+  accent: "#5b3f8c",
+  ok: "#9bb36a",
+  gate: "#e08a3c",
+  crit: "#e0705a",
+  fontFamily: "'IM Fell English', Georgia, serif",
+};
+
 /** Dark theme — light mode: same cyan accent, inverted GitHub-style surfaces. */
 export const DARK_LIGHT_PRESET: CustomTheme = {
   bg: "#F6F8FA",
@@ -207,7 +235,7 @@ export const TACTILE_DARK_PRESET: CustomTheme = {
 export type ThemeMode = "light" | "dark";
 
 /** Every named theme has Light/Dark. Custom stays a free colour grid. */
-export const MODE_TOGGLE_THEMES = new Set(["dark", "paper", "tactile", "observatory", "manuscript"]);
+export const MODE_TOGGLE_THEMES = new Set(["dark", "paper", "tactile", "observatory", "manuscript", "notebook"]);
 
 const MODE_KEY = "yggdrasil:theme-mode";
 
@@ -284,6 +312,7 @@ export function defaultThemeAccent(themeId: string, mode: ThemeMode = loadThemeM
   if (themeId === "tactile") return TACTILE_PRESET.accent;
   if (themeId === "observatory") return mode === "dark" ? OBSERVATORY_DARK_PRESET.accent : OBSERVATORY_PRESET.accent;
   if (themeId === "manuscript") return MANUSCRIPT_PRESET.accent;
+  if (themeId === "notebook") return NOTEBOOK_PRESET.accent;
   if (themeId === "custom") return loadCustomTheme().accent;
   return CUSTOM_DEFAULTS.accent;
 }
@@ -448,6 +477,7 @@ function basePreset(themeId: string, mode: ThemeMode): CustomTheme {
   if (themeId === "observatory") return { ...(mode === "dark" ? OBSERVATORY_DARK_PRESET : OBSERVATORY_PRESET) };
   if (themeId === "manuscript") return { ...(mode === "dark" ? MANUSCRIPT_DARK_PRESET : MANUSCRIPT_PRESET) };
   if (themeId === "tactile") return { ...(mode === "dark" ? TACTILE_DARK_PRESET : TACTILE_PRESET) };
+  if (themeId === "notebook") return { ...(mode === "dark" ? NOTEBOOK_DARK_PRESET : NOTEBOOK_PRESET) };
   if (themeId === "dark") return { ...(mode === "light" ? DARK_LIGHT_PRESET : CUSTOM_DEFAULTS) };
   return { ...CUSTOM_DEFAULTS };
 }
@@ -500,7 +530,7 @@ function applyPageVars(pageId: PageId, themeId: string) {
           ? mode === "dark"
             ? "#4a3d24"
             : "#ead9b8"
-          : themeId === "custom" || themeId === "tactile"
+          : themeId === "custom" || themeId === "tactile" || themeId === "notebook"
             ? mixHex(tokens.bg, tokens.text, 0.14)
             : tokens.border;
   const fillDefault =
@@ -538,6 +568,81 @@ function applyPageVars(pageId: PageId, themeId: string) {
   root.setProperty("--graph-suggested", edges.suggested);
 }
 
+/** Field Notebook background grid: style + cell size, applied as CSS variables. */
+export type GridStyle = "none" | "ruled" | "graph";
+export type GridSize = "fine" | "medium" | "large";
+export interface GridSettings {
+  style: GridStyle;
+  size: GridSize;
+}
+const GRID_KEY = "yggdrasil:bg-grid";
+export const DEFAULT_GRID: GridSettings = { style: "graph", size: "medium" };
+
+export function loadGridSettings(): GridSettings {
+  try {
+    const p = JSON.parse(localStorage.getItem(GRID_KEY) || "{}") as Partial<GridSettings>;
+    return {
+      style: p.style === "none" || p.style === "ruled" || p.style === "graph" ? p.style : DEFAULT_GRID.style,
+      size: p.size === "fine" || p.size === "medium" || p.size === "large" ? p.size : DEFAULT_GRID.size,
+    };
+  } catch {
+    return { ...DEFAULT_GRID };
+  }
+}
+
+export function saveGridSettings(g: GridSettings) {
+  localStorage.setItem(GRID_KEY, JSON.stringify(g));
+  applyGridVars();
+  notifyTheme();
+}
+
+function applyGridVars() {
+  const { style, size } = loadGridSettings();
+  const root = document.documentElement.style;
+  const px = size === "fine" ? 14 : size === "large" ? 32 : 22;
+  const on = style !== "none";
+  root.setProperty("--gs", `${px}px`);
+  root.setProperty("--gh", on ? "11%" : "0%");
+  root.setProperty("--ghm", on ? "24%" : "0%");
+  root.setProperty("--gv", style === "graph" ? "11%" : "0%");
+  root.setProperty("--gvm", style === "graph" ? "24%" : "0%");
+}
+
+/** Text size: separate scales for titles (h1–h3) and everything else, 70–180 %. */
+export interface TextScale {
+  title: number;
+  body: number;
+}
+const TEXT_SCALE_KEY = "yggdrasil:text-scale";
+export const DEFAULT_TEXT_SCALE: TextScale = { title: 1, body: 1 };
+
+function clampScale(v: unknown): number {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? Math.min(1.8, Math.max(0.7, n)) : 1;
+}
+
+export function loadTextScale(): TextScale {
+  try {
+    const p = JSON.parse(localStorage.getItem(TEXT_SCALE_KEY) || "{}") as Partial<TextScale>;
+    return { title: clampScale(p.title ?? 1), body: clampScale(p.body ?? 1) };
+  } catch {
+    return { ...DEFAULT_TEXT_SCALE };
+  }
+}
+
+export function saveTextScale(t: TextScale) {
+  localStorage.setItem(TEXT_SCALE_KEY, JSON.stringify({ title: clampScale(t.title), body: clampScale(t.body) }));
+  applyTextScale();
+  notifyTheme();
+}
+
+function applyTextScale() {
+  const { title, body } = loadTextScale();
+  const root = document.documentElement.style;
+  root.setProperty("--title-scale", String(title));
+  root.setProperty("--text-scale", String(body));
+}
+
 /** Apply the saved theme to <html>. Call on boot and after any change. */
 export function applyTheme(pageId?: PageId) {
   if (pageId) currentPageId = pageId;
@@ -557,6 +662,8 @@ export function applyTheme(pageId?: PageId) {
     document.documentElement.style.setProperty("--accent", accent);
   }
   applyLogoVars(accent);
+  applyGridVars();
+  applyTextScale();
   applyPageVars(currentPageId, theme);
   applyAppFonts();
   notifyTheme();

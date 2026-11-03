@@ -7,15 +7,14 @@ import GraphView from "./views/GraphView";
 import AskView from "./views/AskView";
 import ScoresView from "./views/ScoresView";
 import LaTeXEditor from "./views/LaTeXEditor";
-import ArxivSearch from "./views/ArxivSearch";
-import ArxivBrowser from "./views/ArxivBrowser";
+import PapersView from "./views/PapersView";
 import TasksView from "./views/TasksView";
 import CalendarView from "./views/CalendarView";
 import { applyTheme } from "./lib/theme";
 import { APP_WATERMARK } from "./lib/copyright";
 import { startSettingsSync } from "./lib/settingsSync";
 
-export type View = "editor" | "graph" | "ask" | "scores" | "latex" | "search" | "browse" | "tasks" | "calendar";
+export type View = "editor" | "graph" | "ask" | "scores" | "latex" | "papers" | "tasks" | "calendar";
 
 export default function App() {
   const [view, setView] = useState<View>("scores");
@@ -86,7 +85,7 @@ export default function App() {
         {view === "editor" && (
           <CERICEditor
             citekey={editorCitekey}
-            onBack={() => setView("search")}
+            onBack={() => setView("papers")}
             onSelectPaper={openEditor}
             onPaperDeleted={() => setEditorCitekey(null)}
           />
@@ -102,8 +101,7 @@ export default function App() {
         {view === "ask" && <AskView />}
         {view === "scores" && <ScoresView onOpenTask={openTask} />}
         {view === "latex" && <LaTeXEditor />}
-        {view === "search" && <ArxivSearch />}
-        {view === "browse" && <ArxivBrowser />}
+        {view === "papers" && <PapersView />}
       </main>
       <SettingsDrawer
         open={settingsOpen}

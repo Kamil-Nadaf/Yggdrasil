@@ -26,6 +26,12 @@ import {
   loadThemeMode,
   saveThemeMode,
   hexOk,
+  loadGridSettings,
+  saveGridSettings,
+  type GridSettings,
+  loadTextScale,
+  saveTextScale,
+  type TextScale,
   type CustomTheme,
   type ThemeMode,
 } from "../lib/theme";
@@ -513,6 +519,16 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
     setModeTick((n) => n + 1);
   };
   void modeTick;
+  const [grid, setGrid] = useState<GridSettings>(() => loadGridSettings());
+  const [textScale, setTextScale] = useState<TextScale>(() => loadTextScale());
+  const pickTextScale = (t: TextScale) => {
+    setTextScale(t);
+    saveTextScale(t);
+  };
+  const pickGrid = (g: GridSettings) => {
+    setGrid(g);
+    saveGridSettings(g);
+  };
 
   function updateCustom<K extends keyof CustomTheme>(key: K, value: CustomTheme[K]) {
     const next = { ...customTheme, [key]: value };
@@ -806,6 +822,66 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
               </div>
             </div>
           )}
+
+          {settings.theme === "notebook" && (
+            <div className="settings-item" style={{ marginTop: 14 }}>
+              <label>Background grid</label>
+              <div className="settings-info" style={{ marginBottom: 8 }}>
+                Pencil lines on the notebook paper. Choose None to remove them entirely.
+              </div>
+              <div className="theme-mode-toggle" style={{ marginBottom: 8 }}>
+                {(["none", "ruled", "graph"] as const).map((st) => (
+                  <button
+                    key={st}
+                    type="button"
+                    className={`theme-mode-btn${grid.style === st ? " selected" : ""}`}
+                    onClick={() => pickGrid({ ...grid, style: st })}
+                  >
+                    {st === "none" ? "None" : st === "ruled" ? "Ruled" : "Graph"}
+                  </button>
+                ))}
+              </div>
+              {grid.style !== "none" && (
+                <div className="theme-mode-toggle">
+                  {(["fine", "medium", "large"] as const).map((sz) => (
+                    <button
+                      key={sz}
+                      type="button"
+                      className={`theme-mode-btn${grid.size === sz ? " selected" : ""}`}
+                      onClick={() => pickGrid({ ...grid, size: sz })}
+                    >
+                      {sz === "fine" ? "Fine" : sz === "medium" ? "Medium" : "Large"}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="settings-item" style={{ marginTop: 14 }}>
+            <label>Text size</label>
+            <div className="settings-info" style={{ marginBottom: 8 }}>
+              Scale headings and body text separately. Applies to every theme.
+            </div>
+            {([["title", "Titles"], ["body", "Text"]] as const).map(([k, name]) => (
+              <label key={k} className="font-picker-field" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                <span style={{ width: 52 }}>{name}</span>
+                <input
+                  type="range"
+                  min={70}
+                  max={180}
+                  step={5}
+                  value={Math.round(textScale[k] * 100)}
+                  onChange={(e) => pickTextScale({ ...textScale, [k]: Number(e.target.value) / 100 })}
+                  style={{ flex: 1 }}
+                />
+                <span className="mono" style={{ width: 44, textAlign: "right" }}>{Math.round(textScale[k] * 100)}%</span>
+              </label>
+            ))}
+            <button type="button" className="btn" onClick={() => pickTextScale({ title: 1, body: 1 })}>
+              Reset
+            </button>
+          </div>
 
           <div className="settings-item" style={{ marginTop: 14 }}>
             <label>Fonts</label>

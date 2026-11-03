@@ -21,6 +21,43 @@ CHILDREN: list[subprocess.Popen] = []
 _BOOT_STATE: dict = {"window": None, "chosen_path": None, "event": None}
 
 
+def log_file() -> Path:
+    if platform.system() == "Darwin":
+        base = Path.home() / "Library" / "Logs"
+    else:
+        base = support_dir()
+    base.mkdir(parents=True, exist_ok=True)
+    return base / "Yggdrasil.log"
+
+
+def blog(msg: str) -> None:
+    """Append a timestamped startup trace line — never raises."""
+    try:
+        with log_file().open("a", encoding="utf-8") as fh:
+            fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {msg}\n")
+    except Exception:
+        pass
+
+
+def safe_boot(window) -> None:
+    """Run boot(); if it dies, write the traceback to the log and show it on the splash
+    instead of hanging forever on "Preparing Yggdrasil…"."""
+    import traceback
+
+    blog("boot: start")
+    try:
+        boot(window)
+        blog("boot: finished")
+    except BaseException:
+        tb = traceback.format_exc()
+        blog("boot: FAILED\n" + tb)
+        last = tb.strip().splitlines()[-1] if tb.strip() else "unknown error"
+        try:
+            window.evaluate_js(f"setStatus({json.dumps('Startup failed: ' + last + ' — details in ' + str(log_file()))})")
+        except Exception:
+            pass
+
+
 def bundle_dir() -> Path:
     env = os.environ.get("YGG_BUNDLE")
     if env:
@@ -227,6 +264,7 @@ def boot(window) -> None:
         write_manifest,
     )
 
+    blog(f"boot: bundle={bundle} resources={resources} support={support}")
     saved_path = None
     data_chosen = False
     if config_path.exists():
@@ -253,10 +291,13 @@ def boot(window) -> None:
     else:
         vault = resolve_data_dir(saved_path, default_data_path())
 
+    blog(f"boot: data dir {vault}")
     inspected = inspect_data_dir(vault)
+    blog("boot: data dir inspected")
     if inspected.get("manifest") and inspected["manifest"].get("vault_path"):
         vault = Path(inspected["manifest"]["vault_path"]).expanduser()
         inspected = inspect_data_dir(vault)
+    blog("boot: ensuring layout")
     ensure_layout_safe(vault)
     try:
         window.evaluate_js(f"setAccentColor({json.dumps(resolve_splash_color(vault))})")
@@ -298,6 +339,7 @@ def boot(window) -> None:
         except Exception:
             pass
 
+    blog("boot: tools/LaTeX setup")
     try:
         load_or_ensure(bundle, progress)
     except Exception as exc:
@@ -334,8 +376,10 @@ def boot(window) -> None:
     port = app_port()
     url = f"http://127.0.0.1:{port}"
 
+    blog("boot: importing app")
     import uvicorn
     from main import app
+    blog(f"boot: starting server on {port}")
 
     thread = threading.Thread(
         target=lambda: uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning"),
@@ -427,7 +471,7 @@ def main() -> None:
     except Exception:
         pass
     webview.start(
-        boot,
+        safe_boot,
         window,
         private_mode=False,
         storage_path=str(storage_path),

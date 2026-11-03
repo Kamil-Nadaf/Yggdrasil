@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { usePdfOpener } from "../components/PdfViewer";
+import ZoteroCollectionSelect, { getZoteroCollection } from "../components/ZoteroCollectionSelect";
 import { api, type ArxivPaper, type ArxivSearchField } from "../api/client";
 import { SlotIndicator, CericSelectionToolbar, useCericAppend } from "../components/CericToolbar";
 import AbstractText from "../components/AbstractText";
@@ -6,6 +8,48 @@ import AbstractText from "../components/AbstractText";
 interface ToastMsg { text: string; ok: boolean }
 
 const PAGE_SIZE = 50;
+
+const CATEGORY_KEY = "yggdrasil:search-category";
+
+/** arXiv category presets for the fast, focused search. "" = every source (slower, widest coverage). */
+const SEARCH_CATEGORIES: { group: string; items: { value: string; label: string }[] }[] = [
+  { group: "Everything", items: [{ value: "", label: "All fields (all sources — slower)" }] },
+  {
+    group: "Astrophysics",
+    items: [
+      { value: "astro-ph", label: "All astrophysics" },
+      { value: "astro-ph.HE", label: "High Energy Astrophysics" },
+      { value: "astro-ph.CO", label: "Cosmology & Nongalactic" },
+      { value: "astro-ph.GA", label: "Astrophysics of Galaxies" },
+      { value: "astro-ph.SR", label: "Solar & Stellar" },
+      { value: "astro-ph.EP", label: "Earth & Planetary" },
+      { value: "astro-ph.IM", label: "Instrumentation & Methods" },
+      { value: "astro-ph.HE,astro-ph.CO,astro-ph.GA", label: "HE + Cosmology + Galaxies" },
+    ],
+  },
+  {
+    group: "Gravity & High-Energy Physics",
+    items: [
+      { value: "gr-qc", label: "General Relativity & Quantum Cosmology" },
+      { value: "hep-ph", label: "HEP — Phenomenology" },
+      { value: "hep-th", label: "HEP — Theory" },
+      { value: "hep-ex", label: "HEP — Experiment" },
+      { value: "nucl-th,nucl-ex", label: "Nuclear" },
+    ],
+  },
+  {
+    group: "Other physics, maths & CS",
+    items: [
+      { value: "physics", label: "Physics (all)" },
+      { value: "quant-ph", label: "Quantum Physics" },
+      { value: "cond-mat", label: "Condensed Matter" },
+      { value: "math", label: "Mathematics" },
+      { value: "stat", label: "Statistics" },
+      { value: "cs.LG,cs.AI,stat.ML", label: "Machine Learning & AI" },
+      { value: "cs", label: "Computer Science" },
+    ],
+  },
+];
 
 const FIELD_OPTIONS: { value: ArxivSearchField; label: string; placeholder: string }[] = [
   { value: "all", label: "Keyword", placeholder: "Search title, abstract, keyword (any discipline, multilingual)…" },
@@ -33,6 +77,14 @@ function resolvePaperUrl(paper: ArxivPaper): string {
 }
 
 export default function ArxivBrowser() {
+  const openPdf = usePdfOpener();
+  const [category, setCategory] = useState<string>(() => {
+    try { return localStorage.getItem(CATEGORY_KEY) || ""; } catch { return ""; }
+  });
+  function pickCategory(v: string) {
+    setCategory(v);
+    try { localStorage.setItem(CATEGORY_KEY, v); } catch { /* ignore */ }
+  }
   const [query, setQuery] = useState("");
   const [field, setField] = useState<ArxivSearchField>("all");
   const [results, setResults] = useState<ArxivPaper[]>([]);
@@ -58,7 +110,7 @@ export default function ArxivBrowser() {
     setLoading(true);
     setSearched(true);
     try {
-      const r = await api.arxiv.search(q, field, 0, PAGE_SIZE, "all");
+      const r = await api.arxiv.search(q, field, 0, PAGE_SIZE, "all", category);
       setResults(r.papers);
       setTotal(r.total);
     } catch (e) {
@@ -75,7 +127,7 @@ export default function ArxivBrowser() {
     if (!q || loadingMore) return;
     setLoadingMore(true);
     try {
-      const r = await api.arxiv.search(q, field, results.length, PAGE_SIZE, "all");
+      const r = await api.arxiv.search(q, field, results.length, PAGE_SIZE, "all", category);
       setResults((prev) => [...prev, ...r.papers]);
       setTotal(r.total);
     } catch {
@@ -100,7 +152,7 @@ export default function ArxivBrowser() {
 
   async function handleAddToZotero(paper: ArxivPaper) {
     try {
-      const r = await api.zotero.addPaper(paper.id, paper.title, paper.authors, resolvePdfUrl(paper));
+      const r = await api.zotero.addPaper(paper.id, paper.title, paper.authors, resolvePdfUrl(paper), getZoteroCollection());
       if (r.status === "ok") {
         showToast("Added to Zotero ✓", true);
       } else {
@@ -129,6 +181,23 @@ export default function ArxivBrowser() {
               {f.label}
             </button>
           ))}
+        </div>
+
+        {/* Category: restricts to arXiv within the chosen categories — much faster than searching every source */}
+        <div className="browser-category">
+          <label>
+            <span className="muted">Category</span>
+            <select value={category} onChange={(e) => pickCategory(e.target.value)} title="Pick a category for a faster, focused search">
+              {SEARCH_CATEGORIES.map((g) => (
+                <optgroup key={g.group} label={g.group}>
+                  {g.items.map((c) => (
+                    <option key={c.value} value={c.value}>{c.label}</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </label>
+          {category && <span className="muted mono" style={{ fontSize: 11 }}>arXiv only · faster</span>}
         </div>
 
         {/* Search Bar */}
@@ -235,7 +304,11 @@ export default function ArxivBrowser() {
                   )}
                   <div className="browser-card-actions">
                     {pdfUrl ? (
-                      <a className="btn" href={pdfUrl} target="_blank" rel="noopener noreferrer">↗ Open PDF</a>
+                      openPdf ? (
+                        <button type="button" className="btn" onClick={() => openPdf({ url: pdfUrl, title: p.title, paper: p })}>▤ Open PDF</button>
+                      ) : (
+                        <a className="btn" href={pdfUrl} target="_blank" rel="noopener noreferrer">↗ Open PDF</a>
+                      )
                     ) : (
                       <button className="btn" disabled title="No direct PDF link found">No PDF</button>
                     )}
@@ -244,6 +317,7 @@ export default function ArxivBrowser() {
                         ↗ {p.source === "openalex" ? "Open Paper / DOI" : p.source === "europepmc" ? "Open Europe PMC" : "Open Source"}
                       </a>
                     )}
+                    <ZoteroCollectionSelect />
                     <button className="btn btn-primary" onClick={() => handleAddToZotero(p)}>
                       + Add to Zotero
                     </button>

@@ -21,6 +21,53 @@ import httpx
 from typing import Optional
 
 
+import json
+from pathlib import Path
+
+
+def _creds_file() -> Path:
+    cfg = os.environ.get("YGG_CONFIG_PATH")
+    if cfg:  # desktop app: next to config.json, outside the (git-synced) vault
+        return Path(cfg).parent / "zotero.json"
+    return Path.home() / ".yggdrasil" / "zotero.json"
+
+
+def zotero_credentials() -> tuple[str, str]:
+    """(user_id, api_key): environment first (Docker .env), then the file saved from Settings."""
+    uid = os.environ.get("ZOTERO_USER_ID", "").strip()
+    key = os.environ.get("ZOTERO_API_KEY", "").strip()
+    if uid and key:
+        return uid, key
+    try:
+        data = json.loads(_creds_file().read_text())
+        return str(data.get("user_id", "")).strip(), str(data.get("api_key", "")).strip()
+    except Exception:
+        return uid, key
+
+
+def creds_source() -> str:
+    if os.environ.get("ZOTERO_USER_ID") and os.environ.get("ZOTERO_API_KEY"):
+        return "env"
+    return "settings" if all(zotero_credentials()) else "none"
+
+
+def save_zotero_credentials(user_id: str, api_key: str) -> None:
+    """Keep the stored key when api_key is blank (so editing the ID doesn't wipe it)."""
+    old_uid, old_key = "", ""
+    try:
+        data = json.loads(_creds_file().read_text())
+        old_uid, old_key = str(data.get("user_id", "")), str(data.get("api_key", ""))
+    except Exception:
+        pass
+    path = _creds_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"user_id": user_id or old_uid, "api_key": api_key or old_key}))
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+
+
 BBT_URL = "http://localhost:23119/better-bibtex/json-rpc"
 ZOTERO_API = "https://api.zotero.org"
 
@@ -59,8 +106,7 @@ def _bbt_search(query: str) -> Optional[dict]:
 
 def _web_api_search(query: str) -> Optional[dict]:
     """Try Zotero Web API search."""
-    user_id = os.environ.get("ZOTERO_USER_ID", "")
-    api_key = os.environ.get("ZOTERO_API_KEY", "")
+    user_id, api_key = zotero_credentials()
     if not user_id or not api_key:
         return None
     try:
@@ -122,8 +168,7 @@ def ensure_arxiv_in_zotero(arxiv_id: str) -> Optional[dict]:
         return result
 
     # Try adding via Web API
-    user_id = os.environ.get("ZOTERO_USER_ID", "")
-    api_key = os.environ.get("ZOTERO_API_KEY", "")
+    user_id, api_key = zotero_credentials()
     if not user_id or not api_key:
         return None
 
@@ -153,15 +198,46 @@ def ensure_arxiv_in_zotero(arxiv_id: str) -> Optional[dict]:
         return None
 
 
-def add_paper_to_zotero(arxiv_id: str, title: str, authors: list, pdf_url: str = "") -> Optional[dict]:
+def list_zotero_collections() -> Optional[list[dict]]:
+    """All collections as [{key, name}] with parent path in the name ("Parent / Child"); None without credentials."""
+    user_id, api_key = zotero_credentials()
+    if not user_id or not api_key:
+        return None
+    rows: list[dict] = []
+    start = 0
+    while True:
+        resp = httpx.get(
+            f"{ZOTERO_API}/users/{user_id}/collections",
+            headers={"Zotero-API-Key": api_key},
+            params={"limit": 100, "start": start},
+            timeout=8.0,
+        )
+        resp.raise_for_status()
+        batch = resp.json()
+        rows.extend(r.get("data", {}) for r in batch)
+        if len(batch) < 100:
+            break
+        start += 100
+    by_key = {r["key"]: r for r in rows}
+
+    def path(r: dict) -> str:
+        parent = r.get("parentCollection")
+        if parent and parent in by_key and parent != r["key"]:
+            return f"{path(by_key[parent])} / {r['name']}"
+        return r["name"]
+
+    out = [{"key": r["key"], "name": path(r)} for r in rows]
+    return sorted(out, key=lambda c: c["name"].lower())
+
+
+def add_paper_to_zotero(arxiv_id: str, title: str, authors: list, pdf_url: str = "", collection: str = "") -> Optional[dict]:
     """
     Directly create a Zotero preprint item from known arXiv metadata (title/authors
     already in hand from the arXiv API — no search-first round trip needed).
     Raises on transport/API errors so the caller can surface a message; returns
     None only if credentials are missing.
     """
-    user_id = os.environ.get("ZOTERO_USER_ID", "")
-    api_key = os.environ.get("ZOTERO_API_KEY", "")
+    user_id, api_key = zotero_credentials()
     if not user_id or not api_key:
         return None
 
@@ -184,6 +260,7 @@ def add_paper_to_zotero(arxiv_id: str, title: str, authors: list, pdf_url: str =
                 "url": pdf_url or f"https://arxiv.org/abs/{arxiv_id}",
                 "archiveID": f"arXiv:{arxiv_id}",
                 "repository": "arXiv",
+                **({"collections": [collection]} if collection else {}),
             }
         ],
         timeout=8.0,

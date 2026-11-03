@@ -21,17 +21,18 @@ const DASH_HEIGHTS_KEY = "yggdrasil:dash-heights";
 
 type DashWidget = "active" | "today" | "activity";
 
-type SlotId = "active" | "phd" | "progress" | "activity" | "charts";
+type SlotId = "active" | "progress" | "phd" | "activity" | "charts";
 const SLOT_LABEL: Record<SlotId, string> = {
   active: "Active Tasks",
-  phd: "Day Timer",
   progress: "Task Progress",
+  phd: "Day Timer + Week",
   activity: "Activity",
   charts: "Mental Health + Lightcurve",
 };
-const DEFAULT_ORDER: SlotId[] = ["active", "phd", "progress", "activity", "charts"];
-const DEFAULT_SPANS: Record<SlotId, number> = { active: 4, phd: 3, progress: 5, activity: 7, charts: 5 };
-const DASH_LAYOUT_KEY = "yggdrasil:dash-layout-v2";
+const DEFAULT_ORDER: SlotId[] = ["active", "progress", "phd", "activity", "charts"];
+const DEFAULT_SPANS: Record<SlotId, number> = { active: 5, progress: 4, phd: 3, activity: 7, charts: 5 };
+const PINS_KEY = "yggdrasil:progress-pins";
+const DASH_LAYOUT_KEY = "yggdrasil:dash-layout-v4";
 
 interface DashLayout {
   order: SlotId[];
@@ -124,6 +125,40 @@ function daysBetween(startIso: string, endIso: string, todayIso: string): number
   return Math.ceil(ms / (1000 * 60 * 60 * 24));
 }
 
+/** Monotone cubic through the points (no overshoot): returns the "C …" segments that follow an initial "M x0,y0". */
+function smoothSegs(pts: [number, number][]): string {
+  const n = pts.length;
+  if (n < 2) return "";
+  const dx: number[] = [];
+  const sl: number[] = [];
+  for (let i = 0; i < n - 1; i++) {
+    dx.push(pts[i + 1][0] - pts[i][0]);
+    sl.push(dx[i] === 0 ? 0 : (pts[i + 1][1] - pts[i][1]) / dx[i]);
+  }
+  const t: number[] = new Array(n).fill(0);
+  t[0] = sl[0];
+  t[n - 1] = sl[n - 2];
+  for (let i = 1; i < n - 1; i++) t[i] = sl[i - 1] * sl[i] <= 0 ? 0 : (sl[i - 1] + sl[i]) / 2;
+  for (let i = 0; i < n - 1; i++) {
+    if (sl[i] === 0) { t[i] = 0; t[i + 1] = 0; continue; }
+    const a = t[i] / sl[i];
+    const b = t[i + 1] / sl[i];
+    const sq = a * a + b * b;
+    if (sq > 9) {
+      const tau = 3 / Math.sqrt(sq);
+      t[i] = tau * a * sl[i];
+      t[i + 1] = tau * b * sl[i];
+    }
+  }
+  const f = (v: number) => v.toFixed(1);
+  let d = "";
+  for (let i = 0; i < n - 1; i++) {
+    const h = dx[i] / 3;
+    d += ` C ${f(pts[i][0] + h)},${f(pts[i][1] + t[i] * h)} ${f(pts[i + 1][0] - h)},${f(pts[i + 1][1] - t[i + 1] * h)} ${f(pts[i + 1][0])},${f(pts[i + 1][1])}`;
+  }
+  return d;
+}
+
 /** SVG lightcurve — Habits and Subtasks completed vs time (from the heatmap data, not points). */
 function Lightcurve({
   days,
@@ -142,18 +177,22 @@ function Lightcurve({
   const innerW = W - pad.l - pad.r;
   const innerH = H - pad.t - pad.b;
   const n = Math.max(days.length, 1);
-  const maxV = Math.max(1, ...habits, ...subtasks) * 1.15;
+  const top = Math.max(1, Math.ceil(Math.max(...habits, ...subtasks, 1)));
+  const maxV = top * 1.1;
+  const yTicks = top <= 3 ? Array.from({ length: top + 1 }, (_, i) => i) : [0, Math.round(top / 2), top];
   const xAt = (i: number) => pad.l + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
   const yAt = (v: number) => pad.t + innerH - (v / maxV) * innerH;
 
   function pathFor(values: number[]) {
-    const pts = values.map((v, i) => `${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`);
-    const line = pts.length ? `M ${pts.join(" L ")}` : "";
-    const area =
-      pts.length > 0
-        ? `M ${xAt(0).toFixed(1)},${(pad.t + innerH).toFixed(1)} L ${pts.join(" L ")} L ${xAt(n - 1).toFixed(1)},${(pad.t + innerH).toFixed(1)} Z`
-        : "";
-    return { line, area };
+    const pts = values.map((v, i) => [xAt(i), yAt(v)] as [number, number]);
+    if (pts.length === 0) return { line: "", area: "" };
+    const base = (pad.t + innerH).toFixed(1);
+    const head = `${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)}`;
+    const segs = smoothSegs(pts);
+    return {
+      line: `M ${head}${segs}`,
+      area: `M ${pts[0][0].toFixed(1)},${base} L ${head}${segs} L ${pts[pts.length - 1][0].toFixed(1)},${base} Z`,
+    };
   }
 
   const hab = pathFor(habits);
@@ -174,13 +213,13 @@ function Lightcurve({
         y2={pad.t + innerH}
       />
       <line className="lightcurve-axis" x1={pad.l} y1={pad.t} x2={pad.l} y2={pad.t + innerH} />
-      {[0, 0.5, 1].map((f) => {
-        const y = yAt(f * maxV);
+      {yTicks.map((v) => {
+        const y = yAt(v);
         return (
-          <g key={f}>
+          <g key={v}>
             <line className="lightcurve-grid" x1={pad.l} y1={y} x2={pad.l + innerW} y2={y} />
             <text className="lightcurve-tick" x={pad.l - 8} y={y + 3} textAnchor="end">
-              {Math.round(f * maxV)}
+              {v}
             </text>
           </g>
         );
@@ -195,7 +234,7 @@ function Lightcurve({
           className={`lightcurve-dot habits${days[i] === today ? " today" : ""}`}
           cx={xAt(i)}
           cy={yAt(v)}
-          r={days[i] === today ? 4 : 2.5}
+          r={days[i] === today ? 4 : 1.8}
         >
           <title>{`${days[i]} habits: ${v}`}</title>
         </circle>
@@ -229,7 +268,7 @@ function Lightcurve({
   );
 }
 
-/** Mental Health ECG-style line chart — sharp straight segments, no area fill. */
+/** Mental Health wave — a smooth curve through the days you recorded (Bad −1 · Fine 0 · Good +1). */
 function MentalHealthChart({
   days,
   values,
@@ -248,28 +287,9 @@ function MentalHealthChart({
   const xAt = (i: number) => pad.l + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
   const yAt = (v: number) => pad.t + innerH - ((v + 1) / 2) * innerH; // map -1..+1
 
-  // Build path: only connect consecutive non-null points with straight segments
-  let pathD = "";
-  for (let i = 0; i < values.length; i++) {
-    const v = values[i];
-    if (v === null || v === undefined) continue;
-    // find previous non-null
-    let prevIdx = -1;
-    for (let j = i - 1; j >= 0; j--) {
-      if (values[j] !== null && values[j] !== undefined) {
-        prevIdx = j;
-        break;
-      }
-    }
-    if (prevIdx === -1) {
-      pathD += `M ${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`;
-    } else {
-      const prevV = values[prevIdx]!;
-      // ECG step: horizontal then vertical (sharp corner)
-      const midX = (xAt(prevIdx) + xAt(i)) / 2;
-      pathD += ` L ${midX.toFixed(1)},${yAt(prevV).toFixed(1)} L ${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`;
-    }
-  }
+  const recorded: [number, number][] = [];
+  values.forEach((v, i) => { if (v !== null && v !== undefined) recorded.push([xAt(i), yAt(v)]); });
+  const pathD = recorded.length >= 2 ? `M ${recorded[0][0].toFixed(1)},${recorded[0][1].toFixed(1)}${smoothSegs(recorded)}` : "";
 
   const todayIdx = days.indexOf(today);
   const tickIdx =
@@ -310,7 +330,7 @@ function MentalHealthChart({
             className={`lightcurve-dot mental-health${days[i] === today ? " today" : ""}`}
             cx={xAt(i)}
             cy={yAt(v)}
-            r={days[i] === today ? 2.5 : 1.5}
+            r={days[i] === today ? 4 : 2.5}
           >
             <title>{`${days[i]} · ${mentalHealthLabel(v as MentalHealthValue)}`}</title>
           </circle>
@@ -381,22 +401,27 @@ function ProgressRing({ pct, size = 72, stroke = 7 }: { pct: number; size?: numb
   );
 }
 
-/** Five-step progress stepper (To do → Done) derived from subtasks done / total. */
-function TaskStepper({ done, total }: { done: number; total: number }) {
-  const steps = ["To do", "Started", "Halfway", "Almost", "Done"];
-  const pct = total > 0 ? done / total : 0;
-  const cur = pct >= 1 ? 4 : Math.floor(pct * 4);
+const isSubDone = (st: Subtask) => st.done || st.status_id === "done";
+
+/** One dot per subtask — click a dot to tick it off (or undo it). The first open one is highlighted. */
+function SubtaskStepper({ subs, onToggle }: { subs: Subtask[]; onToggle: (st: Subtask) => void }) {
+  if (subs.length === 0) {
+    return <div className="muted" style={{ fontSize: 12, padding: "4px 2px" }}>No subtasks yet — add some in Tasks.</div>;
+  }
+  const firstOpen = subs.findIndex((x) => !isSubDone(x));
   return (
-    <div className="stepper" title={`${done}/${total} subtasks`}>
-      {steps.map((label, i) => {
-        const state = i < cur || (pct >= 1 && i === 4) ? "done" : i === cur ? "cur" : "todo";
+    <div className="stepper sub-stepper">
+      {subs.map((st, i) => {
+        const d = isSubDone(st);
+        const state = d ? "done" : i === firstOpen ? "cur" : "todo";
         return (
-          <Fragment key={label}>
-            <div className={`step ${state}`}>
-              <span className="step-node">{state === "done" ? "✓" : state === "cur" ? <i /> : null}</span>
-              <span className="step-lab">{label}</span>
-            </div>
-            {i < steps.length - 1 && <div className={`step-line${i < cur ? " on" : ""}`} />}
+          <Fragment key={st.id}>
+            <button type="button" className={`step ${state}`} onClick={() => onToggle(st)} title={`${st.name}${st.deadline ? ` · due ${st.deadline}` : ""} — click to ${d ? "undo" : "mark done"}`}>
+              <span className="step-node">{d ? "✓" : state === "cur" ? <i /> : null}</span>
+              <span className="step-lab">{st.name}</span>
+              {st.deadline && <span className="step-due mono">{st.deadline.slice(5)}</span>}
+            </button>
+            {i < subs.length - 1 && <div className={`step-line${d ? " on" : ""}`} />}
           </Fragment>
         );
       })}
@@ -406,8 +431,35 @@ function TaskStepper({ done, total }: { done: number; total: number }) {
 
 /** Rotary day timer: a thin arc whose current position always sits at 3 o'clock, faded
  * tilted year/month numerals around it, and one big number — days left. */
-function PhdDial({ dayNum, totalDays, daysLeft }: { dayNum: number; totalDays: number; daysLeft: number | null }) {
-  const cx = -70, cy = 150, R = 140;
+/** Mon–Sun strip: past days ticked, today ringed, plus how many days are left this week. */
+function WeekCard({ today }: { today: string }) {
+  const dow = (parseLocal(today).getDay() + 6) % 7; // 0 = Mon
+  const left = 6 - dow;
+  const letters = ["M", "T", "W", "T", "F", "S", "S"];
+  return (
+    <div className="card dash-widget week-card">
+      <div className="week-progress-title">This week</div>
+      <div className="week-days">
+        {letters.map((l, i) => (
+          <div key={i} className={`week-day${i < dow ? " past" : i === dow ? " today" : ""}`}>
+            <span className="week-day-box">{i < dow ? "✓" : ""}</span>
+            <span className="week-day-l">{l}</span>
+          </div>
+        ))}
+      </div>
+      <div className="week-left"><strong>{left}</strong> {left === 1 ? "day" : "days"} left{left === 0 ? " — last day of the week" : ""}</div>
+    </div>
+  );
+}
+
+function ordinal(n: number): string {
+  const v = n % 100;
+  if (v >= 11 && v <= 13) return "th";
+  return ({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[n % 10] || "th";
+}
+
+function PhdDial({ dayNum, totalDays, daysLeft, compact = false }: { dayNum: number; totalDays: number; daysLeft: number | null; compact?: boolean }) {
+  const cx = compact ? -12 : -70, cy = compact ? 72 : 150, R = compact ? 68 : 140;
   const yearly = totalDays > 730;
   const unitDays = yearly ? 365.25 : 30.44;
   const degPer = yearly ? 35 : 22;
@@ -421,8 +473,8 @@ function PhdDial({ dayNum, totalDays, daysLeft }: { dayNum: number; totalDays: n
   const [bx, by] = at(VIS, R);
   const label = daysLeft === null ? "—" : daysLeft < 0 ? "0" : String(daysLeft);
   return (
-    <div className="phd-dial" title={`Day ${dayNum} of ${totalDays}`}>
-      <svg viewBox="0 0 270 300" width="100%" aria-hidden="true">
+    <div className={`phd-dial${compact ? " compact" : ""}`} title={`Day ${dayNum} of ${totalDays}`}>
+      <svg viewBox={compact ? "0 0 330 144" : "0 0 300 300"} width="100%" aria-hidden="true">
         <path className="phd-dial-track" d={`M ${ax} ${ay} A ${R} ${R} 0 0 1 ${bx} ${by}`} fill="none" strokeWidth="1.5" />
         {Array.from({ length: units + 1 }, (_, i) => {
           const d = theta(i / units);
@@ -433,17 +485,20 @@ function PhdDial({ dayNum, totalDays, daysLeft }: { dayNum: number; totalDays: n
         {Array.from({ length: units }, (_, i) => {
           const d = theta((i + 0.5) / units);
           if (Math.abs(d) > VIS + 6) return null;
-          const [x, y] = at(d, R + 34);
+          const [x, y] = at(d, R + (compact ? 17 : 34));
           return (
             <text key={`n${i}`} className="phd-dial-num" x={x} y={y} textAnchor="middle" dominantBaseline="middle" transform={`rotate(${d} ${x} ${y})`}>
               {String(i + 1).padStart(2, "0")}
             </text>
           );
         })}
-        <circle className="phd-dial-dot" cx={cx + R} cy={cy} r="5" />
-        <text className="phd-dial-left" x={cx + R + 28} y={cy + 20}>{label}</text>
-        <text className="phd-dial-cap" x={cx + R + 30} y={cy + 46}>days left</text>
-        <text className="phd-dial-of" x={cx + R + 30} y={cy + 64}>day {dayNum} of {totalDays}</text>
+        <circle className="phd-dial-dot" cx={cx + R} cy={cy} r={compact ? 4 : 5} />
+        <text className="phd-dial-left" x={cx + R + 22} y={compact ? cy + 12 : cy + 20}>
+          {dayNum}
+          <tspan className="phd-dial-suf">{ordinal(dayNum)} Day</tspan>
+        </text>
+        <text className="phd-dial-cap" x={cx + R + 24} y={compact ? cy + 34 : cy + 48}>{label} days remaining</text>
+        <text className="phd-dial-of" x={cx + R + 24} y={compact ? cy + 50 : cy + 66}>of {totalDays} days</text>
       </svg>
     </div>
   );
@@ -577,7 +632,7 @@ function GoalCard({
   }
 
   return (
-    <div className="card dash-widget week-progress-card goal-card">
+    <div className="goal-timer">
       <div className="goal-card-actions">
         <button type="button" className="goal-card-edit" title="Edit goal" onClick={startEditing}>
           ✎
@@ -587,7 +642,7 @@ function GoalCard({
         </button>
       </div>
       <div className="week-progress-title goal-card-name">{goal.name} Remaining Day Timer</div>
-      <PhdDial dayNum={dayNum} totalDays={totalDays} daysLeft={daysLeft} />
+      <PhdDial compact dayNum={dayNum} totalDays={totalDays} daysLeft={daysLeft} />
     </div>
   );
 }
@@ -611,6 +666,7 @@ export default function ScoresView({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [selectedDay, setSelectedDay] = useState<string>(() => isoLocal(new Date()));
   const [addingHabit, setAddingHabit] = useState(false);
+  const [editingHabits, setEditingHabits] = useState(false);
   const [allTasks, setAllTasks] = useState<(ActiveMainTask & { active: boolean })[]>([]);
   const [heights, setHeights] = useState<Partial<Record<DashWidget, number>>>(() => loadHeights());
   const [goals, setGoals] = useState<Goal[]>([]);
@@ -618,6 +674,14 @@ export default function ScoresView({
   const [goalName, setGoalName] = useState("");
   const [goalStart, setGoalStart] = useState("");
   const [goalEnd, setGoalEnd] = useState("");
+  const [pins, setPins] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(PINS_KEY) || "[]") as string[]; } catch { return []; }
+  });
+  const [pinChoice, setPinChoice] = useState("");
+  function savePins(next: string[]) {
+    setPins(next);
+    try { localStorage.setItem(PINS_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+  }
 
   const today = isoLocal(new Date());
   const range = useMemo(() => rangeFor(mode, new Date()), [mode]);
@@ -814,9 +878,8 @@ export default function ScoresView({
   }
 
   function widgetStyle(id: DashWidget): CSSProperties | undefined {
-    const h = heights[id];
-    if (!h) return undefined;
-    return { height: h, marginBottom: 20 };
+    void id;
+    return undefined;
   }
 
   const habitKeys = habitDefs.map((h) => h.key);
@@ -853,8 +916,6 @@ export default function ScoresView({
       return null;
     });
   }, [habitByDate, range.days]);
-
-  const isSubDone = (st: Subtask) => st.done || st.status_id === "done";
 
   async function toggleSubtask(t: ActiveMainTask & { active: boolean }, st: Subtask) {
     const key = `${t.project_slug}:${t.main_task_id}`;
@@ -918,6 +979,38 @@ export default function ScoresView({
     }
   }
 
+  /** Set (or, tapping the same one again, clear) the mood for a day: Good +1 · Fine 0 · Bad −1. */
+  async function setMood(date: string, value: MentalHealthValue) {
+    const cur = { ...(habitByDate.get(date) || {}) } as Record<string, boolean | number>;
+    const next = { ...cur, [MENTAL_HEALTH_KEY]: mhNum(cur[MENTAL_HEALTH_KEY]) === value ? false : value };
+    setHabitDays((prev) =>
+      prev.some((d) => d.date === date)
+        ? prev.map((d) => (d.date === date ? { date, habits: next } : d))
+        : [...prev, { date, habits: next }]
+    );
+    if (date === today) setTodayHabits(next);
+    try {
+      await api.habits.set(date, next);
+    } catch {
+      reload();
+    }
+  }
+
+  function renameHabit(key: string, label: string) {
+    const l = label.trim();
+    if (!l || l === labelOf[key]) return;
+    persistDefs(habitDefs.map((h) => (h.key === key ? { ...h, label: l } : h)));
+  }
+
+  function moveHabit(key: string, dir: -1 | 1) {
+    const i = habitDefs.findIndex((h) => h.key === key);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= habitDefs.length) return;
+    const next = [...habitDefs];
+    [next[i], next[j]] = [next[j], next[i]];
+    persistDefs(next);
+  }
+
   function commitLayout(next: DashLayout) {
     setLayout(next);
     try {
@@ -955,6 +1048,17 @@ export default function ScoresView({
     sub: weekProgress.daysLeft <= 0 ? "last day" : `${weekProgress.daysLeft}d left`,
     pct: weekProgress.pct,
   };
+  const pinCatalog = [
+    weekItem,
+    ...allTasks.map((t) => ({
+      key: `${t.project_slug}:${t.main_task_id}`,
+      label: `${t.project_name} › ${t.main_task_name}`,
+      sub: `${t.subtask_done}/${t.subtask_total}`,
+      pct: t.subtask_total > 0 ? Math.round((t.subtask_done / t.subtask_total) * 100) : 0,
+    })),
+  ];
+  const pinnedItems = pins.map((k) => pinCatalog.find((c) => c.key === k)).filter((x): x is (typeof pinCatalog)[number] => !!x);
+  const pinOptions = pinCatalog.filter((c) => !pins.includes(c.key));
   const widgets: Record<SlotId, ReactNode> = {
     active: (
       <div
@@ -963,13 +1067,13 @@ export default function ScoresView({
         onMouseUp={(e) => customizing && persistWidgetHeight("active", e.currentTarget)}
       >
         <h2 style={{ margin: "0 0 10px" }}>Active Tasks</h2>
-        {allTasks.length === 0 ? (
+        {allTasks.filter((t) => t.active).length === 0 ? (
           <div className="muted" style={{ fontSize: 13 }}>
-            No tasks yet — add a project and main tasks in the Tasks section.
+            No starred tasks — star a main task in the Tasks section to show it here.
           </div>
         ) : (
           <div className="dash-task-list">
-            {allTasks.map((t) => {
+            {allTasks.filter((t) => t.active).map((t) => {
               const key = `${t.project_slug}:${t.main_task_id}`;
               const subs = subtasksByMain[key] || [];
               const open = !collapsed.has(key);
@@ -977,30 +1081,14 @@ export default function ScoresView({
                 <div key={key} className="dash-task-bar dash-task-main">
                   <div className="dash-task-bar-label">
                     <button type="button" className="dash-task-toggle" onClick={() => toggleCollapsed(key)} aria-expanded={open}>
-                      {open ? "▾" : "▸"} {t.active ? "★ " : ""}{t.project_name} › {t.main_task_name}
+                      {open ? "▾" : "▸"} ★ {t.project_name} › {t.main_task_name}
                     </button>
                     <span className="muted mono">
-                      {t.subtask_done}/{t.subtask_total}{t.deadline ? ` · due ${t.deadline}` : ""}
+                      {subs.length ? subs.filter(isSubDone).length : t.subtask_done}/{subs.length || t.subtask_total}{t.deadline ? ` · due ${t.deadline}` : ""}
                     </span>
                     <button type="button" className="dash-task-open" title="Open in Tasks" onClick={() => onOpenTask?.(t.project_slug, t.main_task_id)}>↗</button>
                   </div>
-                  <TaskStepper done={t.subtask_done} total={t.subtask_total} />
-                  {open && subs.length > 0 && (
-                    <ul className="dash-subtasks">
-                      {subs.map((st) => {
-                        const d = isSubDone(st);
-                        return (
-                          <li key={st.id}>
-                            <button type="button" className={`dash-sub${d ? " done" : ""}`} onClick={() => toggleSubtask(t, st)} title={d ? "Mark not done" : "Mark done"}>
-                              <span className="dash-sub-box">{d ? "✓" : ""}</span>
-                              <span className="dash-sub-name">{st.name}</span>
-                              {st.deadline && <span className="muted mono dash-sub-due">{st.deadline}</span>}
-                            </button>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
+                  {open && <SubtaskStepper subs={subs} onToggle={(st) => toggleSubtask(t, st)} />}
                 </div>
               );
             })}
@@ -1008,49 +1096,69 @@ export default function ScoresView({
         )}
       </div>
     ),
-    phd: primaryGoal ? (
-      <GoalCard goal={primaryGoal} today={today} onUpdate={updateGoal} onDelete={deleteGoal} />
-    ) : (
-      <div className="card dash-widget">
-        <div className="week-progress-title">Day Timer</div>
-        <div className="muted" style={{ fontSize: 13, marginTop: 8 }}>
-          Add a goal with start and end dates (for example your PhD) using “+ Add goal” in Task Progress — the first goal becomes this timer.
+    phd: (
+      <div className="phd-stack">
+        <div className="card dash-widget phd-card">
+          {primaryGoal ? (
+            <GoalCard goal={primaryGoal} today={today} onUpdate={updateGoal} onDelete={deleteGoal} />
+          ) : (
+            <div className="muted" style={{ fontSize: 13 }}>
+              Day Timer — add a goal with start and end dates (for example your PhD) using “+ Add” in Task Progress; the first goal becomes this timer.
+            </div>
+          )}
         </div>
+        <WeekCard today={today} />
       </div>
     ),
     progress: (
       <div className="card dash-widget task-progress-card">
         <h2 style={{ margin: "0 0 10px", textAlign: "center" }}>Task Progress</h2>
         <div className="task-progress-grid">
-          {[weekItem, ...allTasks.slice(0, 12).map((t) => ({
-            key: `${t.project_slug}:${t.main_task_id}`,
-            label: t.main_task_name,
-            sub: `${t.subtask_done}/${t.subtask_total}`,
-            pct: t.subtask_total > 0 ? Math.round((t.subtask_done / t.subtask_total) * 100) : 0,
-          }))].map((it) => (
-            <div key={it.key} className="tp-item">
+          {pinnedItems.map((it) => (
+            <div key={it.key} className="tp-item tp-goal">
+              <div className="tp-goal-actions">
+                <button type="button" title="Remove from dashboard" onClick={() => savePins(pins.filter((k) => k !== it.key))}>×</button>
+              </div>
               <ProgressRing pct={it.pct} size={96} stroke={13} />
               <div className="tp-cap" title={it.label}>{it.label}</div>
               <div className="tp-sub muted mono">{it.sub}</div>
             </div>
           ))}
-          {goals.slice(1).map((g) => (
+          {otherGoals.map((g) => (
             <GoalRing key={g.id} goal={g} today={today} onUpdate={updateGoal} onDelete={deleteGoal} />
           ))}
           {addingGoal ? (
             <div className="goal-add-form tp-item">
-              <input type="text" placeholder="Goal name (e.g. PhD)" value={goalName} onChange={(e) => setGoalName(e.target.value)} />
-              <label className="muted" style={{ fontSize: 11 }}>Start<input type="date" value={goalStart} onChange={(e) => setGoalStart(e.target.value)} /></label>
-              <label className="muted" style={{ fontSize: 11 }}>End<input type="date" value={goalEnd} onChange={(e) => setGoalEnd(e.target.value)} /></label>
+              <select value={pinChoice} onChange={(e) => setPinChoice(e.target.value)}>
+                <option value="">Choose what to add…</option>
+                {pinOptions.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+                <option value="__goal__">+ New goal (with dates)…</option>
+              </select>
+              {pinChoice === "__goal__" && (
+                <>
+                  <input type="text" placeholder="Goal name (first goal = day timer)" value={goalName} onChange={(e) => setGoalName(e.target.value)} />
+                  <label className="muted" style={{ fontSize: 11 }}>Start<input type="date" value={goalStart} onChange={(e) => setGoalStart(e.target.value)} /></label>
+                  <label className="muted" style={{ fontSize: 11 }}>End<input type="date" value={goalEnd} onChange={(e) => setGoalEnd(e.target.value)} /></label>
+                </>
+              )}
               <div className="goal-add-form-actions">
-                <button type="button" className="btn btn-primary" onClick={submitGoal} disabled={!goalName.trim() || !goalStart || !goalEnd}>Save</button>
-                <button type="button" className="btn" onClick={() => setAddingGoal(false)}>Cancel</button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={!pinChoice || (pinChoice === "__goal__" && (!goalName.trim() || !goalStart || !goalEnd))}
+                  onClick={() => {
+                    if (pinChoice === "__goal__") { void submitGoal(); }
+                    else { savePins([...pins, pinChoice]); setAddingGoal(false); }
+                    setPinChoice("");
+                  }}
+                >Add</button>
+                <button type="button" className="btn" onClick={() => { setAddingGoal(false); setPinChoice(""); }}>Cancel</button>
               </div>
             </div>
           ) : (
-            <button type="button" className="tp-add" onClick={() => setAddingGoal(true)} title="Add a long-term goal">
+            <button type="button" className="tp-add" onClick={() => setAddingGoal(true)} title="Add a ring to the dashboard">
               <span>+</span>
-              <small>Add goal</small>
+              <small>Add</small>
             </button>
           )}
         </div>
@@ -1070,13 +1178,16 @@ export default function ScoresView({
                 {m.charAt(0).toUpperCase() + m.slice(1)}
               </button>
             ))}
+            <button type="button" className={`btn${editingHabits ? " btn-primary" : ""}`} onClick={() => { setEditingHabits((v) => !v); setAddingHabit(false); }} title="Rename, reorder, add or remove habits">
+              {editingHabits ? "Done" : "Edit"}
+            </button>
           </div>
         </div>
         <div className="heatmap-scroll">
           <div
             className="heatmap-grid"
             style={{
-              gridTemplateColumns: `minmax(120px, 148px) repeat(${range.days.length}, ${mode === "year" ? "14px" : "minmax(14px, 1fr)"})`,
+              gridTemplateColumns: `${editingHabits ? "minmax(210px, 250px)" : "minmax(120px, 148px)"} repeat(${range.days.length}, ${mode === "year" ? "14px" : "minmax(14px, 1fr)"})`,
             }}
           >
             <div className="heatmap-corner" />
@@ -1090,12 +1201,26 @@ export default function ScoresView({
                 {d.slice(8)}
               </div>
             ))}
-            {habitKeys.map((key) => (
+            {habitKeys.map((key, hi) => (
               <Fragment key={key}>
-                <div className="heatmap-row-label">
-                  <span className="heatmap-row-text">{labelOf[key] || key}</span>
-                  <button type="button" className="heatmap-row-x" title={`Remove “${labelOf[key] || key}”`} onClick={() => removeHabit(key)}>×</button>
-                </div>
+                {editingHabits ? (
+                  <div className="heatmap-row-label editing">
+                    <button type="button" className="heatmap-row-mv" disabled={hi === 0} onClick={() => moveHabit(key, -1)} title="Move up">▲</button>
+                    <button type="button" className="heatmap-row-mv" disabled={hi === habitKeys.length - 1} onClick={() => moveHabit(key, 1)} title="Move down">▼</button>
+                    <input
+                      type="text"
+                      key={`${key}-${labelOf[key]}`}
+                      defaultValue={labelOf[key] || key}
+                      onBlur={(e) => renameHabit(key, e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                    />
+                    <button type="button" className="heatmap-row-x on" title={`Remove “${labelOf[key] || key}”`} onClick={() => removeHabit(key)}>×</button>
+                  </div>
+                ) : (
+                  <div className="heatmap-row-label">
+                    <span className="heatmap-row-text">{labelOf[key] || key}</span>
+                  </div>
+                )}
                 {range.days.map((d) => {
                   const raw = habitByDate.get(d)?.[key];
                   const mh = key === MENTAL_HEALTH_KEY ? mhNum(raw) : null;
@@ -1127,7 +1252,7 @@ export default function ScoresView({
             })}
           </div>
         </div>
-        <div className="heatmap-add-row">
+        {editingHabits && <div className="heatmap-add-row">
           {addingHabit ? (
             <>
               <input
@@ -1144,7 +1269,7 @@ export default function ScoresView({
           ) : (
             <button type="button" className="btn heatmap-add" onClick={() => setAddingHabit(true)} title="Add a habit row">+ habit</button>
           )}
-        </div>
+        </div>}
         <div className="heatmap-legend muted mono">
           <span>less</span>
           <span className="heatmap-cell" />
@@ -1165,6 +1290,20 @@ export default function ScoresView({
               {" · "}
               {mode}
             </span>
+          </div>
+          <div className="mood-row">
+            <span className="muted mono">{selectedDay === today ? "How is today?" : `How was ${selectedDay}?`}</span>
+            {([[1, "Good", "+1"], [0, "Fine", "0"], [-1, "Bad", "−1"]] as [MentalHealthValue, string, string][]).map(([v, label, sign]) => (
+              <button
+                key={v}
+                type="button"
+                className={`mood-btn m${v === 1 ? "g" : v === 0 ? "f" : "b"}${mhNum(habitByDate.get(selectedDay)?.[MENTAL_HEALTH_KEY]) === v ? " on" : ""}`}
+                onClick={() => setMood(selectedDay, v)}
+                title={`${label} (${sign}) for ${selectedDay}`}
+              >
+                {label} <small>{sign}</small>
+              </button>
+            ))}
           </div>
           <MentalHealthChart days={range.days} values={mentalHealthValues} today={selectedDay} />
         </div>

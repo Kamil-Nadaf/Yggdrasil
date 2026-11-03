@@ -40,6 +40,7 @@ Routes:
   GET  /api/zotero/search
   POST /api/zotero/ensure/{arxiv_id}
   POST /api/zotero/add-paper
+  GET  /api/zotero/collections
   GET  /api/arxiv/daily
   GET  /api/arxiv/search
   POST /api/latex/compile    ← proxied to the internal `latex` service
@@ -1567,6 +1568,46 @@ class AddPaperPayload(BaseModel):
     title: str
     authors: list[str] = []
     pdf_url: str = ""
+    collection: str = ""
+
+
+class ZoteroCredsPayload(BaseModel):
+    user_id: str = ""
+    api_key: str = ""
+
+
+@app.get("/api/settings/zotero")
+async def zotero_creds_get():
+    from zotero import zotero_credentials, creds_source
+
+    uid, key = zotero_credentials()
+    return {"user_id": uid, "has_key": bool(key), "source": creds_source()}
+
+
+@app.put("/api/settings/zotero")
+async def zotero_creds_put(payload: ZoteroCredsPayload):
+    from zotero import save_zotero_credentials
+
+    uid = payload.user_id.strip()
+    key = payload.api_key.strip()
+    if uid and not uid.isdigit():
+        raise HTTPException(status_code=400, detail="Zotero user ID is the number shown on zotero.org/settings/keys")
+    save_zotero_credentials(uid, key)
+    return {"ok": True}
+
+
+@app.get("/api/zotero/collections")
+async def zotero_collections():
+    """Zotero collections for the "Add to Zotero" picker. Never raises: errors come back as {collections: [], error}."""
+    from zotero import list_zotero_collections
+
+    try:
+        cols = list_zotero_collections()
+    except Exception as e:
+        return {"collections": [], "error": str(e)}
+    if cols is None:
+        return {"collections": [], "error": "Zotero isn’t connected yet — open Settings → Zotero."}
+    return {"collections": cols}
 
 
 @app.post("/api/zotero/add-paper")
@@ -1576,14 +1617,16 @@ async def zotero_add_paper(payload: AddPaperPayload):
     straight to Zotero. Never crashes the caller: missing credentials or a
     Zotero-side failure both come back as a normal {status: "error"} JSON body.
     """
-    if not os.environ.get("ZOTERO_API_KEY"):
-        return {"status": "error", "message": "Set ZOTERO_API_KEY in .env"}
+    from zotero import zotero_credentials
+
+    if not all(zotero_credentials()):
+        return {"status": "error", "message": "Zotero isn’t connected yet — open Settings → Zotero and add your user ID and API key."}
     try:
-        result = add_paper_to_zotero(payload.arxiv_id, payload.title, payload.authors, payload.pdf_url)
+        result = add_paper_to_zotero(payload.arxiv_id, payload.title, payload.authors, payload.pdf_url, payload.collection)
     except Exception as e:
         return {"status": "error", "message": str(e)}
     if not result:
-        return {"status": "error", "message": "Set ZOTERO_API_KEY and ZOTERO_USER_ID in .env"}
+        return {"status": "error", "message": "Zotero isn’t connected yet — open Settings → Zotero and add your user ID and API key."}
     return {"status": "ok", "item": result}
 
 
@@ -2204,9 +2247,14 @@ async def arxiv_search(
     source: str = "all",
     start: int = 0,
     max_results: int = 50,
+    category: str = "",
 ):
     """
     Universal academic search across OpenAlex, arXiv, and Europe PMC.
+
+    `category` (comma-separated arXiv categories, e.g. "astro-ph.HE,astro-ph.CO")
+    restricts the search to arXiv within those categories — one fast source
+    instead of fanning out to OpenAlex as well.
     """
     q = q.strip()
     m = ARXIV_ID_RE.search(q)
@@ -2216,6 +2264,27 @@ async def arxiv_search(
         if m:
             papers, total = await _fetch_arxiv({"id_list": m.group(0), "max_results": 1})
             return {"papers": papers, "total": total, "start": 0}
+
+    cats = [c.strip() for c in category.split(",") if re.fullmatch(r"[A-Za-z0-9.\-]{2,30}", c.strip())]
+    if cats and field != "id":
+        wildcard_archives = {"astro-ph", "cond-mat", "physics", "math", "cs", "stat", "q-bio", "q-fin", "eess", "econ"}
+        cat_q = " OR ".join(f"cat:{c}*" if c in wildcard_archives else f"cat:{c}" for c in cats)
+        prefix = ARXIV_FIELD_PREFIX.get(field, "all")
+        if prefix == "all":
+            terms = [t for t in re.split(r"\s+", q) if t]
+            field_q = " AND ".join(f"all:{t}" for t in terms) or "all:*"
+        else:
+            field_q = f'{prefix}:"{q}"'
+        papers, total = await _fetch_arxiv(
+            {
+                "search_query": f"({cat_q}) AND ({field_q})",
+                "sortBy": "relevance" if prefix == "all" else "submittedDate",
+                "sortOrder": "descending",
+                "start": max(0, start),
+                "max_results": min(max_results, 50),
+            }
+        )
+        return {"papers": papers, "total": total, "start": start}
 
     # Explicit single source
     if source == "openalex":
@@ -2283,6 +2352,231 @@ async def arxiv_search(
         "total": max(oa_total + ar_total, len(combined)),
         "start": start,
     }
+
+
+# ── In-app PDF viewer: fetch a remote PDF server-side so the webview can embed it ──
+def _assert_public_url(url: str) -> str:
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    u = urlparse(url)
+    if u.scheme not in ("http", "https") or not u.hostname:
+        raise HTTPException(status_code=400, detail="Invalid PDF URL")
+    try:
+        infos = socket.getaddrinfo(u.hostname, None)
+    except OSError:
+        raise HTTPException(status_code=400, detail="Cannot resolve PDF host")
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+            raise HTTPException(status_code=400, detail="PDF host not allowed")
+    return url
+
+
+# ── Calendar events (your own, timed; task deadlines come from /api/tasks/calendar) ──
+
+class CalEventPayload(BaseModel):
+    title: str
+    date: str
+    start: str = ""
+    end: str = ""
+    all_day: bool = False
+    calendar: str = "other"
+    notes: str = ""
+
+
+_CAL_IDS = {"research", "assignments", "meetings", "personal", "other"}
+
+
+def _cal_path() -> Path:
+    d = VAULT / "60-Meta"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / "calendar-events.json"
+
+
+def _cal_load() -> list[dict]:
+    try:
+        return json.loads(_cal_path().read_text()).get("events", [])
+    except Exception:
+        return []
+
+
+def _cal_save(events: list[dict]) -> None:
+    _cal_path().write_text(json.dumps({"events": events}, indent=1))
+
+
+def _cal_clean(p: CalEventPayload) -> dict:
+    import datetime as _dt
+
+    title = p.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Title is required")
+    try:
+        _dt.datetime.strptime(p.date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Date must be YYYY-MM-DD")
+    start, end = ("", "") if p.all_day else (p.start.strip(), p.end.strip())
+    for t in (start, end):
+        if t and not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", t):
+            raise HTTPException(status_code=400, detail="Times must be HH:MM")
+    return {
+        "title": title[:200],
+        "date": p.date,
+        "start": start,
+        "end": end,
+        "all_day": bool(p.all_day or not start),
+        "calendar": p.calendar if p.calendar in _CAL_IDS else "other",
+        "notes": p.notes[:4000],
+    }
+
+
+@app.get("/api/calendar/events")
+async def calendar_events_list():
+    return {"events": _cal_load()}
+
+
+@app.post("/api/calendar/events")
+async def calendar_events_create(payload: CalEventPayload):
+    import uuid
+
+    ev = {"id": uuid.uuid4().hex[:10], **_cal_clean(payload)}
+    events = _cal_load()
+    events.append(ev)
+    _cal_save(events)
+    return {"event": ev}
+
+
+@app.put("/api/calendar/events/{event_id}")
+async def calendar_events_update(event_id: str, payload: CalEventPayload):
+    events = _cal_load()
+    for i, e in enumerate(events):
+        if e.get("id") == event_id:
+            events[i] = {"id": event_id, **_cal_clean(payload)}
+            _cal_save(events)
+            return {"event": events[i]}
+    raise HTTPException(status_code=404, detail="Event not found")
+
+
+@app.delete("/api/calendar/events/{event_id}")
+async def calendar_events_delete(event_id: str):
+    events = _cal_load()
+    kept = [e for e in events if e.get("id") != event_id]
+    if len(kept) == len(events):
+        raise HTTPException(status_code=404, detail="Event not found")
+    _cal_save(kept)
+    return {"ok": True}
+
+
+async def _fetch_pdf_bytes(url: str) -> bytes:
+    """Download a public PDF. Redirects are followed manually so every hop is host-checked."""
+    current = _assert_public_url(url)
+    headers = {"User-Agent": "Yggdrasil/1.0 (PDF viewer)", "Accept": "application/pdf,*/*"}
+    async with httpx.AsyncClient(follow_redirects=False, timeout=60.0) as client:
+        resp = None
+        for _ in range(6):
+            try:
+                resp = await client.get(current, headers=headers)
+            except httpx.RequestError as exc:
+                raise HTTPException(status_code=502, detail=f"Could not fetch PDF: {exc}")
+            if resp.status_code in (301, 302, 303, 307, 308) and resp.headers.get("location"):
+                from urllib.parse import urljoin
+                current = _assert_public_url(urljoin(current, resp.headers["location"]))
+                continue
+            break
+    if resp is None or resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"PDF host returned {resp.status_code if resp else 'no response'}")
+    body = resp.content
+    if len(body) > 120 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="PDF is too large to preview")
+    if not body.startswith(b"%PDF") and "pdf" not in resp.headers.get("content-type", "").lower():
+        raise HTTPException(status_code=415, detail="That link is not a PDF — use “Open Paper / DOI” instead")
+    return body
+
+
+def _pdf_store() -> Path:
+    d = VAULT / "10-Papers" / "pdfs"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _pdf_key(key: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", key).strip("._")[:120]
+    if not safe:
+        raise HTTPException(status_code=400, detail="Missing paper key")
+    return safe
+
+
+@app.get("/api/pdf-proxy")
+async def pdf_proxy(url: str):
+    """Stream a public PDF back inline."""
+    body = await _fetch_pdf_bytes(url)
+    return Response(content=body, media_type="application/pdf", headers={"Content-Disposition": "inline; filename=paper.pdf"})
+
+
+@app.get("/api/pdf-file")
+async def pdf_file(key: str, url: str = ""):
+    """The locally saved copy of a paper if we have one, otherwise the public PDF (proxied)."""
+    local = _pdf_store() / f"{_pdf_key(key)}.pdf"
+    if local.exists():
+        return Response(content=local.read_bytes(), media_type="application/pdf", headers={"Content-Disposition": "inline; filename=paper.pdf", "X-Pdf-Source": "local"})
+    if not url:
+        raise HTTPException(status_code=404, detail="No saved copy and no URL")
+    body = await _fetch_pdf_bytes(url)
+    return Response(content=body, media_type="application/pdf", headers={"Content-Disposition": "inline; filename=paper.pdf", "X-Pdf-Source": "remote"})
+
+
+class PdfSavePayload(BaseModel):
+    key: str
+    url: str = ""
+
+
+@app.post("/api/pdf-local/save")
+async def pdf_local_save(payload: PdfSavePayload):
+    """Keep a copy of the PDF in the vault (10-Papers/pdfs) so it is available offline."""
+    local = _pdf_store() / f"{_pdf_key(payload.key)}.pdf"
+    if not local.exists():
+        local.write_bytes(await _fetch_pdf_bytes(payload.url))
+    return {"ok": True, "path": str(local.relative_to(VAULT))}
+
+
+class PdfAnnotationsPayload(BaseModel):
+    key: str
+    url: str = ""
+    title: str = ""
+    annotations: list[dict] = []
+
+
+@app.get("/api/pdf-annotations")
+async def pdf_annotations_get(key: str):
+    store = _pdf_store()
+    k = _pdf_key(key)
+    f = store / f"{k}.annotations.json"
+    anns: list = []
+    if f.exists():
+        try:
+            anns = json.loads(f.read_text()).get("annotations", [])
+        except Exception:
+            anns = []
+    return {"annotations": anns, "saved_copy": (store / f"{k}.pdf").exists()}
+
+
+@app.put("/api/pdf-annotations")
+async def pdf_annotations_put(payload: PdfAnnotationsPayload):
+    """Highlights and notes live next to the saved PDF copy, in the vault. The PDF copy is fetched on first save."""
+    store = _pdf_store()
+    k = _pdf_key(payload.key)
+    (store / f"{k}.annotations.json").write_text(
+        json.dumps({"key": payload.key, "title": payload.title, "url": payload.url, "annotations": payload.annotations}, indent=1)
+    )
+    saved_copy = (store / f"{k}.pdf").exists()
+    if not saved_copy and payload.url and payload.annotations:
+        try:
+            (store / f"{k}.pdf").write_bytes(await _fetch_pdf_bytes(payload.url))
+            saved_copy = True
+        except HTTPException:
+            pass
+    return {"ok": True, "saved_copy": saved_copy}
 
 
 # ── LaTeX (thin proxy to the internal `latex` container) ───────────────────────

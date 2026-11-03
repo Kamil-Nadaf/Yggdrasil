@@ -193,6 +193,28 @@ export interface ArxivSearchResult {
 export type ArxivSearchField = "all" | "author" | "title" | "id";
 export type AcademicSearchSource = "all" | "openalex" | "arxiv" | "europepmc";
 
+export interface PdfAnnotation {
+  id: string;
+  page: number;
+  /** [x, y, w, h] as fractions of the page width/height, one per text line */
+  rects: [number, number, number, number][];
+  text: string;
+  color: string;
+  note: string;
+  created: string;
+}
+
+export interface CalEvent {
+  id: string;
+  title: string;
+  date: string; // YYYY-MM-DD
+  start: string; // HH:MM, "" when all-day
+  end: string;
+  all_day: boolean;
+  calendar: string;
+  notes: string;
+}
+
 export interface ZoteroAddResult {
   status: "ok" | "error";
   message?: string;
@@ -548,11 +570,29 @@ export const api = {
 
   graph: () => req<GraphData>("GET", "/api/graph"),
 
+  calendarEvents: {
+    list: () => req<{ events: CalEvent[] }>("GET", "/api/calendar/events"),
+    create: (e: Omit<CalEvent, "id">) => req<{ event: CalEvent }>("POST", "/api/calendar/events", e),
+    update: (id: string, e: Omit<CalEvent, "id">) => req<{ event: CalEvent }>("PUT", `/api/calendar/events/${encodeURIComponent(id)}`, e),
+    remove: (id: string) => req<{ ok: boolean }>("DELETE", `/api/calendar/events/${encodeURIComponent(id)}`),
+  },
+
+  pdf: {
+    annotations: (key: string) =>
+      req<{ annotations: PdfAnnotation[]; saved_copy: boolean }>("GET", `/api/pdf-annotations?key=${encodeURIComponent(key)}`),
+    saveAnnotations: (key: string, url: string, title: string, annotations: PdfAnnotation[]) =>
+      req<{ ok: boolean; saved_copy: boolean }>("PUT", "/api/pdf-annotations", { key, url, title, annotations }),
+    saveCopy: (key: string, url: string) => req<{ ok: boolean; path: string }>("POST", "/api/pdf-local/save", { key, url }),
+  },
+
   zotero: {
     search: (q: string) => req<PaperFrontmatter>("GET", `/api/zotero/search?q=${encodeURIComponent(q)}`),
     ensure: (arxivId: string) => req<PaperFrontmatter>("POST", `/api/zotero/ensure/${arxivId}`),
-    addPaper: (arxiv_id: string, title: string, authors: string[], pdf_url: string) =>
-      req<ZoteroAddResult>("POST", "/api/zotero/add-paper", { arxiv_id, title, authors, pdf_url }),
+    getCreds: () => req<{ user_id: string; has_key: boolean; source: "env" | "settings" | "none" }>("GET", "/api/settings/zotero"),
+    saveCreds: (user_id: string, api_key: string) => req<{ ok: boolean }>("PUT", "/api/settings/zotero", { user_id, api_key }),
+    collections: () => req<{ collections: { key: string; name: string }[]; error?: string }>("GET", "/api/zotero/collections"),
+    addPaper: (arxiv_id: string, title: string, authors: string[], pdf_url: string, collection = "") =>
+      req<ZoteroAddResult>("POST", "/api/zotero/add-paper", { arxiv_id, title, authors, pdf_url, collection }),
   },
 
   arxiv: {
@@ -562,10 +602,10 @@ export const api = {
         "GET",
         `/api/arxiv/daily?max=${max}&cat=${encodeURIComponent(cat)}&refresh=${refresh ? "true" : "false"}${date ? `&date=${encodeURIComponent(date)}` : ""}`
       ),
-    search: (q: string, field: ArxivSearchField = "all", start = 0, maxResults = 50, source: AcademicSearchSource = "all") =>
+    search: (q: string, field: ArxivSearchField = "all", start = 0, maxResults = 50, source: AcademicSearchSource = "all", category = "") =>
       req<ArxivSearchResult>(
         "GET",
-        `/api/arxiv/search?q=${encodeURIComponent(q)}&field=${field}&start=${start}&max_results=${maxResults}&source=${source}`
+        `/api/arxiv/search?q=${encodeURIComponent(q)}&field=${field}&start=${start}&max_results=${maxResults}&source=${source}${category ? `&category=${encodeURIComponent(category)}` : ""}`
       ),
   },
 

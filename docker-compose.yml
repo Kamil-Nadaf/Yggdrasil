@@ -83,25 +83,5 @@ services:
       - "9000"
     restart: unless-stopped
 
-  # Feynman CLI terminal for Ask → Feynman (https://www.feynman.is)
-  # WebSocket PTY on :6174 — no workbench GUI.
-  feynman:
-    build:
-      context: ./services/feynman
-      dockerfile: Dockerfile
-    container_name: yggdrasil-feynman
-    environment:
-      FEYNMAN_HOME: /data/feynman-home
-      TZ: ${TZ:-Asia/Shanghai}
-    volumes:
-      - type: bind
-        source: ${VAULT_HOST_PATH}
-        target: /workspace
-      - feynman_home:/data/feynman-home
-    ports:
-      - "${FEYNMAN_HOST_PORT:-6174}:6174"
-    restart: unless-stopped
-
 volumes:
   lancedb_data:
-  feynman_home:

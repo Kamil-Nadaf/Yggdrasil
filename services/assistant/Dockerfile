@@ -19,6 +19,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl git openss
     rm -rf /var/lib/apt/lists/*
 
 # Python deps
+# Slow or distant networks: override with --build-arg PIP_INDEX_URL=<mirror>
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ENV PIP_DEFAULT_TIMEOUT=120 PIP_RETRIES=10
 COPY requirements.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt
 

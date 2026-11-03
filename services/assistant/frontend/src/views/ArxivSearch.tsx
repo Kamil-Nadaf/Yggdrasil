@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { usePdfOpener } from "../components/PdfViewer";
 import { Group, Panel, Separator, useDefaultLayout, type LayoutStorage } from "react-resizable-panels";
+import ZoteroCollectionSelect, { getZoteroCollection } from "../components/ZoteroCollectionSelect";
 import { api, type ArxivPaper } from "../api/client";
 import { SlotIndicator, CericSelectionToolbar, useCericAppend } from "../components/CericToolbar";
 import AbstractText from "../components/AbstractText";
@@ -176,6 +178,7 @@ function todayIso(): string {
 }
 
 export default function ArxivSearch() {
+  const openPdf = usePdfOpener();
   const [daily, setDaily] = useState<ArxivPaper[]>([]);
   const [dailyLoading, setDailyLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -312,7 +315,7 @@ export default function ArxivSearch() {
 
   async function handleAddToZotero(paper: ArxivPaper) {
     try {
-      const r = await api.zotero.addPaper(paper.id, paper.title, paper.authors, resolvePdfUrl(paper));
+      const r = await api.zotero.addPaper(paper.id, paper.title, paper.authors, resolvePdfUrl(paper), getZoteroCollection());
       if (r.status === "ok") {
         showToast("Added to Zotero ✓", true);
       } else {
@@ -675,9 +678,15 @@ export default function ArxivSearch() {
               />
               <div className="arxiv-reading-actions">
                 {activePdfUrl ? (
-                  <a className="btn" href={activePdfUrl} target="_blank" rel="noopener noreferrer">
-                    ↗ Open PDF
-                  </a>
+                  openPdf ? (
+                    <button type="button" className="btn" onClick={() => openPdf({ url: activePdfUrl, title: activePaper?.title || "PDF", paper: activePaper || undefined })}>
+                      ▤ Open PDF
+                    </button>
+                  ) : (
+                    <a className="btn" href={activePdfUrl} target="_blank" rel="noopener noreferrer">
+                      ↗ Open PDF
+                    </a>
+                  )
                 ) : (
                   <button className="btn" disabled title="No direct PDF URL available">
                     No PDF Link
@@ -688,6 +697,7 @@ export default function ArxivSearch() {
                     ↗ {activePaper.source === "openalex" ? "Open Paper / DOI" : "Open Source"}
                   </a>
                 ) : null}
+                <ZoteroCollectionSelect />
                 <button className="btn btn-primary" onClick={() => handleAddToZotero(activePaper)}>
                   + Add to Zotero
                 </button>

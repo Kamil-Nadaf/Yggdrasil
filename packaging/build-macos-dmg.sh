@@ -79,6 +79,7 @@ if command -v codesign >/dev/null 2>&1; then
   codesign --force --deep -s - "$APP" 2>/dev/null || true
 fi
 xattr -cr "$APP" 2>/dev/null || true
+chmod -R u+rwX,go+rX "$APP"
 
 rm -f "$DMG"
 hdiutil create -volname "Yggdrasil" -srcfolder "$DMG_ROOT" -ov -format UDZO "$DMG"

@@ -139,6 +139,10 @@ if command -v codesign >/dev/null 2>&1; then
   codesign --force --deep -s - "$APP" 2>/dev/null || true
 fi
 xattr -cr "$APP" 2>/dev/null || true
+# Normalise permissions: source files edited on some machines end up 0600, and an
+# installed (root-owned) 0600 file is unreadable by the user running the app
+# ("PermissionError ... data_manifest.py" on the splash screen).
+chmod -R u+rwX,go+rX "$APP"
 
 # ── DMG ─────────────────────────────────────────────────────────────────────
 echo "→ Creating DMG"
@@ -175,6 +179,7 @@ PKG_SCRIPTS="${OUT}/pkg-scripts"
 rm -rf "$PKG_ROOT" "$PKG_SCRIPTS"
 mkdir -p "$PKG_ROOT/Applications" "$PKG_SCRIPTS"
 cp -R "$APP" "$PKG_ROOT/Applications/Yggdrasil.app"
+chmod -R u+rwX,go+rX "$PKG_ROOT/Applications/Yggdrasil.app"
 
 cat > "$PKG_SCRIPTS/postinstall" << 'EOF'
 #!/bin/bash

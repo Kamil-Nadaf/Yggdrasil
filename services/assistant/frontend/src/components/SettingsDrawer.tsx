@@ -519,6 +519,25 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
     setModeTick((n) => n + 1);
   };
   void modeTick;
+  const [zUser, setZUser] = useState("");
+  const [zKey, setZKey] = useState("");
+  const [zInfo, setZInfo] = useState<{ has_key: boolean; source: string } | null>(null);
+  const [zMsg, setZMsg] = useState("");
+  useEffect(() => {
+    api.zotero.getCreds().then((r) => { setZUser(r.user_id); setZInfo({ has_key: r.has_key, source: r.source }); }).catch(() => undefined);
+  }, []);
+  async function saveZotero() {
+    setZMsg("");
+    try {
+      await api.zotero.saveCreds(zUser.trim(), zKey.trim());
+      setZKey("");
+      const r = await api.zotero.getCreds();
+      setZInfo({ has_key: r.has_key, source: r.source });
+      setZMsg("Saved. Try “+ Add to Zotero” on a paper.");
+    } catch (e) {
+      setZMsg(e instanceof Error ? e.message : "Could not save");
+    }
+  }
   const [grid, setGrid] = useState<GridSettings>(() => loadGridSettings());
   const [textScale, setTextScale] = useState<TextScale>(() => loadTextScale());
   const pickTextScale = (t: TextScale) => {
@@ -1077,6 +1096,29 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
               </div>
             </div>
           )}
+        </CollapsibleSection>
+
+        <CollapsibleSection id="zotero" title="Zotero" open={!!openSections.zotero} onToggle={() => toggle("zotero")}>
+          <div className="settings-info" style={{ marginBottom: 8 }}>
+            Lets “+ Add to Zotero” save papers to your library.
+            <ol style={{ margin: "6px 0 0 18px", padding: 0 }}>
+              <li>Sign in at <strong>zotero.org/settings/keys</strong>.</li>
+              <li>Copy <em>“Your userID for use in API calls”</em> (a number).</li>
+              <li>Click <strong>Create new private key</strong>, tick <strong>Allow library access</strong> and <strong>Allow write access</strong>, then save and copy the key.</li>
+              <li>Paste both below and press Save.</li>
+            </ol>
+          </div>
+          <div className="settings-item">
+            <label>User ID</label>
+            <input type="text" inputMode="numeric" value={zUser} onChange={(e) => setZUser(e.target.value)} placeholder="e.g. 1234567" />
+          </div>
+          <div className="settings-item">
+            <label>API key {zInfo?.has_key && <span className="muted">(saved — leave blank to keep)</span>}</label>
+            <input type="password" value={zKey} onChange={(e) => setZKey(e.target.value)} placeholder={zInfo?.has_key ? "••••••••" : "paste key"} autoComplete="off" />
+          </div>
+          <button type="button" className="btn btn-primary" onClick={saveZotero} disabled={!zUser.trim() && !zKey.trim()}>Save</button>
+          {zInfo?.source === "env" && <div className="settings-info" style={{ marginTop: 6 }}>Currently using ZOTERO_USER_ID / ZOTERO_API_KEY from the environment (.env).</div>}
+          {zMsg && <div className="settings-info" style={{ marginTop: 6 }}>{zMsg}</div>}
         </CollapsibleSection>
 
         <CollapsibleSection id="ai" title="AI Providers" open={!!openSections.ai} onToggle={() => toggle("ai")}>

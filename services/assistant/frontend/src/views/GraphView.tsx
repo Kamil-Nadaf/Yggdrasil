@@ -14,6 +14,8 @@ interface Props {
 
 const EDGE_FILTERS = [
   { id: "manual_link", label: "wikilinks" },
+  { id: "shared_keyword", label: "shared keyword" },
+  { id: "has_keyword", label: "keyword hubs" },
   { id: "shared_claim", label: "shared claim" },
   { id: "shared_method", label: "shared method" },
   { id: "shared_citation", label: "shared citation" },
@@ -32,6 +34,7 @@ export default function GraphView({ onOpenEditor }: Props) {
     Object.fromEntries(EDGE_FILTERS.map((f) => [f.id, f.id !== "suggested"]))
   );
   const [neighbors, setNeighbors] = useState<GraphNeighbor[]>([]);
+  const [noteKeywords, setNoteKeywords] = useState<string[]>([]);
   const [enriching, setEnriching] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
   const [themeTick, setThemeTick] = useState(0);
@@ -74,11 +77,14 @@ export default function GraphView({ onOpenEditor }: Props) {
   useEffect(() => {
     if (!selected) {
       setNeighbors([]);
+      setNoteKeywords([]);
       return;
     }
-    api.graphNeighbors(selected)
-      .then((r) => setNeighbors(r.neighbors))
-      .catch(() => setNeighbors([]));
+    const sel = data?.nodes.find((n) => n.id === selected);
+    const q = sel?.folder === "keyword" ? sel.label : selected;
+    api.graphNeighbors(q)
+      .then((r) => { setNeighbors(r.neighbors); setNoteKeywords(r.keywords || []); })
+      .catch(() => { setNeighbors([]); setNoteKeywords([]); });
   }, [selected, data]);
 
   const filteredEdges = useMemo(() => {
@@ -156,6 +162,8 @@ export default function GraphView({ onOpenEditor }: Props) {
       shared_claim: { stroke: edgeColors.wikilink, width: 2.2, dash: "6 3", opacity: 0.95 },
       shared_method: { stroke: edgeColors.wikilink, width: 1.6, dash: "2 2", opacity: 0.9 },
       shared_citation: { stroke: edgeColors.citation, width: 1.8, dash: "8 3 2 3", opacity: 0.9 },
+      shared_keyword: { stroke: edgeColors.wikilink, width: 1.8, dash: "5 2", opacity: 0.9 },
+      has_keyword: { stroke: edgeColors.suggested, width: 0.9, dash: "2 3", opacity: 0.6 },
       shared_entity: { stroke: edgeColors.wikilink, width: 1.5, dash: "1 2", opacity: 0.85 },
       citation: { stroke: edgeColors.citation, width: 1.5, dash: "4 2", opacity: 0.9 },
       suggested: { stroke: edgeColors.suggested, width: 1, dash: "1 3", opacity: 0.55 },
@@ -175,8 +183,9 @@ export default function GraphView({ onOpenEditor }: Props) {
       .selectAll("circle")
       .data(nodes)
       .join("circle")
-      .attr("r", (d) => 5 + Math.min(12, (degreeMap.get(d.id) || 0) * 1.2))
-      .attr("fill", (d) => folderColors[d.folder] || "var(--page-accent)")
+      .attr("r", (d) => (d.folder === "keyword" ? 3 + Math.min(8, (degreeMap.get(d.id) || 0) * 0.7) : 5 + Math.min(12, (degreeMap.get(d.id) || 0) * 1.2)))
+      .attr("fill", (d) => (d.folder === "keyword" ? "var(--muted)" : folderColors[d.folder] || "var(--page-accent)"))
+      .attr("fill-opacity", (d) => (d.folder === "keyword" ? 0.75 : 1))
       .attr("stroke", (d) => (d.id === selected ? "var(--text)" : "var(--bg)"))
       .attr("stroke-width", (d) => (d.id === selected ? 2.5 : 1.5))
       .attr("cursor", "pointer")
@@ -196,8 +205,9 @@ export default function GraphView({ onOpenEditor }: Props) {
       .data(nodes)
       .join("text")
       .text((d) => d.label)
-      .attr("font-size", 10)
-      .attr("fill", "var(--text)")
+      .attr("font-size", (d) => (d.folder === "keyword" ? 9 : 10))
+      .attr("font-style", (d) => (d.folder === "keyword" ? "italic" : "normal"))
+      .attr("fill", (d) => (d.folder === "keyword" ? "var(--muted)" : "var(--text)"))
       .attr("dx", 10)
       .attr("dy", 4)
       .attr("pointer-events", "none");
@@ -244,6 +254,10 @@ export default function GraphView({ onOpenEditor }: Props) {
       </div>
 
       <div style={{ display: "flex", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11 }} className="mono">
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--muted)", display: "inline-block" }} />
+          keyword
+        </span>
         {Object.entries(folderColors).filter(([k]) => k !== "external").map(([folder, color]) => (
           <span key={folder} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11 }} className="mono">
             <span style={{ width: 10, height: 10, borderRadius: "50%", background: color, display: "inline-block" }} />
@@ -295,8 +309,14 @@ export default function GraphView({ onOpenEditor }: Props) {
             )}
           </div>
 
+          {noteKeywords.length > 0 && selectedNode.folder !== "keyword" && (
+            <div style={{ marginTop: 12 }}>
+              <div className="slot-label" style={{ marginBottom: 6 }}>Keywords</div>
+              <div className="mono" style={{ fontSize: 12 }}>{noteKeywords.join(" · ")}</div>
+            </div>
+          )}
           <div style={{ marginTop: 12 }}>
-            <div className="slot-label" style={{ marginBottom: 6 }}>Neighbors (with reasons)</div>
+            <div className="slot-label" style={{ marginBottom: 6 }}>{selectedNode.folder === "keyword" ? "Notes with this keyword" : "Neighbors (with reasons)"}</div>
             {neighbors.length === 0 ? (
               <div className="muted" style={{ fontSize: 12 }}>No typed neighbors yet — save a note or rebuild edges.</div>
             ) : (
@@ -327,7 +347,7 @@ export default function GraphView({ onOpenEditor }: Props) {
       )}
 
       <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
-        Click a node for local neighbors + reasons · Double-click a paper to open · Dash patterns encode edge type (e-ink safe)
+        Click a node for local neighbors + reasons · Double-click a paper to open · Graph shows notes only; grey dots are keywords shared by 2+ notes. Dash patterns encode edge type (e-ink safe)
       </div>
     </div>
   );

@@ -123,6 +123,9 @@ from arxiv_topics import (
     is_openalex_topic,
     get_topic_search_query,
 )
+from graph_keywords import cached_keyword_graph, node_for as _kw_node_for
+from note_tags import suggest_tags as _suggest_note_tags
+from reading import make_router as _make_reading_router
 from graph_links import (
     DEFAULT_SIMILARITY_THRESHOLD,
     cosine,
@@ -219,6 +222,8 @@ if DESKTOP_MODE:
     ensure_layout_safe(VAULT)
 
 app = FastAPI(title="CERIC Reading System")
+# Books reading library (/api/reading): lazy lookups, because _write_habits is defined further down.
+app.include_router(_make_reading_router(lambda: VAULT, lambda day, habits: _write_habits(day, habits)))
 
 app.add_middleware(
     CORSMiddleware,
@@ -1389,38 +1394,22 @@ Do NOT summarize the paper. Do NOT restate the analysis slots. Add value beyond 
 # ── Graph ─────────────────────────────────────────────────────────────────────
 
 def _graph_node_for(md: Path) -> Optional[dict]:
-    """Identify a graph node. Book sections live under 15-Books/{slug}/."""
-    try:
-        rel = md.relative_to(VAULT)
-    except ValueError:
-        return None
-    if not rel.parts:
-        return None
-    top = rel.parts[0]
-    if top == "15-Books":
-        if md.name.startswith("_"):
-            return None
-        slug = rel.parts[1] if len(rel.parts) > 2 else ""
-        node_id = f"{slug}/{md.stem}" if slug else md.stem
-        return {"id": node_id, "label": md.stem, "folder": "15-Books", "path": str(rel)}
-    return {"id": md.stem, "label": md.stem, "folder": top, "path": str(rel)}
+    """Graph nodes are notes only (papers, books, concepts, questions, Notes
+    workspace...). Daily schedules, task files, briefs and LaTeX are excluded."""
+    return _kw_node_for(VAULT, md)
 
 
 @app.get("/api/graph")
 async def graph():
-    """Nodes from vault .md + edges from [[wikilinks]] and LanceDB graph_edges."""
-    nodes: dict[str, dict] = {}
+    """Notes-only graph: note nodes + keyword hubs, [[wikilinks]], shared-keyword
+    edges and typed LanceDB edges (both ends must be notes)."""
+    kg = cached_keyword_graph(VAULT, current_analysis_keys())
+    nodes: dict[str, dict] = dict(kg["nodes"])
     edges: list[dict] = []
     seen_pairs: set[tuple[str, str, str]] = set()
     wikilink_re = re.compile(r"\[\[([^\]|#]+)(?:[|\#][^\]]*)?\]\]")
 
-    all_md = list(VAULT.rglob("*.md"))
-    for md in all_md:
-        node = _graph_node_for(md)
-        if node:
-            nodes[node["id"]] = node
-
-    for md in all_md:
+    for md in VAULT.rglob("*.md"):
         node = _graph_node_for(md)
         if not node:
             continue
@@ -1428,23 +1417,18 @@ async def graph():
         text = md.read_text(errors="replace")
         for m in wikilink_re.finditer(text):
             target = m.group(1).strip()
-            if target and target != src:
-                if target not in nodes:
-                    nodes[target] = {"id": target, "label": target, "folder": "external", "path": ""}
+            if target and target != src and target in nodes:
                 key = (src, target, "manual_link")
-                if key not in seen_pairs:
+                rev = (target, src, "manual_link")
+                if key not in seen_pairs and rev not in seen_pairs:
                     seen_pairs.add(key)
-                    edges.append(
-                        {
-                            "source": src,
-                            "target": target,
-                            "type": "manual_link",
-                            "reason_text": f"manual [[wikilink]] → {target}",
-                            "confidence_score": 1.0,
-                        }
-                    )
+                    edges.append({
+                        "source": src, "target": target, "type": "manual_link",
+                        "reason_text": f"manual [[wikilink]] → {target}",
+                        "confidence_score": 1.0,
+                    })
 
-    # Persisted typed edges (manual + auto) from LanceDB
+    # Persisted typed edges from LanceDB, kept only between note nodes
     try:
         et = get_edges_table(LANCEDB_PATH)
         rows = et.to_pandas().to_dict(orient="records") if et is not None else []
@@ -1454,26 +1438,22 @@ async def graph():
         src = str(row.get("source_note") or "")
         tgt = str(row.get("target_note") or "")
         etype = str(row.get("type") or "manual_link")
-        if not src or not tgt:
+        if src not in nodes or tgt not in nodes:
             continue
-        for nid in (src, tgt):
-            if nid not in nodes:
-                nodes[nid] = {"id": nid, "label": nid, "folder": "external", "path": ""}
         key = (src, tgt, etype)
         rev = (tgt, src, etype)
         if key in seen_pairs or rev in seen_pairs:
             continue
         seen_pairs.add(key)
-        edges.append(
-            {
-                "source": src,
-                "target": tgt,
-                "type": etype,
-                "reason_text": str(row.get("reason_text") or ""),
-                "confidence_score": float(row.get("confidence_score") or 0),
-            }
-        )
+        edges.append({
+            "source": src, "target": tgt, "type": etype,
+            "reason_text": str(row.get("reason_text") or ""),
+            "confidence_score": float(row.get("confidence_score") or 0),
+        })
 
+    # Keyword layer
+    nodes.update(kg["keyword_nodes"])
+    edges.extend(kg["edges"])
     return {"nodes": list(nodes.values()), "edges": edges}
 
 
@@ -1509,8 +1489,29 @@ async def graph_neighbors(payload: GraphNeighborsPayload):
                 }
                 for e in wiki
             ]
-    neighbors = neighbors_from_rows(rows, note, limit=max(1, min(payload.limit, 100)))
-    return {"note": note, "neighbors": neighbors}
+    # Keyword layer: notes that share keywords with this note, or notes carrying
+    # a keyword when `note` is a topic (e.g. "internal shocks").
+    kg = cached_keyword_graph(VAULT, current_analysis_keys())
+    needle = note.lower()
+    kw_rows = [
+        {"source_note": e["source"], "target_note": e["target"], "type": e["type"],
+         "reason_text": e["reason_text"], "confidence_score": e["confidence_score"]}
+        for e in kg["edges"]
+        if e["type"] == "shared_keyword" and needle in (e["source"].lower(), e["target"].lower())
+    ]
+    if f"kw:{needle}" in {n.lower() for n in kg["keyword_nodes"]}:
+        kw_rows += [
+            {"source_note": e["source"], "target_note": note, "type": "has_keyword",
+             "reason_text": f"note keyword “{needle}”", "confidence_score": 1.0}
+            for e in kg["edges"]
+            if e["type"] == "has_keyword" and e["target"].lower() == f"kw:{needle}"
+        ]
+    base = neighbors_from_rows(rows, note, limit=max(1, min(payload.limit, 100)))
+    extra = neighbors_from_rows(kw_rows, note, limit=max(1, min(payload.limit, 100)))
+    seen = {(n["note"], n["type"]) for n in base}
+    neighbors = base + [n for n in extra if (n["note"], n["type"]) not in seen]
+    keywords = kg["note_keywords"].get(note, [])
+    return {"note": note, "neighbors": neighbors[: max(1, min(payload.limit, 100))], "keywords": keywords}
 
 
 @app.post("/api/graph/rebuild")
@@ -2514,10 +2515,22 @@ async def pdf_proxy(url: str):
     return Response(content=body, media_type="application/pdf", headers={"Content-Disposition": "inline; filename=paper.pdf"})
 
 
+def _pdf_locations(key: str) -> tuple[Path, Path]:
+    """(pdf, annotations) paths for a viewer key. Imported books (`book-{slug}`) keep both inside
+    their own 15-Books/{slug}/ folder; everything else lives in the shared papers store."""
+    m = re.fullmatch(r"book-([a-z0-9-]+)", key or "")
+    if m:
+        d = VAULT / "15-Books" / m.group(1)
+        return d / "book.pdf", d / "annotations.json"
+    store = _pdf_store()
+    k = _pdf_key(key)
+    return store / f"{k}.pdf", store / f"{k}.annotations.json"
+
+
 @app.get("/api/pdf-file")
 async def pdf_file(key: str, url: str = ""):
     """The locally saved copy of a paper if we have one, otherwise the public PDF (proxied)."""
-    local = _pdf_store() / f"{_pdf_key(key)}.pdf"
+    local, _ = _pdf_locations(key)
     if local.exists():
         return Response(content=local.read_bytes(), media_type="application/pdf", headers={"Content-Disposition": "inline; filename=paper.pdf", "X-Pdf-Source": "local"})
     if not url:
@@ -2549,30 +2562,28 @@ class PdfAnnotationsPayload(BaseModel):
 
 @app.get("/api/pdf-annotations")
 async def pdf_annotations_get(key: str):
-    store = _pdf_store()
-    k = _pdf_key(key)
-    f = store / f"{k}.annotations.json"
+    pdf_path, f = _pdf_locations(key)
     anns: list = []
     if f.exists():
         try:
             anns = json.loads(f.read_text()).get("annotations", [])
         except Exception:
             anns = []
-    return {"annotations": anns, "saved_copy": (store / f"{k}.pdf").exists()}
+    return {"annotations": anns, "saved_copy": pdf_path.exists()}
 
 
 @app.put("/api/pdf-annotations")
 async def pdf_annotations_put(payload: PdfAnnotationsPayload):
     """Highlights and notes live next to the saved PDF copy, in the vault. The PDF copy is fetched on first save."""
-    store = _pdf_store()
-    k = _pdf_key(payload.key)
-    (store / f"{k}.annotations.json").write_text(
+    pdf_path, ann_path = _pdf_locations(payload.key)
+    ann_path.parent.mkdir(parents=True, exist_ok=True)
+    ann_path.write_text(
         json.dumps({"key": payload.key, "title": payload.title, "url": payload.url, "annotations": payload.annotations}, indent=1)
     )
-    saved_copy = (store / f"{k}.pdf").exists()
-    if not saved_copy and payload.url and payload.annotations:
+    saved_copy = pdf_path.exists()
+    if not saved_copy and payload.url and payload.annotations and not payload.key.startswith("book-"):
         try:
-            (store / f"{k}.pdf").write_bytes(await _fetch_pdf_bytes(payload.url))
+            pdf_path.write_bytes(await _fetch_pdf_bytes(payload.url))
             saved_copy = True
         except HTTPException:
             pass
@@ -2771,6 +2782,18 @@ async def notes_save_file(payload: NotesFilePayload):
         source = frontmatter.dumps(frontmatter.loads(source))
     path.write_text(source)
     return {"ok": True, "name": str(path.relative_to(notes_root())).replace("\\", "/")}
+
+
+class NoteTagsSuggestPayload(BaseModel):
+    source: str = ""
+    limit: int = 6
+
+
+@app.post("/api/notes/tags/suggest")
+async def notes_suggest_tags(payload: NoteTagsSuggestPayload):
+    """Keyword tags for a note body (local extraction, no LLM call)."""
+    limit = max(1, min(payload.limit, 12))
+    return {"tags": _suggest_note_tags(payload.source, limit)}
 
 
 @app.post("/api/notes/folders")

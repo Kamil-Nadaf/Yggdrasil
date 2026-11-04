@@ -1,0 +1,54 @@
+/* Dashboard cards: drag-to-resize handles + content that adapts to the card's size. */
+.dash-slot { position: relative; container-type: inline-size; }
+.dash-slot.has-height { align-self: start; }
+.dash-slot.is-resizing { user-select: none; }
+.dash-slot > .card, .dash-slot > .phd-stack { min-height: 0; }
+
+/* Fixed-height cards: FitContent scales the content to the box */
+.fit-outer { flex: 1 1 0; min-height: 0; position: relative; overflow: hidden; }
+.fit-inner { display: flex; flex-direction: column; transform-origin: 0 0; }
+.fit-inner > .card, .fit-inner > .phd-stack, .fit-inner > .goals-row, .fit-inner > .goal-card { margin: 0 !important; flex: 1 1 auto; min-height: 0; }
+.fit-inner > .goals-row { flex: 0 0 auto; }
+.fit-inner > .phd-stack { align-self: stretch; }
+
+.dash-grip { position: absolute; z-index: 5; touch-action: none; }
+.dash-grip-e { top: 28px; bottom: 14px; right: -9px; width: 14px; cursor: ew-resize; }
+.dash-grip-s { left: 14px; right: 14px; bottom: -9px; height: 14px; cursor: ns-resize; }
+.dash-grip-se { right: -9px; bottom: -9px; width: 18px; height: 18px; cursor: nwse-resize; }
+.dash-grip::after { content: ""; position: absolute; background: var(--page-accent, var(--accent)); opacity: .35; border-radius: 3px; transition: opacity .15s; }
+.dash-grip-e::after { top: 0; bottom: 0; left: 5px; width: 4px; }
+.dash-grip-s::after { left: 0; right: 0; top: 5px; height: 4px; }
+.dash-grip-se::after { inset: 3px; border-radius: 4px; }
+.dash-grip:hover::after, .dash-slot.is-resizing .dash-grip::after { opacity: .9; }
+.dash-slot.is-resizing { outline: 2px dashed var(--page-accent, var(--accent)); outline-offset: 2px; }
+
+/* Reading goals card scales with its box */
+.rg-card { container-type: inline-size; overflow: hidden; }
+.rg-arc-box { flex: 1 1 150px; min-height: 70px; width: 100%; display: flex; justify-content: center; container-type: size; }
+.rd-arc--fluid { position: relative; width: 100%; height: 100%; }
+.rg-card .rd-arc--fluid svg { width: 100%; height: 100%; max-width: none; }
+.rg-card .rd-arc-center { padding-bottom: 0; }
+.rg-card .rg-time { font-size: clamp(14px, calc(min(100cqw, 190cqh) * 0.12), 44px); }
+.rg-card .rg-of { font-size: clamp(10px, calc(min(100cqw, 190cqh) * 0.052), 15px); }
+.rg-dots { flex-wrap: wrap; gap: clamp(3px, 2cqw, 8px); }
+.rg-dots .bk-dot { width: clamp(18px, 9cqw, 30px); height: clamp(18px, 9cqw, 30px); font-size: clamp(9px, 3.6cqw, 12px); }
+@container (max-width: 190px) { .rg-foot .muted { display: none; } }
+
+.rg-times { width: 100%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; text-align: center; }
+.rg-time-item { display: flex; flex-direction: column; gap: 1px; padding: 4px 2px; border-top: 1px dashed var(--border); }
+.rg-time-item .muted { font-size: clamp(9px, 3.2cqw, 12px); }
+.rg-time-item strong { font-size: clamp(11px, 4.4cqw, 16px); font-family: var(--font-mono); }
+/* keep the arc inside its box whatever the theme does to svg sizing */
+.rg-card .rd-arc--fluid { overflow: hidden; }
+.rg-card .rd-arc--fluid svg { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; }
+
+.rg-daynav { display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 13px; }
+.rg-day { min-width: 120px; text-align: center; font-weight: 600; }
+.rg-nav-btn { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 50%; width: 24px; height: 24px; cursor: pointer; line-height: 1; }
+.rg-nav-btn:disabled { opacity: .3; cursor: default; }
+.rg-timer { display: flex; gap: 8px; align-items: center; justify-content: center; width: 100%; }
+.rg-timer select { max-width: 40%; }
+.rg-timer-btn { flex: 1 1 auto; font-variant-numeric: tabular-nums; }
+.rg-timer-btn.running { background: color-mix(in srgb, var(--crit) 14%, var(--surface)); border-color: var(--crit); color: var(--text); }
+
+.dash-fit-btn { display: inline-flex; align-items: center; justify-content: center; padding: 0 12px; }

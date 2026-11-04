@@ -361,7 +361,7 @@ export const api = {
   graphSuggested: () =>
     req<{ edges: { source: string; target: string; type: string }[]; warning?: string }>("GET", "/api/graph/suggested"),
   graphNeighbors: (note: string, limit = 20) =>
-    req<{ note: string; neighbors: GraphNeighbor[] }>("POST", "/api/graph/neighbors", { note, limit }),
+    req<{ note: string; neighbors: GraphNeighbor[]; keywords?: string[] }>("POST", "/api/graph/neighbors", { note, limit }),
   graphRebuild: () =>
     req<{ ok: boolean; notes?: number; edges_written?: number; message?: string }>("POST", "/api/graph/rebuild"),
 
@@ -689,6 +689,8 @@ export const api = {
       req<{ ok: boolean }>("POST", "/api/notes/rename", { src, dest }),
     uploadAsset: (path: string, content_b64: string) =>
       req<{ ok: boolean; path: string }>("POST", "/api/notes/assets", { path, content_b64 }),
+    suggestTags: (source: string, limit = 6) =>
+      req<{ tags: string[] }>("POST", "/api/notes/tags/suggest", { source, limit }),
   },
 
   vault: {

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { usePdfOpener } from "../components/PdfViewer";
 import { Group, Panel, Separator, useDefaultLayout, type LayoutStorage } from "react-resizable-panels";
+import AddToCollection from "../components/AddToCollection";
 import ZoteroCollectionSelect, { getZoteroCollection } from "../components/ZoteroCollectionSelect";
 import { api, type ArxivPaper } from "../api/client";
 import { SlotIndicator, CericSelectionToolbar, useCericAppend } from "../components/CericToolbar";
@@ -571,6 +572,7 @@ export default function ArxivSearch() {
                           ↗ Source
                         </a>
                       )}
+                      <AddToCollection paper={p} pdfUrl={pdf} onResult={showToast} />
                     </div>
                   </div>
                 );
@@ -619,6 +621,7 @@ export default function ArxivSearch() {
                           ↗ Source
                         </a>
                       )}
+                      <AddToCollection paper={p} pdfUrl={pdf} onResult={showToast} />
                     </div>
                   </div>
                 );
@@ -697,6 +700,7 @@ export default function ArxivSearch() {
                     ↗ {activePaper.source === "openalex" ? "Open Paper / DOI" : "Open Source"}
                   </a>
                 ) : null}
+                <AddToCollection paper={activePaper} pdfUrl={activePdfUrl} onResult={showToast} />
                 <ZoteroCollectionSelect />
                 <button className="btn btn-primary" onClick={() => handleAddToZotero(activePaper)}>
                   + Add to Zotero
@@ -719,6 +723,7 @@ export default function ArxivSearch() {
                   >
                     <span className="arxiv-saved-card-title">{p.title}</span>
                     <SlotIndicator status={cericStatus[p.id]} slots={slots} />
+                    <AddToCollection paper={p} pdfUrl={resolvePdfUrl(p)} onResult={showToast} compact />
                     <button className="btn" onClick={(e) => { e.stopPropagation(); handleAddToZotero(p); }}>
                       Zotero
                     </button>

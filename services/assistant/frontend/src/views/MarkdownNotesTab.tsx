@@ -14,6 +14,8 @@ import { LatexPromptModal } from "../components/LatexMenuBar";
 import { PreviewToolbar, useFullscreenPane, useZoom } from "../components/WorkspacePreviewPane";
 import { markdownToLatexDocument } from "../lib/markdownToLatex";
 import IconFigure from "../components/IconFigure";
+import NoteTagsButton from "../components/NoteTagsButton";
+import { ensureTitle, normalizeTag, parseTags, setTags } from "../lib/noteTags";
 import { apiErrorMessage } from "../lib/apiError";
 import { downloadBase64 } from "../lib/download";
 import { fileToBase64, imageFileName, imageFilesFrom } from "../lib/pastedImages";
@@ -127,6 +129,7 @@ export default function MarkdownNotesTab({ section = "Quick Notes" }: { section?
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const [tagging, setTagging] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem(storageKey) === "collapsed");
   const [renaming, setRenaming] = useState(false);
@@ -236,13 +239,45 @@ export default function MarkdownNotesTab({ section = "Quick Notes" }: { section?
     }
   }
 
-  async function save() {
+  const tags = useMemo(() => parseTags(source), [source]);
+
+  function addTags(raw: string) {
+    const incoming = raw.split(",").map(normalizeTag).filter(Boolean);
+    if (!incoming.length) return;
+    setSource((prev) => setTags(prev, [...new Set([...parseTags(prev), ...incoming])]));
+    setDirty(true);
+  }
+
+  function removeTag(tag: string) {
+    setSource((prev) => setTags(prev, parseTags(prev).filter((t) => t !== tag)));
+    setDirty(true);
+  }
+
+  /** Extract keyword tags, merge them with the user's own, fill an empty title, and save. */
+  async function autoTag() {
+    if (!filename.trim()) return;
+    setTagging(true);
+    try {
+      const { tags: suggested } = await api.notes.suggestTags(source);
+      const merged = [...new Set([...parseTags(source), ...suggested])];
+      const next = ensureTitle(setTags(source, merged));
+      setSource(next);
+      await save(next);
+      flash(suggested.length ? `Tagged: ${suggested.length} keywords` : "No keywords found");
+    } catch (error) {
+      flash(error instanceof Error ? error.message : "Auto-tag failed", false);
+    } finally {
+      setTagging(false);
+    }
+  }
+
+  async function save(nextSource: string = source) {
     const stem = filename.trim();
     if (!stem) return;
     setSaving(true);
     try {
       const abs = `${rootFolder}/${stem}`;
-      await api.notes.save(abs, source);
+      await api.notes.save(abs, nextSource);
       setDirty(false);
       setSelected(`${abs}.md`);
       await refresh(`${abs}.md`);
@@ -586,6 +621,14 @@ export default function MarkdownNotesTab({ section = "Quick Notes" }: { section?
         <>
           <FilesToggleButton collapsed={sidebarCollapsed} onToggle={() => setSidebarOpen(sidebarCollapsed)} />
           <ViewModeToggle modes={viewModes} active={mode} onChange={setMode} />
+          <NoteTagsButton
+            tags={tags}
+            disabled={!filename.trim()}
+            busy={tagging}
+            onAdd={addTags}
+            onRemove={removeTag}
+            onAuto={() => void autoTag()}
+          />
           <button type="button" className="btn" disabled={!selected && !source} onClick={() => void shareNote()}>Share</button>
           <button type="button" className="btn btn-primary" disabled={saving || !filename.trim()} onClick={() => void save()}>
             {saving ? "Saving…" : "Save"}

@@ -60,6 +60,13 @@ function CollectionTab({
   const [deleting, setDeleting] = useState<string | null>(null);
   const [zoteroMissing, setZoteroMissing] = useState<Set<string> | null>(null);
   const [zoteroChecking, setZoteroChecking] = useState(false);
+  const [viewMode, setViewMode] = useState<"list" | "tile">(() => {
+    try { return localStorage.getItem("yggdrasil:collection-view") === "tile" ? "tile" : "list"; } catch { return "list"; }
+  });
+  function chooseView(v: "list" | "tile") {
+    setViewMode(v);
+    try { localStorage.setItem("yggdrasil:collection-view", v); } catch { /* ignore */ }
+  }
 
   useEffect(() => {
     api.papers.list()
@@ -153,16 +160,50 @@ function CollectionTab({
         <button className="btn" onClick={handleZoteroAudit} disabled={zoteroChecking}>
           {zoteroChecking ? "Checking…" : "Check Zotero"}
         </button>
+        <div className="view-toggle" role="group" aria-label="Collection view">
+          <button type="button" className={`btn${viewMode === "list" ? " btn-primary" : ""}`} onClick={() => chooseView("list")}>List</button>
+          <button type="button" className={`btn${viewMode === "tile" ? " btn-primary" : ""}`} onClick={() => chooseView("tile")}>Tiles</button>
+        </div>
         {copyMsg && <span className="ok mono" style={{ fontSize: 12 }}>{copyMsg}</span>}
       </div>
 
-      <div style={{ marginTop: 16 }}>
+      <div style={{ marginTop: 16 }} className={viewMode === "tile" ? "collection-tiles" : undefined}>
         {filtered.length === 0 ? (
           <div className="muted">No papers match this filter.</div>
         ) : (
           filtered.map((p) => {
             const fm = p.frontmatter;
             const filled = slotsFilledCount(fm, slots);
+            if (viewMode === "tile") {
+              return (
+                <div key={p.citekey} className="card collection-tile" onClick={() => onSelect(p.citekey)}>
+                  <div className="collection-tile-title">{fm.title || p.citekey}</div>
+                  <div className="muted mono" style={{ fontSize: 11 }}>
+                    {fm.arxiv ? `arXiv:${fm.arxiv}` : p.citekey}{fm.read ? ` · ${fm.read}` : ""}
+                  </div>
+                  {zoteroMissing && (
+                    zoteroMissing.has(p.citekey)
+                      ? <div className="crit mono" style={{ fontSize: 11 }}>○ not in Zotero</div>
+                      : <div className="ok mono" style={{ fontSize: 11 }}>● in Zotero</div>
+                  )}
+                  <div style={{ flex: 1 }} />
+                  <div style={{ height: 5, background: "var(--border)", borderRadius: 3, overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${(filled / Math.max(slots.length, 1)) * 100}%`, background: filled === slots.length ? "var(--ok)" : "var(--page-accent)" }} />
+                  </div>
+                  <div className="muted mono" style={{ fontSize: 10 }}>{filled}/{slots.length} slots</div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }} onClick={(e) => e.stopPropagation()}>
+                    <button className="btn" onClick={() => handleCopyMd(p.citekey)}>Copy MD</button>
+                    <button
+                      className="btn btn-crit"
+                      disabled={deleting === p.citekey}
+                      onClick={() => handleDelete(p.citekey, fm.title)}
+                    >
+                      {deleting === p.citekey ? "…" : "Delete"}
+                    </button>
+                  </div>
+                </div>
+              );
+            }
             return (
               <div key={p.citekey} className="card" style={{ cursor: "pointer" }} onClick={() => onSelect(p.citekey)}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
@@ -315,7 +356,7 @@ export default function CERICEditor({ citekey, onBack, onSelectPaper, onPaperDel
   }
 
   const tabBar = (
-    <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+    <div className="notes-tabs" style={{ display: "flex", gap: 8, marginBottom: 16 }}>
       <button className={`btn${tab === "editor" ? " btn-primary" : ""}`} onClick={() => setTab("editor")}>Editor</button>
       <button className={`btn${tab === "collection" ? " btn-primary" : ""}`} onClick={() => setTab("collection")}>Collection</button>
       <button className={`btn${tab === "books" ? " btn-primary" : ""}`} onClick={() => setTab("books")}>Books</button>
@@ -405,35 +446,27 @@ export default function CERICEditor({ citekey, onBack, onSelectPaper, onPaperDel
 
       <GateIndicator gate={gate} />
 
-      {/* ── Analysis slots — collapsed by default, click the header to expand ── */}
-      {slots.map((slot) => {
-        const val = (fm[slot.key] as string) || "";
-        const filled = val.trim().length > 0;
-        const open = expandedSlots.has(slot.key);
-        return (
-          <div key={slot.key} className={`slot-block${open ? " open" : ""}`} style={{ marginBottom: 10 }}>
-            <button
-              type="button"
-              className="slot-label slot-collapse-toggle"
-              onClick={() => toggleSlot(slot.key)}
-              aria-expanded={open}
-            >
-              <span className={`slot-collapse-caret${open ? " open" : ""}`}>▸</span>
-              {slot.letter} — {slot.label}
-              {filled && <span className="slot-collapse-dot" title="filled" />}
-            </button>
-            {open && (
+      {/* ── Analysis slots — one card per letter, side by side ── */}
+      <div className="ceric-slot-row" style={{ gridTemplateColumns: `repeat(${Math.max(slots.length, 1)}, minmax(0, 1fr))` }}>
+        {slots.map((slot) => {
+          const val = (fm[slot.key] as string) || "";
+          const filled = val.trim().length > 0;
+          return (
+            <div key={slot.key} className={`slot-block ceric-slot-card${filled ? " filled" : ""}`}>
+              <div className="slot-label">
+                <span className="ceric-slot-letter">{slot.letter}</span> {slot.label}
+                {filled && <span className="slot-collapse-dot" title="filled" />}
+              </div>
               <textarea
                 className={`slot-textarea${filled ? " filled" : ""}`}
                 placeholder={`Write your ${slot.label.toLowerCase()} notes…`}
                 value={val}
                 onChange={(e) => setField(slot.key, e.target.value)}
-                autoFocus
               />
-            )}
-          </div>
-        );
-      })}
+            </div>
+          );
+        })}
+      </div>
 
       {/* ── Combined — auto-merges all slots for a quick copy/export ─── */}
       <div className="slot-block combined-block" style={{ marginBottom: 16 }}>

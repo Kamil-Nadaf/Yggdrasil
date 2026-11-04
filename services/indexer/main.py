@@ -98,7 +98,9 @@ def chunk_text(text: str) -> list[str]:
     return chunks
 
 
-WATCH_FOLDERS = ("10-Papers", "20-Concepts", "15-Books")
+# "60-Meta/Notes" is where the Notes view (Quick Notes / Documentation / Meeting
+# Minutes) saves its files — without it Loki never sees anything written there.
+WATCH_FOLDERS = ("10-Papers", "20-Concepts", "15-Books", "60-Meta/Notes")
 
 
 def citekey_for(path: Path, fm: dict) -> str:
@@ -168,8 +170,11 @@ def index_file(path: Path, table):
 
     # Include key frontmatter fields in searchable text (configured analysis tags + book fields)
     slot_bits = [str(fm.get(k, "")) for k in current_analysis_keys()]
+    tags = fm.get("tags") or []
+    tags_text = " ".join(str(t) for t in tags) if isinstance(tags, (list, tuple)) else str(tags)
     meta_text = " ".join(filter(None, [
         str(fm.get("title", "")),
+        tags_text.replace("-", " "),
         str(fm.get("abstract", "")),
         *slot_bits,
         str(fm.get("explain_cold", "")),

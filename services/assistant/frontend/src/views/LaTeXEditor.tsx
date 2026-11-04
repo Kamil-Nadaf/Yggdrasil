@@ -26,6 +26,7 @@ import { PreviewToolbar, useFullscreenPane, useZoom } from "../components/Worksp
 import IconFigure from "../components/IconFigure";
 import LatexAssetViewer from "../components/LatexAssetViewer";
 import LatexFigurePicker from "../components/LatexFigurePicker";
+import CitePicker, { type CiteCommand } from "./books/CitePicker";
 import { apiErrorMessage } from "../lib/apiError";
 import { downloadBlobUrl, downloadBase64 } from "../lib/download";
 import { imageExt, imageFileName, imageFilesFrom } from "../lib/pastedImages";
@@ -444,6 +445,7 @@ export default function LaTeXEditor() {
   const sourceRef = useRef("");
   const [viewAsset, setViewAsset] = useState<string | null>(null);
   const [figureOpen, setFigureOpen] = useState(false);
+  const [citeOpen, setCiteOpen] = useState(false);
   // Always points at the latest closure so the CodeMirror paste/drop handlers (created once) see current state.
   const imageInsertRef = useRef<(files: File[]) => void>(() => {});
   const editorVisible = viewMode !== "pdf";
@@ -538,6 +540,30 @@ export default function LaTeXEditor() {
         ? { annotations: Transaction.addToHistory.of(false) }
         : {}),
     });
+  }
+
+  /** Insert \\citep{keys} at the cursor; make sure the document loads references.bib. */
+  function insertCitation(keys: string[], command: CiteCommand, bibPath: string) {
+    setCiteOpen(false);
+    const view = viewRef.current;
+    if (!view || keys.length === 0) return;
+    const sel = view.state.selection.main;
+    const text = `${command}{${keys.join(",")}}`;
+    const changes: { from: number; to?: number; insert: string }[] = [{ from: sel.from, to: sel.to, insert: text }];
+    const doc = view.state.doc.toString();
+    let note = `Cited ${keys.length} reference${keys.length === 1 ? "" : "s"} — saved to ${bibPath.replace(/^70-LaTeX\//, "")}`;
+    if (!/\\bibliography\s*\{|\\addbibresource|\\begin\{thebibliography\}|\\printbibliography/.test(doc)) {
+      const end = doc.lastIndexOf("\\end{document}");
+      if (end >= 0) {
+        changes.push({ from: end, insert: "\\bibliographystyle{plain}\n\\bibliography{references}\n\n" });
+        note += "; added \\bibliography{references}";
+      }
+    }
+    view.dispatch({ changes, selection: { anchor: sel.from + text.length } });
+    view.focus();
+    setDirty(true);
+    setSaveMsg({ text: note, ok: true });
+    setTimeout(() => setSaveMsg(null), 4000);
   }
 
   function wrapOrInsert(before: string, after: string, placeholder = "") {
@@ -697,7 +723,7 @@ export default function LaTeXEditor() {
         insertBlock("\\begin{equation}\n  \n\\end{equation}\n");
         break;
       case "cite":
-        wrapOrInsert("\\citep{", "}", "key");
+        setCiteOpen(true);
         break;
       case "label":
         wrapOrInsert("\\label{", "}", "sec:id");
@@ -1512,6 +1538,13 @@ export default function LaTeXEditor() {
           fileInputRef.current?.click();
         }}
       />
+      {citeOpen && (
+        <CitePicker
+          project={filename.includes("/") ? filename.split("/")[0] : ""}
+          onClose={() => setCiteOpen(false)}
+          onInsert={insertCitation}
+        />
+      )}
       <LatexPromptModal
         open={Boolean(prompt)}
         title={

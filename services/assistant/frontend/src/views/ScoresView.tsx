@@ -1,4 +1,7 @@
-import { useEffect, useMemo, useState, Fragment, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, Fragment, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import "./dashboard-resize.css";
+import FitContent from "../components/FitContent";
+import ReadingGoalsCard from "../components/ReadingGoalsCard";
 import { api, type ActiveMainTask, type Goal, type Subtask } from "../api/client";
 import {
   type HabitDef,
@@ -37,11 +40,15 @@ const DASH_LAYOUT_KEY = "yggdrasil:dash-layout-v4";
 interface DashLayout {
   order: SlotId[];
   spans: Record<SlotId, number>;
+  /** Explicit card heights in px (set by dragging the bottom edge in layout-edit mode). Absent = auto. */
+  heights: Partial<Record<SlotId, number>>;
+  /** "Fit to screen": card heights are computed from the window height and follow it when it changes. */
+  fit?: boolean;
   hidden: SlotId[];
 }
 
 function loadLayout(): DashLayout {
-  const base: DashLayout = { order: [...DEFAULT_ORDER], spans: { ...DEFAULT_SPANS }, hidden: [] };
+  const base: DashLayout = { order: [...DEFAULT_ORDER], spans: { ...DEFAULT_SPANS }, heights: {}, hidden: [] };
   try {
     const p = JSON.parse(localStorage.getItem(DASH_LAYOUT_KEY) || "{}") as Partial<DashLayout>;
     if (Array.isArray(p.order)) {
@@ -52,6 +59,11 @@ function loadLayout(): DashLayout {
       const v = Number((p.spans as Record<string, number>)[id]);
       if (v >= 2 && v <= 12) base.spans[id] = Math.round(v);
     }
+    if (p.heights && typeof p.heights === "object") for (const id of DEFAULT_ORDER) {
+      const v = Number((p.heights as Record<string, number>)[id]);
+      if (v >= 80 && v <= 2400) base.heights[id] = Math.round(v);
+    }
+    if (p.fit === true) base.fit = true;
     if (Array.isArray(p.hidden)) base.hidden = p.hidden.filter((id): id is SlotId => DEFAULT_ORDER.includes(id as SlotId));
   } catch {
     /* defaults */
@@ -429,35 +441,14 @@ function SubtaskStepper({ subs, onToggle }: { subs: Subtask[]; onToggle: (st: Su
   );
 }
 
-/** Rotary day timer: a thin arc whose current position always sits at 3 o'clock, faded
- * tilted year/month numerals around it, and one big number — days left. */
-/** Mon–Sun strip: past days ticked, today ringed, plus how many days are left this week. */
-function WeekCard({ today }: { today: string }) {
-  const dow = (parseLocal(today).getDay() + 6) % 7; // 0 = Mon
-  const left = 6 - dow;
-  const letters = ["M", "T", "W", "T", "F", "S", "S"];
-  return (
-    <div className="card dash-widget week-card">
-      <div className="week-progress-title">This week</div>
-      <div className="week-days">
-        {letters.map((l, i) => (
-          <div key={i} className={`week-day${i < dow ? " past" : i === dow ? " today" : ""}`}>
-            <span className="week-day-box">{i < dow ? "✓" : ""}</span>
-            <span className="week-day-l">{l}</span>
-          </div>
-        ))}
-      </div>
-      <div className="week-left"><strong>{left}</strong> {left === 1 ? "day" : "days"} left{left === 0 ? " — last day of the week" : ""}</div>
-    </div>
-  );
-}
-
 function ordinal(n: number): string {
   const v = n % 100;
   if (v >= 11 && v <= 13) return "th";
   return ({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[n % 10] || "th";
 }
 
+/** Rotary day timer: a thin arc whose current position always sits at 3 o'clock, faded
+ * tilted year/month numerals around it, and one big number — days left. */
 function PhdDial({ dayNum, totalDays, daysLeft, compact = false }: { dayNum: number; totalDays: number; daysLeft: number | null; compact?: boolean }) {
   const cx = compact ? -12 : -70, cy = compact ? 72 : 150, R = compact ? 68 : 140;
   const yearly = totalDays > 730;
@@ -649,8 +640,10 @@ function GoalCard({
 
 export default function ScoresView({
   onOpenTask,
+  onOpenBooks,
 }: {
   onOpenTask?: (projectSlug: string, mainTaskId: string) => void;
+  onOpenBooks?: () => void;
 }) {
   const [activeTasks, setActiveTasks] = useState<ActiveMainTask[]>([]);
   const [mode, setMode] = useState<RangeMode>("month");
@@ -662,6 +655,9 @@ export default function ScoresView({
   const [newHabitLabel, setNewHabitLabel] = useState("");
   const [loading, setLoading] = useState(true);
   const [layout, setLayout] = useState<DashLayout>(() => loadLayout());
+  const [drag, setDrag] = useState<{ id: SlotId; span: number; height?: number } | null>(null);
+  const [viewport, setViewport] = useState(() => ({ h: window.innerHeight, top: 150 }));
+  const gridRef = useRef<HTMLDivElement>(null);
   const [subtasksByMain, setSubtasksByMain] = useState<Record<string, Subtask[]>>({});
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [selectedDay, setSelectedDay] = useState<string>(() => isoLocal(new Date()));
@@ -1011,6 +1007,41 @@ export default function ScoresView({
     persistDefs(next);
   }
 
+  // Fit-to-screen: split the visible window height between the grid rows (rows follow the 12-column flow).
+  const fitHeights = useMemo(() => {
+    const out: Partial<Record<SlotId, number>> = {};
+    const ids = layout.order.filter((id) => !layout.hidden.includes(id));
+    const rows: SlotId[][] = [];
+    let used = 12;
+    for (const id of ids) {
+      if (used + layout.spans[id] > 12) { rows.push([]); used = 0; }
+      rows[rows.length - 1].push(id);
+      used += layout.spans[id];
+    }
+    if (rows.length === 0) return out;
+    const gap = 20;
+    const avail = viewport.h - viewport.top - 28;
+    const rowH = Math.max(190, Math.floor((avail - gap * (rows.length - 1)) / rows.length));
+    rows.forEach((r) => r.forEach((id) => { out[id] = rowH; }));
+    return out;
+  }, [layout.order, layout.hidden, layout.spans, viewport]);
+  const heightOf = (id: SlotId): number | undefined => (layout.fit ? fitHeights[id] : layout.heights[id]);
+
+  useEffect(() => {
+    const measure = () => {
+      const top = gridRef.current ? gridRef.current.getBoundingClientRect().top + window.scrollY : 150;
+      setViewport((v) => (v.h === window.innerHeight && Math.abs(v.top - top) < 1 ? v : { h: window.innerHeight, top }));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [customizing]);
+
+  function toggleFit() {
+    if (layout.fit) commitLayout({ ...layout, fit: false, heights: {} });
+    else commitLayout({ order: layout.order, spans: { ...DEFAULT_SPANS }, heights: {}, hidden: layout.hidden, fit: true });
+  }
+
   function commitLayout(next: DashLayout) {
     setLayout(next);
     try {
@@ -1031,7 +1062,46 @@ export default function ScoresView({
     commitLayout({ ...layout, order });
   }
   function resizeSlot(id: SlotId, delta: number) {
-    commitLayout({ ...layout, spans: { ...layout.spans, [id]: Math.max(2, Math.min(12, layout.spans[id] + delta)) } });
+    commitLayout({ ...layout, fit: false, heights: layout.fit ? { ...fitHeights } : layout.heights, spans: { ...layout.spans, [id]: Math.max(2, Math.min(12, layout.spans[id] + delta)) } });
+  }
+  /** Drag a card's right edge (width, snaps to the 12-column grid), bottom edge (height) or corner (both). */
+  function startResize(e: ReactPointerEvent<HTMLElement>, id: SlotId, axis: "w" | "h" | "wh") {
+    e.preventDefault();
+    e.stopPropagation();
+    const slot = e.currentTarget.closest(".dash-slot") as HTMLElement | null;
+    const grid = slot?.parentElement as HTMLElement | null;
+    if (!slot || !grid) return;
+    const gap = parseFloat(getComputedStyle(grid).columnGap) || 20;
+    const colW = (grid.getBoundingClientRect().width - gap * 11) / 12 + gap;
+    const rect = slot.getBoundingClientRect();
+    const x0 = e.clientX, y0 = e.clientY;
+    const span0 = layout.spans[id];
+    let last = { span: span0, height: heightOf(id) };
+    const target = e.currentTarget;
+    target.setPointerCapture?.(e.pointerId);
+    const move = (ev: PointerEvent) => {
+      const span = axis === "h" ? span0 : Math.max(2, Math.min(12, Math.round((rect.width + (ev.clientX - x0) + gap) / colW)));
+      const height = axis === "w" ? last.height : Math.max(100, Math.min(2400, Math.round(rect.height + (ev.clientY - y0))));
+      last = { span, height };
+      setDrag({ id, span, height });
+    };
+    const up = () => {
+      target.removeEventListener("pointermove", move);
+      target.removeEventListener("pointerup", up);
+      target.removeEventListener("pointercancel", up);
+      setDrag(null);
+      const heights = { ...(layout.fit ? fitHeights : layout.heights) };
+      if (last.height) heights[id] = last.height;
+      commitLayout({ ...layout, fit: false, spans: { ...layout.spans, [id]: last.span }, heights });
+    };
+    target.addEventListener("pointermove", move);
+    target.addEventListener("pointerup", up);
+    target.addEventListener("pointercancel", up);
+  }
+  function autoHeight(id: SlotId) {
+    const heights = { ...(layout.fit ? fitHeights : layout.heights) };
+    delete heights[id];
+    commitLayout({ ...layout, fit: false, heights });
   }
   function hideSlot(id: SlotId) {
     commitLayout({ ...layout, hidden: [...layout.hidden, id] });
@@ -1107,7 +1177,7 @@ export default function ScoresView({
             </div>
           )}
         </div>
-        <WeekCard today={today} />
+        <ReadingGoalsCard onOpenBooks={onOpenBooks} onHabitsChanged={() => void reload()} />
       </div>
     ),
     progress: (
@@ -1341,24 +1411,41 @@ export default function ScoresView({
           >
             {customizing ? "Done" : "Edit"}
           </button>
+          <button
+            type="button"
+            className={`btn dash-fit-btn${layout.fit ? " btn-primary" : ""}`}
+            onClick={toggleFit}
+            aria-pressed={!!layout.fit}
+            title={layout.fit ? "Fit to screen is on — click to go back to automatic card heights" : "Reset layout and fit all cards to the screen size"}
+            aria-label="Reset and fit dashboard to screen"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9" /><path d="M20 3.5v5.2h-5.2" fill="currentColor" /></svg>
+          </button>
         </div>
       </div>
 
       {customizing && (
         <div className="dash-edit-banner">
-          <span>Editing layout — move, resize or hide each widget.</span>
+          <span>Editing layout — drag a card’s right edge, bottom edge or corner to resize it; use ◀ ▶ to move, × to hide.</span>
           {layout.hidden.map((id) => (
             <button key={id} type="button" className="btn" onClick={() => showSlot(id)}>+ {SLOT_LABEL[id]}</button>
           ))}
-          <button type="button" className="btn" onClick={() => commitLayout({ order: [...DEFAULT_ORDER], spans: { ...DEFAULT_SPANS }, hidden: [] })}>
+          <button type="button" className="btn" onClick={() => commitLayout({ order: [...DEFAULT_ORDER], spans: { ...DEFAULT_SPANS }, heights: {}, fit: false, hidden: [] })}>
             Reset layout
           </button>
         </div>
       )}
 
-      <div className="dash-grid">
+      <div className="dash-grid" ref={gridRef}>
         {visible.map((id, idx) => (
-          <div key={id} className={`dash-slot dash-slot-${id}`} style={{ ["--span" as string]: layout.spans[id] } as CSSProperties}>
+          <div
+            key={id}
+            className={`dash-slot dash-slot-${id}${(drag?.id === id ? drag.height : heightOf(id)) ? " has-height" : ""}${drag?.id === id ? " is-resizing" : ""}`}
+            style={{
+              ["--span" as string]: drag?.id === id ? drag.span : layout.spans[id],
+              height: (drag?.id === id ? drag.height : heightOf(id)) || undefined,
+            } as CSSProperties}
+          >
             {customizing && (
               <div className="dash-slot-bar">
                 <span className="dash-slot-name">{SLOT_LABEL[id]}</span>
@@ -1366,10 +1453,18 @@ export default function ScoresView({
                 <button type="button" title="Move later" disabled={idx === visible.length - 1} onClick={() => moveSlot(id, 1)}>▶</button>
                 <button type="button" title="Narrower" onClick={() => resizeSlot(id, -1)}>−</button>
                 <button type="button" title="Wider" onClick={() => resizeSlot(id, 1)}>+</button>
+                <button type="button" title="Auto height" disabled={!heightOf(id)} onClick={() => autoHeight(id)}>↕</button>
                 <button type="button" title="Hide" onClick={() => hideSlot(id)}>×</button>
               </div>
             )}
-            {widgets[id]}
+            {(drag?.id === id ? drag.height : heightOf(id)) ? <FitContent>{widgets[id]}</FitContent> : widgets[id]}
+            {customizing && (
+              <>
+                <div className="dash-grip dash-grip-e" title="Drag to change width" onPointerDown={(e) => startResize(e, id, "w")} />
+                <div className="dash-grip dash-grip-s" title="Drag to change height" onPointerDown={(e) => startResize(e, id, "h")} />
+                <div className="dash-grip dash-grip-se" title="Drag to resize" onPointerDown={(e) => startResize(e, id, "wh")} />
+              </>
+            )}
           </div>
         ))}
       </div>

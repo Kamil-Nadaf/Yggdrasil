@@ -116,6 +116,14 @@ The top bar has one tab per area:
    analysis button becomes available. It is deliberately locked until you have
    thought it through yourself.
 
+### Collection (papers + books, Zotero-style)
+
+The **Collection** tab is your reference library. Add papers from arXiv (**+ Collection** on any result), books (PDF/EPUB), DOIs, URLs, BibTeX/RIS files or your Zotero library, then organise them into collections and sub-collections, tags, saved searches (`tag:nlp year:2017 is:fav`) and related items. Each item has an info pane with citation export (APA, MLA, Chicago, IEEE, BibTeX, RIS), duplicate merging, and automatic metadata from PDFs and web pages. In the LaTeX editor, **Cite** picks references and keeps `references.bib` up to date.
+
+### Highlighting and annotating PDFs
+
+Select text in any paper or book and a palette appears beside it: pick a colour to **highlight** or **underline**, add a note, or (papers) send it to a **CERIC** slot, which highlights in that slot's soft colour so CERIC highlights stand out from plain ones. Yellow is the default; add custom colours and change opacity or slot colours with the gear. The tool strip above the PDF also has **note, text, area and draw** tools, which work with touch and Apple Pencil.
+
 ### Markdown notes
 
 - **Notes → Quick Notes / Documentation / Meeting Minutes** — create files and

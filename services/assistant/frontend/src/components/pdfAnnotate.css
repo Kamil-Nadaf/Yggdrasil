@@ -1,0 +1,51 @@
+/* selection palette + annotation tools for the PDF reader */
+.pdfv-selpop { position: fixed; z-index: 3000; display: flex; flex-direction: column; gap: 6px; padding: 7px 9px; max-width: min(94vw, 420px); background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(10px); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 8px 26px rgba(0,0,0,0.4); -webkit-user-select: none; user-select: none; }
+.pdfv-selpop-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pdfv-selpop-sep { width: 1px; align-self: stretch; background: var(--border); margin: 0 2px; }
+.pdfv-selpop .pdfv-swatch { width: 24px; height: 24px; border: 1.5px solid rgba(255,255,255,0.35); flex: 0 0 auto; }
+.pdfv-selpop .pdfv-swatch.small { width: 18px; height: 18px; }
+.pdfv-selpop .pdfv-swatch.default { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--text); }
+.pdfv-selpop .pdfv-swatch.add { display: inline-flex; align-items: center; justify-content: center; position: relative; background: transparent; color: var(--text); font-size: 16px; line-height: 1; cursor: pointer; overflow: hidden; }
+.pdfv-selpop .pdfv-swatch.add input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+.pdfv-mk { width: 28px; height: 28px; border-radius: 7px; border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; padding: 0; }
+.pdfv-mk.on { background: color-mix(in srgb, var(--accent) 22%, transparent); border-color: var(--accent); }
+.mk-hl { display: inline-block; border: 1.5px solid currentColor; border-radius: 3px; padding: 0 3px; font: 700 13px/1.15 serif; }
+.mk-ul { display: inline-block; text-decoration: underline; text-underline-offset: 2px; font: 700 14px/1.1 serif; }
+.pdfv-pill { border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: 999px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
+.pdfv-pill.on { border-color: var(--accent); }
+.pdfv-selpop-lbl { font-size: 10px; letter-spacing: .08em; color: var(--muted, #999); }
+.pdfv-selpop-row.ceric { padding-top: 6px; border-top: 1px dashed var(--border); }
+.pdfv-slot { display: inline-flex; align-items: center; gap: 5px; border: 1px solid rgba(255,255,255,0.18); border-radius: 8px; padding: 3px 8px; color: #111; cursor: pointer; font-size: 11.5px; }
+.pdfv-slot b { font-size: 12px; }
+.pdfv-slot span { opacity: .8; }
+.pdfv-slot:disabled { opacity: .5; }
+.pdfv-selpop-cfg { display: flex; flex-direction: column; gap: 7px; padding-top: 6px; border-top: 1px dashed var(--border); font-size: 12px; }
+.cfg-row { display: flex; align-items: center; gap: 7px; }
+.cfg-row.wrap { flex-wrap: wrap; }
+.cfg-row > span { width: 52px; color: var(--muted, #999); flex: 0 0 auto; }
+.cfg-row input[type=range] { flex: 1; }
+.cfg-row em { font-style: normal; color: var(--muted, #999); font-size: 11px; }
+.cfg-slot { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; }
+.cfg-slot input { width: 22px; height: 22px; padding: 0; border: none; background: none; }
+
+/* annotation tool strip */
+.pdfv-tools { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; padding: 4px 8px; background: var(--surface); border-bottom: 1px solid var(--border); overflow-x: auto; }
+.pdfv-tool-btn { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 30px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text); cursor: pointer; padding: 0; flex: 0 0 auto; }
+.pdfv-tool-btn:hover { background: color-mix(in srgb, var(--text) 8%, transparent); }
+.pdfv-tool-btn.on { background: color-mix(in srgb, var(--accent) 22%, transparent); border-color: var(--accent); }
+.pdfv-tool-btn svg { width: 18px; height: 18px; }
+.pdfv-tools input[type=color] { width: 26px; height: 26px; padding: 0; border: 1px solid var(--border); border-radius: 50%; background: none; cursor: pointer; flex: 0 0 auto; }
+.pdfv-tools .hint { font-size: 11px; color: var(--muted, #999); margin-left: 6px; white-space: nowrap; }
+
+/* page overlays */
+.pdfv-hl i.ul { background: none !important; border-bottom: 2px solid; box-sizing: border-box; border-radius: 0; }
+.pdfv-hl i.area { border: 1.5px solid; box-sizing: border-box; }
+.pdfv-hl i.pin { width: 20px; height: 20px; margin: -2px 0 0 -2px; border-radius: 4px 4px 4px 0; border: 1.5px solid rgba(0,0,0,.35); box-shadow: 0 1px 3px rgba(0,0,0,.35); }
+.pdfv-hl .tx { position: absolute; font: 500 13px/1.3 system-ui, sans-serif; white-space: pre-wrap; max-width: 60%; padding: 1px 3px; }
+.pdfv-hl svg.ink { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.pdfv-hl svg.ink polyline { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.pdfv-tool { position: absolute; inset: 0; z-index: 4; touch-action: none; }
+.pdfv-tool.note, .pdfv-tool.text { cursor: crosshair; }
+.pdfv-tool.area, .pdfv-tool.ink { cursor: crosshair; }
+.pdfv-draft { position: absolute; z-index: 5; min-width: 140px; min-height: 44px; font: 500 13px/1.3 system-ui, sans-serif; padding: 3px 5px; border: 1.5px dashed var(--accent); background: rgba(255,255,255,.9); color: #111; border-radius: 4px; resize: both; }
+@media (pointer: coarse) { .pdfv-selpop .pdfv-swatch { width: 30px; height: 30px; } .pdfv-tool-btn { width: 42px; height: 38px; } }

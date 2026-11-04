@@ -4,6 +4,7 @@ import YggdrasilLogo from "./YggdrasilLogo";
 const ITEMS: { id: View; label: string }[] = [
   { id: "scores", label: "Dashboard" },
   { id: "papers", label: "Papers" },
+  { id: "books", label: "Collection" },
   { id: "editor", label: "Notes" },
   { id: "tasks", label: "Tasks" },
   { id: "calendar", label: "Calendar" },

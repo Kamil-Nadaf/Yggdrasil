@@ -6,6 +6,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -17,7 +18,13 @@ from pathlib import Path
 
 from setup import load_or_ensure, support_dir
 
+# Bumped when a release needs new bundled libraries/launcher code. A hot-update payload built for a higher
+# level is refused (the user is sent to the full installer instead).
+RUNTIME_LEVEL = 1
+os.environ["YGG_RUNTIME_LEVEL"] = str(RUNTIME_LEVEL)
+
 CHILDREN: list[subprocess.Popen] = []
+_RES_CACHE: Path | None = None
 _BOOT_STATE: dict = {"window": None, "chosen_path": None, "event": None}
 
 
@@ -65,11 +72,64 @@ def bundle_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
-def resources_dir() -> Path:
+def _base_resources_dir() -> Path:
     env = os.environ.get("YGG_RESOURCES")
     if env:
         return Path(env)
     return Path(__file__).resolve().parent.parent / "services" / "assistant"
+
+
+def _vtuple(text: str) -> tuple[int, int, int]:
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", text or "")
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else (0, 0, 0)
+
+
+def _updates_root() -> Path:
+    return support_dir() / "updates"
+
+
+def resources_dir() -> Path:
+    """The app code folder: an installed in-app update when it is newer than the bundled code, else the bundle."""
+    global _RES_CACHE
+    if _RES_CACHE is not None:
+        return _RES_CACHE
+    base = _base_resources_dir()
+    chosen = base
+    root = _updates_root()
+    cur = root / "current"
+    pending = root / "boot.pending"
+    try:
+        if pending.exists():
+            # the previous start with an update never finished booting → drop it and use the bundled code
+            shutil.rmtree(root / "failed", ignore_errors=True)
+            if cur.exists():
+                cur.rename(root / "failed")
+            pending.unlink(missing_ok=True)
+            blog("update: previous boot with an update failed — using the bundled version")
+        elif cur.exists():
+            info = json.loads((cur / "update.json").read_text(encoding="utf-8"))
+            bundled = re.search(r'APP_VERSION\s*=\s*"([^"]+)"', (base / "data_manifest.py").read_text(encoding="utf-8"))
+            ok = (
+                (cur / "main.py").exists()
+                and (cur / "frontend" / "dist" / "index.html").exists()
+                and int(info.get("requires_runtime", 1)) <= RUNTIME_LEVEL
+                and _vtuple(str(info.get("version"))) > _vtuple(bundled.group(1) if bundled else "")
+            )
+            if ok:
+                pending.write_text(str(info.get("version")), encoding="utf-8")
+                chosen = cur
+                blog(f"update: using installed update {info.get('version')}")
+    except Exception as exc:  # never let a broken update stop the app from starting
+        blog(f"update: ignoring installed update ({exc})")
+    _RES_CACHE = chosen
+    return chosen
+
+
+def mark_boot_ok() -> None:
+    try:
+        (_updates_root() / "boot.pending").unlink(missing_ok=True)
+    except Exception:
+        pass
 
 
 def free_port() -> int:
@@ -387,6 +447,7 @@ def boot(window) -> None:
     )
     thread.start()
     wait_for_server(f"{url}/api/info")
+    mark_boot_ok()
     progress("Opening Yggdrasil…")
     progress_done()
     window.load_url(url)

@@ -128,6 +128,18 @@ interface Props {
   onDataPathSaved?: () => void;
 }
 
+interface UpdateInfo {
+  current: string;
+  latest: string;
+  available: boolean;
+  notes: string;
+  url?: string;
+  desktop: boolean;
+  can_hot_update: boolean;
+  payload: { name: string; size?: number } | null;
+  installer: { name: string; url?: string } | null;
+}
+
 declare global {
   interface Window {
     pywebview?: {
@@ -177,6 +189,43 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
   }));
 
   const [info, setInfo] = useState<SystemInfo>({});
+  const [upd, setUpd] = useState<UpdateInfo | null>(null);
+  const [updBusy, setUpdBusy] = useState<"" | "check" | "install" | "restart">("");
+  const [updMsg, setUpdMsg] = useState("");
+  const [updReady, setUpdReady] = useState(false);
+
+  async function updCall<T>(path: string, method: "GET" | "POST"): Promise<T> {
+    const r = await fetch(`/api/update/${path}`, { method });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error((j && j.detail) || `Request failed (${r.status})`);
+    return j as T;
+  }
+  async function checkForUpdate() {
+    setUpdBusy("check"); setUpdMsg(""); setUpdReady(false);
+    try {
+      const r = await updCall<UpdateInfo>("check", "GET");
+      setUpd(r);
+      setUpdMsg(r.available ? "" : "You’re up to date.");
+    } catch (e) {
+      setUpd(null);
+      setUpdMsg(e instanceof Error ? e.message : "Couldn’t check for updates.");
+    } finally { setUpdBusy(""); }
+  }
+  async function installUpdate() {
+    setUpdBusy("install"); setUpdMsg("");
+    try {
+      await updCall<{ ok: boolean }>("install", "POST");
+      setUpdReady(true);
+      setUpdMsg("Update installed. Restart Yggdrasil to start using it.");
+    } catch (e) {
+      setUpdMsg(e instanceof Error ? e.message : "Update failed.");
+    } finally { setUpdBusy(""); }
+  }
+  async function restartApp() {
+    setUpdBusy("restart");
+    try { await updCall<{ ok: boolean }>("restart", "POST"); setUpdMsg("Restarting…"); }
+    catch (e) { setUpdMsg(e instanceof Error ? e.message : "Couldn’t restart."); setUpdBusy(""); }
+  }
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [probe, setProbe] = useState<{
@@ -1494,6 +1543,39 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
               </div>
             )}
             {taskStatusesMsg && <div className="settings-info" style={{ marginTop: 8 }}>{taskStatusesMsg}</div>}
+          </div>
+        </CollapsibleSection>
+
+        <CollapsibleSection id="updates" title="Updates" open={!!openSections.updates} onToggle={() => toggle("updates")}>
+          <div className="settings-item">
+            <div className="settings-info">Yggdrasil {info.appVersion ? `v${info.appVersion}` : ""}</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+              <button type="button" className="btn" onClick={checkForUpdate} disabled={updBusy !== ""}>
+                {updBusy === "check" ? "Checking…" : "Check for updates"}
+              </button>
+              {upd?.available && upd.can_hot_update && !updReady && (
+                <button type="button" className="btn btn-primary" onClick={installUpdate} disabled={updBusy !== ""}>
+                  {updBusy === "install" ? "Installing…" : `Install v${upd.latest}`}
+                </button>
+              )}
+              {updReady && (
+                <button type="button" className="btn btn-primary" onClick={restartApp} disabled={updBusy === "restart"}>Restart now</button>
+              )}
+            </div>
+            {upd?.available && (
+              <div className="settings-info" style={{ marginTop: 10 }}>
+                <strong>v{upd.latest} is available</strong>
+                {upd.notes && <pre style={{ whiteSpace: "pre-wrap", font: "inherit", fontSize: 12, maxHeight: 160, overflow: "auto", margin: "6px 0 0" }}>{upd.notes}</pre>}
+                {!upd.can_hot_update && (
+                  <div style={{ marginTop: 6 }}>
+                    {info.desktop
+                      ? <>This release needs a full install. {upd.installer?.url ? <a href={upd.installer.url} target="_blank" rel="noopener noreferrer">Download {upd.installer.name}</a> : upd.url && <a href={upd.url} target="_blank" rel="noopener noreferrer">Open the release page</a>}</>
+                      : <>Docker/self-hosted: pull the latest code and run <code>docker compose up -d --build</code>. {upd.url && <a href={upd.url} target="_blank" rel="noopener noreferrer">Release notes</a>}</>}
+                  </div>
+                )}
+              </div>
+            )}
+            {updMsg && <div className="settings-info" style={{ marginTop: 8 }}>{updMsg}</div>}
           </div>
         </CollapsibleSection>
 

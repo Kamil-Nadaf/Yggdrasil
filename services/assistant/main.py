@@ -224,6 +224,9 @@ if DESKTOP_MODE:
 app = FastAPI(title="CERIC Reading System")
 # Books reading library (/api/reading): lazy lookups, because _write_habits is defined further down.
 app.include_router(_make_reading_router(lambda: VAULT, lambda day, habits: _write_habits(day, habits)))
+# In-app update check/install (/api/update)
+from updater import make_update_router as _make_update_router  # noqa: E402
+app.include_router(_make_update_router(APP_VERSION, DESKTOP_MODE))
 
 app.add_middleware(
     CORSMiddleware,

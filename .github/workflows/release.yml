@@ -108,9 +108,38 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  payload:
+    name: Build in-app update package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: services/assistant/frontend/package-lock.json
+      - name: Build frontend
+        working-directory: services/assistant/frontend
+        run: |
+          npm ci
+          npm run build
+      - name: Package update
+        run: bash scripts/make-update-payload.sh
+      - name: Tag must match APP_VERSION
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          V=$(sed -n 's/^APP_VERSION = "\([^"]*\)".*/\1/p' services/assistant/data_manifest.py)
+          test "v$V" = "${GITHUB_REF_NAME}" || { echo "Tag ${GITHUB_REF_NAME} != APP_VERSION v$V"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yggdrasil-update-payload
+          path: release/Yggdrasil-app-v*.zip
+          if-no-files-found: error
+          retention-days: 14
+
   release:
     name: Publish GitHub Release
-    needs: build
+    needs: [build, payload]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -137,6 +166,9 @@ jobs:
             | macOS, Intel | `Yggdrasil-*-mac-intel.pkg` or `.dmg` |
             | Windows | `Yggdrasil-*-windows.zip` → unzip → double-click `Yggdrasil.bat` |
             | Linux | `Yggdrasil-*-linux.tar.gz` → extract → `./install.sh` |
+
+            Already installed? Open **Settings → Updates → Check for updates** — most releases
+            install in-app (`Yggdrasil-app-*.zip`), no download needed.
 
             The apps are not code-signed. On macOS, if Gatekeeper blocks the DMG
             build, right-click → Open, or run `xattr -cr /Applications/Yggdrasil.app`.

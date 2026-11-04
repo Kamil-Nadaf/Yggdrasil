@@ -1237,3 +1237,17 @@ Flexible CERIC replacement. Defaults: Claim, Evidence, Reasoning, Implications, 
   (highlight|underline|note|text|area|ink), `slot` (CERIC slot key) and `pts` (ink). Backend stores annotations verbatim.
   Tool strip uses pointer events (touch/Pencil ready for a future iOS app). `useCericAppend.addSelectionToSlot` returns a boolean.
   The EPUB reader still uses the old four-colour highlights.
+
+### In-app updates (v0.4.1)
+
+Settings → **Updates** (`SettingsDrawer.tsx`) calls `/api/update/check|install|restart` (`services/assistant/updater.py`, tests in
+`test_updater.py`). Check reads the latest GitHub Release of `YGG_UPDATE_REPO` (default `Kamil-Nadaf/Yggdrasil`; private repos need
+`YGG_UPDATE_TOKEN`). Releases carry `Yggdrasil-app-vX.Y.Z.zip` (built by `scripts/make-update-payload.sh` in the `payload` job of
+`.github/workflows/release.yml`: app `*.py` minus tests, `frontend/dist`, `update.json {version, requires_runtime}`). Install unpacks it to
+`<support dir>/updates/current` (previous one kept in `previous`). `desktop/launch.py` `resources_dir()` uses it only when its version is newer
+than the bundled `APP_VERSION` and `requires_runtime <= RUNTIME_LEVEL`; `updates/boot.pending` is written at boot and cleared once the
+server answers, so a failed boot reverts to the bundled code (`updates/failed`). **Release rule:** bump `APP_VERSION` everywhere; if a
+release adds Python dependencies or changes `desktop/launch.py`/`setup.py`, bump `RUNTIME_LEVEL` in launch.py and `requires_runtime` in the
+payload script so older installs are sent to the full installer. New backend modules go in the Dockerfile and `build-*` copy lists
+*and* are picked up automatically by the payload (all top-level non-test `.py`). The CI tag must equal `APP_VERSION`.
+

@@ -169,6 +169,10 @@ bash packaging/build-linux.sh          # Linux  → release/*.tar.gz
 powershell -File packaging/build-windows.ps1   # Windows → release/*.zip
 ```
 
+### Updating
+
+Open **Settings → Updates → Check for updates**. If a newer release exists you'll see its notes; **Install** downloads a small package (the app's code, a few MB), then **Restart now** applies it — no new download of the full app. Releases that add new bundled libraries say so and link to the full installer instead. Docker users update with `git pull && docker compose up -d --build`. If an update ever fails to start, the app falls back to the bundled version automatically.
+
 ### Publishing a release (maintainers)
 
 Installers are built for all three OSes by GitHub Actions

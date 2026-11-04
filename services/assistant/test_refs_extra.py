@@ -117,6 +117,6 @@ def test_webpage_lookup(monkeypatch):
         def read(self, n=-1): return html
         def __enter__(self): return self
         def __exit__(self, *a): pass
-    monkeypatch.setattr(reading.urllib.request, "urlopen", lambda req, timeout=0: R())
+    monkeypatch.setattr(reading, "_open", lambda req, timeout=20: R())
     it = reading.lookup_metadata("https://example.org/paper")
     assert it["title"] == "Gamma-ray bursts" and it["authors"] == ["Lee, Ann", "Bo Wu"] and it["year"] == 2020 and it["venue"] == "ApJ" and it["pages"] == "10-20" and it["item_type"] == "article"

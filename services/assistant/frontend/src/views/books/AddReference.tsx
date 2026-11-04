@@ -15,6 +15,7 @@ export default function AddReference({ collectionId, onClose, onAdded }: Props) 
   const [ident, setIdent] = useState("");
   const [type, setType] = useState<ItemType>("article");
   const [f, setF] = useState(blank);
+  const [pdfUrl, setPdfUrl] = useState("");
   const [bulk, setBulk] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -35,6 +36,7 @@ export default function AddReference({ collectionId, onClose, onAdded }: Props) 
     try {
       const { item } = await reading.lookup(ident);
       setType(item.item_type || "article");
+      setPdfUrl(item.pdf_url || "");
       setF({
         title: item.title || "", authors: (item.authors || []).join("; "), year: item.year ? String(item.year) : "", venue: item.venue || "", doi: item.doi || "",
         arxiv: item.arxiv || "", url: item.url || "", publisher: item.publisher || "", volume: item.volume || "", issue: item.issue || "", pages: item.pages || "", abstract: item.abstract || "",
@@ -56,7 +58,7 @@ export default function AddReference({ collectionId, onClose, onAdded }: Props) 
         title: f.title, kind: type === "book" ? "book" : "paper", item_type: type,
         authors: f.authors.split(/;|\n|\s+and\s+/).map((a) => a.trim()).filter(Boolean),
         year: Number.isFinite(yr) ? yr : null, venue: f.venue, doi: f.doi.trim(), arxiv: f.arxiv.trim(), url: f.url.trim(), publisher: f.publisher,
-        volume: f.volume, issue: f.issue, pages: f.pages, abstract: f.abstract, collection: collectionId, fetch_pdf: true,
+        volume: f.volume, issue: f.issue, pages: f.pages, abstract: f.abstract, collection: collectionId, fetch_pdf: true, pdf_url: pdfUrl || undefined,
       });
       onAdded(r.book, r.duplicate ? "That reference is already in your Collection." : r.pdf_saved ? "Added — PDF saved too." : "Added.");
     } catch (e) {

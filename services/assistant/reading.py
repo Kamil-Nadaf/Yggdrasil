@@ -23,7 +23,9 @@ import posixpath
 import re
 import secrets
 import threading
+import time
 from html.parser import HTMLParser
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -271,6 +273,36 @@ class SessionPayload(BaseModel):
 ITEM_FIELDS = ("item_type", "venue", "doi", "arxiv", "url", "publisher", "volume", "issue", "pages", "abstract", "notes", "citekey")
 MAX_PDF_BYTES = 120 * 1024 * 1024
 _UA = {"User-Agent": "Yggdrasil/1.0 (reference manager; mailto:none)"}
+# Publisher sites often refuse non-browser agents (403), so page and PDF fetches look like a browser.
+_BROWSER_UA = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
+def _ssl_context() -> Optional[ssl.SSLContext]:
+    """TLS context with a CA bundle. The packaged desktop Python has no system certificates, so plain
+    urllib fails with CERTIFICATE_VERIFY_FAILED; certifi (installed with httpx) fixes that everywhere."""
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return None
+
+
+def _open(req: urllib.request.Request, timeout: float = 20):
+    """urlopen with our CA bundle; one polite retry when the server says "slow down" (429/503)."""
+    try:
+        return urllib.request.urlopen(req, timeout=timeout, context=_ssl_context())
+    except urllib.error.HTTPError as e:
+        if e.code not in (429, 503):
+            raise
+        try:
+            wait = min(5.0, float(e.headers.get("Retry-After", "") or 2))
+        except ValueError:
+            wait = 2.0
+        time.sleep(wait)
+        return urllib.request.urlopen(req, timeout=timeout, context=_ssl_context())
 
 
 def download_pdf(url: str, dest: Path) -> bool:
@@ -278,8 +310,8 @@ def download_pdf(url: str, dest: Path) -> bool:
     try:
         if not re.match(r"^https?://", url or ""):
             return False
-        req = urllib.request.Request(url, headers=_UA)
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        req = urllib.request.Request(url, headers={**_BROWSER_UA, "Accept": "application/pdf,*/*"})
+        with _open(req, timeout=60) as resp:
             head = resp.read(5)
             if head != b"%PDF-":
                 return False
@@ -305,53 +337,91 @@ def download_pdf(url: str, dest: Path) -> bool:
 
 def _http_json(url: str) -> Any:
     req = urllib.request.Request(url, headers=_UA)
-    with urllib.request.urlopen(req, timeout=20) as resp:
+    with _open(req, timeout=20) as resp:
         return json.loads(resp.read().decode("utf-8", "replace"))
 
 
-def lookup_metadata(q: str) -> dict[str, Any]:
-    """Resolve a DOI or arXiv id/URL into item fields (Crossref / arXiv API)."""
+_ARXIV_ID = r"(\d{4}\.\d{4,5}|[a-z\-]+(?:\.[A-Z]{2})?/\d{7})"
+
+
+def parse_identifier(q: str) -> tuple[str, str]:
+    """Classify what the user pasted: ("arxiv", id) | ("doi", doi) | ("url", url) | ("", "")."""
     q = (q or "").strip()
-    arx = re.search(r"(?:arxiv\.org/(?:abs|pdf)/|arxiv:)?(\d{4}\.\d{4,5}|[a-z\-]+(?:\.[A-Z]{2})?/\d{7})(?:v\d+)?(?:\.pdf)?$", q, re.IGNORECASE)
-    doi = re.search(r"(10\.\d{4,9}/\S+)", q)
-    if doi and not (arx and "arxiv" in q.lower()):
-        data = _http_json("https://api.crossref.org/works/" + urllib.parse.quote(doi.group(1).rstrip(".,;)"), safe="/"))["message"]
-        issued = (data.get("issued") or {}).get("date-parts") or [[None]]
-        ctype = data.get("type", "")
-        return {
-            "title": re.sub(r"<[^>]+>", "", (data.get("title") or [""])[0]),
-            "authors": [f"{a.get('given', '')} {a.get('family', '')}".strip() for a in data.get("author", [])],
-            "year": issued[0][0],
-            "venue": (data.get("container-title") or [""])[0],
-            "doi": data.get("DOI", doi.group(1)),
-            "url": data.get("URL"),
-            "publisher": data.get("publisher"),
-            "volume": data.get("volume"),
-            "issue": data.get("issue"),
-            "pages": data.get("page"),
-            "abstract": re.sub(r"<[^>]+>", "", data.get("abstract") or "").strip(),
-            "item_type": {"book": "book", "proceedings-article": "conference", "book-chapter": "chapter", "dissertation": "thesis", "report": "report"}.get(ctype, "article"),
-        }
-    if arx:
-        aid = arx.group(1)
-        req = urllib.request.Request(f"https://export.arxiv.org/api/query?id_list={aid}", headers=_UA)
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            root = ET.fromstring(resp.read())
-        ns = {"a": "http://www.w3.org/2005/Atom"}
-        e = root.find("a:entry", ns)
-        if e is None or not (e.findtext("a:title", "", ns) or "").strip():
-            raise ValueError("Not found on arXiv")
-        return {
-            "title": re.sub(r"\s+", " ", e.findtext("a:title", "", ns)).strip(),
-            "authors": [(a.findtext("a:name", "", ns) or "").strip() for a in e.findall("a:author", ns)],
-            "year": int((e.findtext("a:published", "", ns) or "0000")[:4]) or None,
-            "arxiv": aid,
-            "abstract": re.sub(r"\s+", " ", e.findtext("a:summary", "", ns)).strip(),
-            "item_type": "preprint",
-            "url": f"https://arxiv.org/abs/{aid}",
-        }
+    m = (
+        re.search(r"arxiv\.org/(?:abs|pdf|html)/" + _ARXIV_ID + r"(?:v\d+)?", q, re.IGNORECASE)
+        or re.search(r"\barxiv:\s*" + _ARXIV_ID, q, re.IGNORECASE)
+        or re.fullmatch(_ARXIV_ID + r"(?:v\d+)?(?:\.pdf)?", q)
+    )
+    if m:
+        return "arxiv", m.group(1)
+    m = re.search(r"10\.48550/arxiv\.(\d{4}\.\d{4,5})", q, re.IGNORECASE)
+    if m:
+        return "arxiv", m.group(1)
+    m = re.search(r"\b(10\.\d{4,9}/[^\s?#]+)", q)
+    if m:
+        doi = m.group(1).rstrip(".,;)")
+        doi = re.sub(r"\.(?:pdf|full|html?)$", "", doi, flags=re.IGNORECASE)
+        doi = re.sub(r"/(?:abstract|full|fulltext|pdf|epdf|meta|references|summary)$", "", doi, flags=re.IGNORECASE)
+        return "doi", doi
     if re.match(r"^https?://", q):
-        return lookup_webpage(q)
+        return "url", q
+    return "", ""
+
+
+def _lookup_doi(doi: str) -> dict[str, Any]:
+    data = _http_json("https://api.crossref.org/works/" + urllib.parse.quote(doi, safe="/"))["message"]
+    issued = (data.get("issued") or {}).get("date-parts") or [[None]]
+    ctype = data.get("type", "")
+    return {
+        "title": re.sub(r"<[^>]+>", "", (data.get("title") or [""])[0]),
+        "authors": [f"{a.get('given', '')} {a.get('family', '')}".strip() for a in data.get("author", [])],
+        "year": issued[0][0],
+        "venue": (data.get("container-title") or [""])[0],
+        "doi": data.get("DOI", doi),
+        "url": data.get("URL"),
+        "publisher": data.get("publisher"),
+        "volume": data.get("volume"),
+        "issue": data.get("issue"),
+        "pages": data.get("page"),
+        "abstract": re.sub(r"<[^>]+>", "", data.get("abstract") or "").strip(),
+        "item_type": {"book": "book", "proceedings-article": "conference", "book-chapter": "chapter", "dissertation": "thesis", "report": "report"}.get(ctype, "article"),
+    }
+
+
+def _lookup_arxiv(aid: str) -> dict[str, Any]:
+    req = urllib.request.Request(f"https://export.arxiv.org/api/query?id_list={aid}", headers=_UA)
+    with _open(req, timeout=20) as resp:
+        root = ET.fromstring(resp.read())
+    ns = {"a": "http://www.w3.org/2005/Atom"}
+    e = root.find("a:entry", ns)
+    if e is None or not (e.findtext("a:title", "", ns) or "").strip():
+        raise ValueError("Not found on arXiv")
+    return {
+        "title": re.sub(r"\s+", " ", e.findtext("a:title", "", ns)).strip(),
+        "authors": [(a.findtext("a:name", "", ns) or "").strip() for a in e.findall("a:author", ns)],
+        "year": int((e.findtext("a:published", "", ns) or "0000")[:4]) or None,
+        "arxiv": aid,
+        "abstract": re.sub(r"\s+", " ", e.findtext("a:summary", "", ns)).strip(),
+        "item_type": "preprint",
+        "url": f"https://arxiv.org/abs/{aid}",
+    }
+
+
+def lookup_metadata(q: str) -> dict[str, Any]:
+    """Resolve a DOI, arXiv id/URL or publisher/ADS web page into item fields."""
+    kind, val = parse_identifier(q)
+    if kind == "arxiv":
+        return _lookup_arxiv(val)
+    if kind == "doi":
+        try:
+            return _lookup_doi(val)
+        except urllib.error.HTTPError as e:
+            # A publisher URL that merely contains something DOI-shaped: read the page itself instead.
+            if e.code == 404 and re.match(r"^https?://", (q or "").strip()):
+                return lookup_webpage(q.strip())
+            raise
+    if kind == "url":
+        return lookup_webpage(val)
     raise ValueError("Enter a DOI (10.xxxx/…), an arXiv id, or a web address")
 
 
@@ -384,8 +454,8 @@ class _MetaTags(HTMLParser):
 
 def lookup_webpage(url: str) -> dict[str, Any]:
     """Item fields from a publisher / ADS / blog page via citation_* (Highwire) and Open Graph tags."""
-    req = urllib.request.Request(url, headers={**_UA, "Accept": "text/html,application/xhtml+xml"})
-    with urllib.request.urlopen(req, timeout=20) as resp:
+    req = urllib.request.Request(url, headers={**_BROWSER_UA, "Accept": "text/html,application/xhtml+xml"})
+    with _open(req, timeout=20) as resp:
         html = resp.read(2_000_000).decode(resp.headers.get_content_charset() or "utf-8", "replace")
     p = _MetaTags()
     p.feed(html)
@@ -432,7 +502,7 @@ def lookup_webpage(url: str) -> dict[str, Any]:
         "pages": f"{sp}-{ep}" if sp and ep else sp,
         "abstract": first("citation_abstract", "dc.description", "og:description", "description"),
         "item_type": "article" if has_cit else "webpage",
-        "pdf_url": first("citation_pdf_url"),
+        "pdf_url": urllib.parse.urljoin(url, first("citation_pdf_url")) if first("citation_pdf_url") else "",
     }
 
 
@@ -1099,6 +1169,14 @@ def make_router(get_vault: Callable[[], Path], write_habits: Callable[[str, dict
             return {"item": await run_in_threadpool(lookup_metadata, q)}
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403, 405, 429):
+                raise HTTPException(status_code=502, detail=f"That site refused the request (HTTP {e.code}). Paste its DOI or arXiv id instead.")
+            if e.code == 404:
+                raise HTTPException(status_code=404, detail="Nothing found for that identifier")
+            raise HTTPException(status_code=502, detail=f"Lookup failed (HTTP {e.code})")
+        except ssl.SSLError:
+            raise HTTPException(status_code=502, detail="Secure connection failed (certificate problem)")
         except Exception:
             raise HTTPException(status_code=502, detail="Lookup failed — check your connection and the identifier")
 

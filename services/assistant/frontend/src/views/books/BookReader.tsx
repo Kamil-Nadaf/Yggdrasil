@@ -3,6 +3,7 @@ import { reading, type ReadingBook, type ReadingNote } from "../../api/reading";
 import type { ArxivPaper } from "../../api/client";
 import PdfViewer, { type PdfDoc } from "../../components/PdfViewer";
 import ReadingTimerChip from "../../components/ReadingTimerChip";
+import { useCollapsed } from "../../lib/useCollapsed";
 import EpubReader from "./EpubReader";
 import BookNotesPanel from "./BookNotesPanel";
 
@@ -28,6 +29,7 @@ export default function BookReader({ book, onBack, onChanged }: Props) {
   const isPaper = Boolean(arxiv) || book.kind === "paper";
   const [notes, setNotes] = useState<ReadingNote[]>([]);
   const [notesOpen, setNotesOpen] = useState(false);
+  const [barSlim, toggleBar] = useCollapsed("reader-bar");
 
   useEffect(() => {
     if (isPaper) return;
@@ -100,7 +102,7 @@ export default function BookReader({ book, onBack, onChanged }: Props) {
 
   return (
     <div className="bk-reader">
-      <div className="bk-reader-bar">
+      <div className={`bk-reader-bar${barSlim ? " slim" : ""}`}>
         <button type="button" className="btn" onClick={onBack}>← Library</button>
         <div className="bk-reader-title" title={book.title}>
           <strong>{book.title}</strong>
@@ -111,10 +113,12 @@ export default function BookReader({ book, onBack, onChanged }: Props) {
             Book notes ({notes.length})
           </button>
         )}
-        <ReadingTimerChip slug={book.slug} pageRef={pageRef} />
-        <button type="button" className={`btn${status === "finished" ? " btn-primary" : ""}`} onClick={() => void toggleFinished()}>
+        {/* The timer keeps logging reading time even while the bar is collapsed. */}
+        <span className="bk-reader-extra"><ReadingTimerChip slug={book.slug} pageRef={pageRef} /></span>
+        <button type="button" className={`btn bk-reader-extra${status === "finished" ? " btn-primary" : ""}`} onClick={() => void toggleFinished()}>
           {status === "finished" ? "Finished ✓" : "Mark finished"}
         </button>
+        <button type="button" className="btn" onClick={toggleBar} aria-expanded={!barSlim} title={barSlim ? "Show timer and status" : "Hide timer and status"}>{barSlim ? "▾" : "▴"}</button>
       </div>
       <div className="bk-reader-body">
         {!book.has_file ? (

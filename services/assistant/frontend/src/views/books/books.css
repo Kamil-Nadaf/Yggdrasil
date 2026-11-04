@@ -318,3 +318,9 @@
 .bk-notes-list textarea { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; font-size: 12px; background: transparent; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 7px; }
 .pdfv-pill.notes { background: var(--accent); color: #fff; border-color: var(--accent); }
 @media (max-width: 760px) { .bk-notes { position: absolute; right: 0; top: 0; bottom: 0; width: 88%; max-width: none; background: var(--bg, #fff); z-index: 20; padding: 10px; } }
+
+/* Collapsible reader chrome */
+.bk-reader-bar.slim { padding: 2px 0 4px; gap: 8px; flex-wrap: nowrap; }
+.bk-reader-bar.slim .bk-reader-extra { display: none; }
+.pdf-viewer-bar.compact { padding: 4px 8px; }
+.pdfv-collapse { font-size: 12px; padding: 3px 8px; white-space: nowrap; }

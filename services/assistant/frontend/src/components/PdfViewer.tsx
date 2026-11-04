@@ -5,6 +5,7 @@ import "pdfjs-dist/web/pdf_viewer.css";
 import { api, type ArxivPaper, type PdfAnnotation } from "../api/client";
 import { useCericAppend } from "./CericToolbar";
 import { PreviewToolbar, useFullscreenPane, useZoom } from "./WorkspacePreviewPane";
+import { useCollapsed } from "../lib/useCollapsed";
 import PdfSelectionPopup, { type Markup } from "./PdfSelectionPopup";
 import { colorCss, slotColor, useHighlightPrefs } from "../lib/highlightPrefs";
 import "./pdfAnnotate.css";
@@ -242,6 +243,7 @@ export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () =
   const [anchor, setAnchor] = useState<{ x: number; y: number; below: boolean } | null>(null);
   const prefs = useHighlightPrefs();
   const [markup, setMarkup] = useState<Markup>("highlight");
+  const [slim, toggleSlim] = useCollapsed(doc.embedded ? "pdf-controls-embedded" : "pdf-controls");
   const [tool, setTool] = useState<Tool>("select");
   const [toolColor, setToolColor] = useState("#e5484d");
   const [notesOpen, setNotesOpen] = useState(false);
@@ -564,8 +566,13 @@ export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () =
   return (
     <div className={`pdf-viewer${fullscreen ? " is-full" : ""}`}>
       {!doc.embedded && <ActivityTimer category="papers" />}
-      <div className="pdf-viewer-bar">
-        <span className="pdf-viewer-title" title={doc.title}>{doc.title}</span>
+      <div className={`pdf-viewer-bar${doc.embedded ? " compact" : ""}`}>
+        <button type="button" className="btn pdfv-collapse" onClick={() => { toggleSlim(); setTool("select"); }} aria-expanded={!slim} title={slim ? "Show zoom and annotation tools" : "Hide zoom and annotation tools"}>
+          {slim ? "▾ Tools" : "▴ Tools"}
+        </button>
+        {doc.embedded
+          ? <span className="pdf-viewer-title muted">{pages ? `${pages} page${pages === 1 ? "" : "s"}` : ""}</span>
+          : <span className="pdf-viewer-title" title={doc.title}>{doc.title}</span>}
         {!doc.embedded && !savedCopy && <button type="button" className="btn" onClick={keepCopy} title="Keep a copy of this PDF in your vault">Keep copy</button>}
         {!doc.embedded && savedCopy && <span className="muted mono" style={{ fontSize: 11 }} title="Stored in your vault: 10-Papers/pdfs">saved locally ✓</span>}
         <button type="button" className={`btn${notesOpen ? " btn-primary" : ""}`} onClick={() => setNotesOpen((v) => !v)} title="Highlights and notes">
@@ -574,7 +581,7 @@ export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () =
         {!doc.embedded && <a className="btn" href={doc.url} target="_blank" rel="noopener noreferrer" title="Open in your browser">↗</a>}
         {!doc.embedded && <button type="button" className="btn" onClick={onClose} title="Close reader">×</button>}
       </div>
-      <PreviewToolbar
+      {!slim && <PreviewToolbar
         statusLabel={err ? "error" : pages ? `${pages} page${pages === 1 ? "" : "s"}` : "loading…"}
         zoom={zoom}
         atMinZoom={atMinZoom}
@@ -585,9 +592,9 @@ export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () =
         onEnterFullscreen={() => setFullscreen(true)}
         onExitFullscreen={() => setFullscreen(false)}
         onDownload={download}
-      />
+      />}
       <div className="pdfv-stage">
-        <div className="pdfv-tools" role="toolbar" aria-label="Annotation tools">
+        {!slim && <div className="pdfv-tools" role="toolbar" aria-label="Annotation tools">
           <button type="button" className={`pdfv-tool-btn${tool === "select" && markup === "highlight" ? " on" : ""}`} title="Highlight selected text (select text, then pick a colour)" onClick={() => { setTool("select"); setMarkup("highlight"); }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="3.5" y="3.5" width="17" height="17" rx="2.5" /><text x="12" y="17" textAnchor="middle" fontSize="13" fontWeight="700" fill="currentColor" stroke="none" fontFamily="serif">A</text></svg>
           </button>
@@ -608,7 +615,7 @@ export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () =
           </button>
           <input type="color" value={toolColor} onChange={(e) => setToolColor(e.target.value)} title="Colour for note / text / area / draw" aria-label="Tool colour" />
           {tool !== "select" && <span className="hint">Esc to stop</span>}
-        </div>
+        </div>}
         {sel && anchor && (
           <PdfSelectionPopup
             x={anchor.x} y={anchor.y} below={anchor.below} prefs={prefs} markup={markup} onMarkup={setMarkup} text={sel.text}

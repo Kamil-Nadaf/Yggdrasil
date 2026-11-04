@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import ePub from "epubjs";
 import type { Book, NavItem, Rendition } from "epubjs";
+import { useCollapsed } from "../../lib/useCollapsed";
 import { reading, type EpubHighlight, type ReadingBook } from "../../api/reading";
 
 const COLORS: { name: string; css: string }[] = [
@@ -44,6 +45,7 @@ export default function EpubReader({ book: meta, pageRef, onToNotes }: {
   const [panel, setPanel] = useState<"none" | "toc" | "notes">("none");
   const [highlights, setHighlights] = useState<EpubHighlight[]>([]);
   const [loadedHl, setLoadedHl] = useState(false);
+  const [slim, toggleSlim] = useCollapsed("epub-controls");
   const [sel, setSel] = useState<Sel | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [chapter, setChapter] = useState("");
@@ -302,13 +304,16 @@ export default function EpubReader({ book: meta, pageRef, onToNotes }: {
   return (
     <div className="pdf-viewer epub-viewer">
       <div className="pdf-viewer-bar">
+        <button type="button" className="btn pdfv-collapse" onClick={toggleSlim} aria-expanded={!slim} title={slim ? "Show text and layout controls" : "Hide text and layout controls"}>
+          {slim ? "▾ Tools" : "▴ Tools"}
+        </button>
         <span className="pdf-viewer-title" title={chapterLabel || meta.title}>{chapterLabel || meta.title}</span>
         <button type="button" className={`btn${panel === "toc" ? " btn-primary" : ""}`} onClick={() => setPanel(panel === "toc" ? "none" : "toc")} aria-pressed={panel === "toc"}>Contents</button>
         <button type="button" className={`btn${panel === "notes" ? " btn-primary" : ""}`} onClick={() => setPanel(panel === "notes" ? "none" : "notes")} aria-pressed={panel === "notes"}>
           Notes{highlights.length ? ` (${highlights.length})` : ""}
         </button>
       </div>
-      <div className="epub-toolbar">
+      {!slim && <div className="epub-toolbar">
         <button type="button" className="btn" onClick={() => setFontSize((s) => Math.max(80, s - 10))} disabled={fontSize <= 80} aria-label="Smaller text">A−</button>
         <span className="mono muted" style={{ fontSize: 11 }}>{fontSize}%</span>
         <button type="button" className="btn" onClick={() => setFontSize((s) => Math.min(200, s + 10))} disabled={fontSize >= 200} aria-label="Larger text">A+</button>
@@ -319,7 +324,7 @@ export default function EpubReader({ book: meta, pageRef, onToNotes }: {
         <button type="button" className="btn" onClick={() => void rendRef.current?.prev()} aria-label="Previous page">‹</button>
         <span className="mono muted" style={{ fontSize: 11, minWidth: 38, textAlign: "center" }}>{status === "ready" ? `${percent}%` : "…"}</span>
         <button type="button" className="btn" onClick={() => void rendRef.current?.next()} aria-label="Next page">›</button>
-      </div>
+      </div>}
 
       <div className="pdfv-stage">
         {sel && (

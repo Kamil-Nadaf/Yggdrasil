@@ -17,6 +17,7 @@ const P: Record<string, ReactNode> = {
   tag: <><path d="M3.5 12.5V4.5h8l9 9-8 8z" /><circle cx="8" cy="9" r="1.2" /></>,
   dupes: <><rect x="8" y="8" width="12" height="12" rx="1.5" /><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8" /></>,
   inbox: <><path d="M4 13l2.5-7h11L20 13v6H4z" /><path d="M4 13h5l1 2h4l1-2h5" /></>,
+  sync: <><path d="M19.5 9A7.5 7.5 0 0 0 6 6.5L4 9" /><path d="M4 4.5V9h4.5" /><path d="M4.5 15A7.5 7.5 0 0 0 18 17.5L20 15" /><path d="M20 19.5V15h-4.5" /></>,
   rows: <><rect x="4" y="5" width="16" height="5" rx="1" /><rect x="4" y="14" width="16" height="5" rx="1" /></>,
 };
 

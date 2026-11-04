@@ -42,6 +42,26 @@ export interface ReadingBook {
 }
 
 export interface SavedSearch { id: string; name: string; q: string }
+export interface AnnotationSyncStatus {
+  running: boolean;
+  phase: string;
+  done: number;
+  total: number;
+  items: number;
+  pulled: number;
+  pushed: number;
+  updated_local: number;
+  updated_remote: number;
+  deleted_local: number;
+  deleted_remote: number;
+  needs_open: number;
+  unsupported: number;
+  unlinked: number;
+  no_pdf: number;
+  failed: number;
+  error: string;
+}
+
 export interface ZoteroImportStatus {
   running: boolean;
   phase: "idle" | "starting" | "collections" | "notes" | "items" | "pdfs" | "done" | "error";
@@ -255,6 +275,8 @@ export const reading = {
     call<{ ok: boolean; keys: Record<string, string>; added: number; path: string }>("POST", "/api/reading/latex-bib", { project, slugs }),
   importZotero: (withPdfs: boolean) => call<ZoteroImportStatus & { ok: boolean; started: boolean }>("POST", "/api/reading/import-zotero", { with_pdfs: withPdfs }),
   zoteroStatus: () => call<ZoteroImportStatus>("GET", "/api/reading/import-zotero/status"),
+  syncAnnotations: () => call<AnnotationSyncStatus & { ok: boolean; started: boolean }>("POST", "/api/reading/sync-annotations"),
+  annotationSyncStatus: () => call<AnnotationSyncStatus>("GET", "/api/reading/sync-annotations/status"),
 
   fileUrl: (slug: string) => `/api/reading/${slug}/file`,
   coverUrl: (slug: string) => `/api/reading/${slug}/cover`,

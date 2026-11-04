@@ -24,7 +24,7 @@ cp "${ROOT}/desktop/setup.py" "$DIST/desktop/"
 cp "${ROOT}/desktop/splash.html" "$DIST/desktop/"
 cp "${ROOT}/desktop/yggdrasil-logo.png" "$DIST/desktop/"
 cp "${ROOT}/desktop/icons/yggdrasil-512.png" "$DIST/desktop/"
-for f in main.py gate.py zotero.py data_manifest.py graph_links.py graph_keywords.py note_tags.py reading.py citations.py updater.py analysis_tags.py arxiv_topics.py task_statuses.py goals.py notifications.py mcp_server.py; do
+for f in main.py gate.py zotero.py data_manifest.py graph_links.py graph_keywords.py note_tags.py reading.py citations.py zotero_annotations.py updater.py analysis_tags.py arxiv_topics.py task_statuses.py goals.py notifications.py mcp_server.py; do
   cp "${ROOT}/services/assistant/$f" "$DIST/app/"
 done
 mkdir -p "$DIST/app/frontend"

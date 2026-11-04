@@ -26,7 +26,7 @@ COPY requirements.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt
 
 # Copy API source
-COPY gate.py zotero.py main.py data_manifest.py graph_links.py graph_keywords.py note_tags.py reading.py citations.py updater.py analysis_tags.py arxiv_topics.py task_statuses.py goals.py notifications.py ./
+COPY gate.py zotero.py main.py data_manifest.py graph_links.py graph_keywords.py note_tags.py reading.py citations.py zotero_annotations.py updater.py analysis_tags.py arxiv_topics.py task_statuses.py goals.py notifications.py ./
 
 # Copy built frontend from stage 1
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist

@@ -1356,6 +1356,153 @@ def make_router(get_vault: Callable[[], Path], write_habits: Callable[[str, dict
     async def import_zotero_status():
         return dict(zstate)
 
+    # ── Two-way annotation sync with Zotero ──
+
+    asy: dict[str, Any] = {}
+
+    def asy_reset() -> None:
+        asy.clear()
+        asy.update(running=False, phase="idle", done=0, total=0, pulled=0, pushed=0, updated_local=0, updated_remote=0, deleted_local=0,
+                     deleted_remote=0, needs_open=0, unsupported=0, unlinked=0, no_pdf=0, failed=0, error="", items=0)
+
+    asy_reset()
+
+    def annotation_sync_job() -> None:
+        import httpx
+        import zotero as zlib
+        import zotero_annotations as za
+
+        uid, key = zlib.zotero_credentials()
+        client = httpx.Client(timeout=60, follow_redirects=True, headers={"Zotero-API-Key": key, "Zotero-API-Version": "3"})
+        base = f"https://api.zotero.org/users/{uid}"
+
+        def pages(path: str, params: Optional[dict[str, Any]] = None):
+            start = 0
+            while True:
+                r = client.get(f"{base}/{path}", params={"limit": 100, "start": start, **(params or {})})
+                r.raise_for_status()
+                rows = r.json()
+                yield from rows
+                if len(rows) < 100:
+                    return
+                start += 100
+
+        def fail(msg: str, n: int = 1) -> None:
+            asy["failed"] += n
+            asy["error"] = asy["error"] or msg
+
+        try:
+            asy_reset()
+            asy.update(running=True, phase="reading Zotero")
+            atts: dict[str, tuple[str, bool]] = {}
+            for row in pages("items", {"itemType": "attachment"}):
+                d = row["data"]
+                parent = d.get("parentItem")
+                if parent and d.get("contentType") == "application/pdf":
+                    imported = d.get("linkMode") in ("imported_file", "imported_url")
+                    if parent not in atts or (imported and not atts[parent][1]):
+                        atts[parent] = (row["key"], imported)
+            by_att: dict[str, list[dict[str, Any]]] = {}
+            for row in pages("items", {"itemType": "annotation"}):
+                d = row["data"]
+                if d.get("parentItem"):
+                    by_att.setdefault(d["parentItem"], []).append({"key": row["key"], "version": row["version"], "data": d})
+
+            asy["phase"] = "syncing"
+            summaries = all_summaries()
+            asy["total"] = len(summaries)
+            for item in summaries:
+                asy["done"] += 1
+                slug = item["slug"]
+                d = book_dir(slug)
+                ann_path, st_path = d / "annotations.json", d / "zotero-sync.json"
+                doc = _json_read(ann_path, {})
+                doc = doc if isinstance(doc, dict) else {}
+                local = [a for a in (doc.get("annotations") or []) if isinstance(a, dict) and a.get("id")]
+                zk = item.get("zotero_key")
+                if not zk:
+                    asy["unlinked"] += 1 if local else 0
+                    continue
+                att = atts.get(zk, ("", False))[0]
+                if not att:
+                    asy["no_pdf"] += 1 if local else 0
+                    continue
+                remote_rows = by_att.get(att, [])
+                if not local and not remote_rows:
+                    continue
+                state = _json_read(st_path, {})
+                state_items = state.get("items", {}) if isinstance(state, dict) and state.get("att") == att else {}
+                plan = za.merge(local, remote_rows, state_items, att)
+                anns, st = plan["annotations"], plan["state"]
+                by_id = {a["id"]: a for a in anns}
+                st_stats = plan["stats"]
+
+                creates = plan["create"]
+                for i in range(0, len(creates), 50):
+                    chunk = creates[i:i + 50]
+                    r = client.post(f"{base}/items", json=[p for _, p in chunk], headers={"Zotero-Write-Token": secrets.token_hex(16)})
+                    if r.status_code != 200:
+                        fail(f"Zotero rejected new annotations ({r.status_code}): {r.text[:160]}", len(chunk))
+                        continue
+                    j = r.json()
+                    for idx, ok in (j.get("successful") or {}).items():
+                        a = by_id.get(chunk[int(idx)][0])
+                        new_key = ok.get("key") or (ok.get("data") or {}).get("key")
+                        if a is not None and new_key:
+                            a["zkey"] = new_key
+                            st[new_key] = {"version": ok.get("version") or (ok.get("data") or {}).get("version") or 0, "hash": za.local_hash(a)}
+                            asy["pushed"] += 1
+                    for idx, bad in (j.get("failed") or {}).items():
+                        fail(f"Zotero rejected an annotation: {str(bad.get('message', ''))[:160]}")
+                for zkey_, ver, payload in plan["update"]:
+                    a = next((x for x in anns if x.get("zkey") == zkey_), None)
+                    body = {k: v for k, v in payload.items() if k not in ("itemType", "parentItem", "tags")}
+                    r = client.patch(f"{base}/items/{zkey_}", json=body, headers={"If-Unmodified-Since-Version": str(ver)})
+                    if r.status_code in (200, 204) and a is not None:
+                        st[zkey_] = {"version": int(r.headers.get("Last-Modified-Version", ver + 1)), "hash": za.local_hash(a)}
+                        asy["updated_remote"] += 1
+                    else:
+                        fail(f"Couldn’t update an annotation in Zotero ({r.status_code}) — try again after the next sync.")
+                        if zkey_ in state_items:
+                            st[zkey_] = state_items[zkey_]
+                for zkey_, ver in plan["delete"]:
+                    r = client.delete(f"{base}/items/{zkey_}", headers={"If-Unmodified-Since-Version": str(ver)})
+                    if r.status_code not in (200, 204):
+                        fail(f"Couldn’t delete an annotation in Zotero ({r.status_code}).")
+                        st_stats["deleted_remote"] -= 1
+                        if zkey_ in state_items:
+                            st[zkey_] = state_items[zkey_]
+
+                for k in ("pulled", "updated_local", "deleted_local", "deleted_remote", "needs_open", "unsupported"):
+                    asy[k] += st_stats[k]
+                if anns != local:
+                    ann_path.parent.mkdir(parents=True, exist_ok=True)
+                    _json_write(ann_path, {**({"key": f"book-{slug}", "title": item.get("title", ""), "url": ""} if not doc else doc), "annotations": anns})
+                _json_write(st_path, {"att": att, "items": st, "synced": datetime.now(timezone.utc).isoformat()})
+                asy["items"] += 1
+            asy["phase"] = "done"
+        except Exception as e:  # noqa: BLE001
+            asy["error"] = f"Annotation sync failed: {str(e)[:200]}"
+            asy["phase"] = "error"
+        finally:
+            asy["running"] = False
+
+    @router.post("/sync-annotations")
+    async def sync_annotations():
+        import zotero as zlib
+
+        if not all(zlib.zotero_credentials()):
+            raise HTTPException(status_code=400, detail="Zotero isn’t connected yet — open Settings → Zotero and add your user ID and API key.")
+        if asy["running"]:
+            return {"ok": True, "started": False, **asy}
+        asy.update(running=True, phase="starting", error="")
+        threading.Thread(target=annotation_sync_job, daemon=True).start()
+        return {"ok": True, "started": True, **asy}
+
+    @router.get("/sync-annotations/status")
+    async def sync_annotations_status():
+        return dict(asy)
+
     # ── One book ──
 
     @router.get("/{slug}/file")

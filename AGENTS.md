@@ -1251,3 +1251,16 @@ release adds Python dependencies or changes `desktop/launch.py`/`setup.py`, bump
 payload script so older installs are sent to the full installer. New backend modules go in the Dockerfile and `build-*` copy lists
 *and* are picked up automatically by the payload (all top-level non-test `.py`). The CI tag must equal `APP_VERSION`.
 
+### Zotero annotation sync (v0.4.2)
+
+Collection sidebar → **Sync with Zotero** (`views/books/AnnotationSync.tsx`) → `POST /api/reading/sync-annotations` (+ `/status`, a background job in
+`reading.py`, like the library import). Pure logic is in `zotero_annotations.py` (tests `test_zotero_annotations.py`, `test_annotation_sync.py`):
+`merge()` plans creates/updates/deletes per item from three inputs: our `annotations.json`, Zotero's annotation children of the item's PDF attachment,
+and `15-Books/{slug}/zotero-sync.json` (per annotation: Zotero `version` + hash of our side at last sync → tells "changed here / changed there /
+deleted here / deleted there"). Conflicts: Zotero wins. Only items with a `zotero_key` and a PDF attachment in Zotero sync. Annotations carry `zkey`
+and `zpos` (Zotero position in PDF user-space units + page height `ph`). `PdfViewer.computeGeom` fills in `zpos` from our fractions (or the fractions from a
+pulled `zpos`) once the PDF is open and page geometry is known — so annotations made before this feature wait until their PDF is opened once.
+Types: highlight/underline/note/text/ink sync; `area` stays local (Zotero image annotations need an image upload). Writes use `POST /items` with
+`itemType: annotation`; Zotero documents annotation writes poorly, so rejected creates are surfaced in the dialog (pull still works). Colours map to Zotero's
+8-colour palette on push; our custom colours are kept locally.
+

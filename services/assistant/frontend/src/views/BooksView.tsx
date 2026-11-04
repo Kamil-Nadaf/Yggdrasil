@@ -7,6 +7,7 @@ import ImportDialog from "./books/ImportDialog";
 import BookReader from "./books/BookReader";
 import AddReference from "./books/AddReference";
 import ZoteroImport from "./books/ZoteroImport";
+import AnnotationSync from "./books/AnnotationSync";
 import ItemInfo from "./books/ItemInfo";
 import Shelf, { sortBooks, ViewToggle, type Sort, type ViewMode } from "./books/Shelf";
 import "./books/books.css";
@@ -77,6 +78,7 @@ export default function BooksView() {
   const [adding, setAdding] = useState(false);
   const [addRef, setAddRef] = useState(false);
   const [zoteroOpen, setZoteroOpen] = useState(false);
+  const [syncOpen, setSyncOpen] = useState(false);
   const [searches, setSearches] = useState<SavedSearch[]>([]);
   const [newParent, setNewParent] = useState<string | undefined>(undefined);
   const [infoSlug, setInfoSlug] = useState<string | null>(null);
@@ -259,6 +261,7 @@ export default function BooksView() {
         <div className="ab-sidehead">Tools</div>
         <nav className="ab-nav">
           <button type="button" className="ab-item" onClick={() => setZoteroOpen(true)}><BookIcon name="plus" size={16} /><span>Import from Zotero…</span></button>
+          <button type="button" className="ab-item" onClick={() => setSyncOpen(true)} title="Two-way sync of highlights, underlines, notes and drawings with Zotero"><BookIcon name="sync" size={16} /><span>Sync with Zotero</span></button>
         </nav>
       </aside>
 
@@ -372,6 +375,7 @@ export default function BooksView() {
         />
       )}
 
+      {syncOpen && <AnnotationSync onClose={() => setSyncOpen(false)} />}
       {zoteroOpen && <ZoteroImport onClose={() => setZoteroOpen(false)} onDone={() => void refresh()} />}
 
       {addRef && (

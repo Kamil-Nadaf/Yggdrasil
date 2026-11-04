@@ -64,8 +64,8 @@ cat > "${APP}/Contents/Info.plist" << 'EOF'
   <key>CFBundleName</key><string>Yggdrasil</string>
   <key>CFBundleDisplayName</key><string>Yggdrasil</string>
   <key>CFBundleIdentifier</key><string>io.yggdrasil.app</string>
-  <key>CFBundleVersion</key><string>0.4.1</string>
-  <key>CFBundleShortVersionString</key><string>0.4.1</string>
+  <key>CFBundleVersion</key><string>0.4.2</string>
+  <key>CFBundleShortVersionString</key><string>0.4.2</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>Yggdrasil</string>
   <key>CFBundleIconFile</key><string>Yggdrasil</string>
@@ -106,6 +106,7 @@ cp "${ROOT}/services/assistant/graph_keywords.py" "${APPDIR}/graph_keywords.py"
 cp "${ROOT}/services/assistant/reading.py" "${APPDIR}/reading.py"
 cp "${ROOT}/services/assistant/citations.py" "${APPDIR}/citations.py"
 cp "${ROOT}/services/assistant/updater.py" "${APPDIR}/updater.py"
+cp "${ROOT}/services/assistant/zotero_annotations.py" "${APPDIR}/zotero_annotations.py"
 cp "${ROOT}/services/assistant/note_tags.py" "${APPDIR}/note_tags.py"
 cp "${ROOT}/services/assistant/analysis_tags.py" "${APPDIR}/analysis_tags.py"
 cp "${ROOT}/services/assistant/arxiv_topics.py"  "${APPDIR}/arxiv_topics.py"
@@ -199,7 +200,7 @@ pkgbuild \
   --root "$PKG_ROOT" \
   --scripts "$PKG_SCRIPTS" \
   --identifier io.yggdrasil.app \
-  --version 0.4.1 \
+  --version 0.4.2 \
   "$PKG_UNSIGNED"
 
 DIST_XML="${OUT}/distribution.xml"
@@ -216,7 +217,7 @@ cat > "$DIST_XML" << EOF
     <choice id="yggdrasil" title="Yggdrasil" description="Install Yggdrasil to /Applications">
         <pkg-ref id="io.yggdrasil.app">Yggdrasil.pkg</pkg-ref>
     </choice>
-    <pkg-ref id="io.yggdrasil.app" version="0.4.1" onConclusion="none">Yggdrasil.pkg</pkg-ref>
+    <pkg-ref id="io.yggdrasil.app" version="0.4.2" onConclusion="none">Yggdrasil.pkg</pkg-ref>
 </installer-gui-script>
 EOF
 

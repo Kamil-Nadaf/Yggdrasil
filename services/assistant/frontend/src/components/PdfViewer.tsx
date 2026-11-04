@@ -35,7 +35,45 @@ type AnnKind = "highlight" | "underline" | "note" | "text" | "area" | "ink";
 type Tool = "select" | "note" | "text" | "area" | "ink";
 type Pt = [number, number];
 /** Stored verbatim by the backend, so extra fields need no server change. */
-type Ann = PdfAnnotation & { kind?: AnnKind; slot?: string; pts?: Pt[] };
+type Ann = PdfAnnotation & { kind?: AnnKind; slot?: string; pts?: Pt[]; paths?: Pt[][]; zkey?: string; zpos?: ZPos };
+/** Zotero-style position in PDF user-space units (origin bottom-left), kept next to our on-screen fractions. */
+interface ZPos { pageIndex: number; rects?: [number, number, number, number][]; paths?: number[][]; ph?: number }
+type View = number[];
+
+/** Fill in whichever of the two coordinate systems an annotation is missing (needed for Zotero sync). */
+function computeGeom(a: Ann, v: View): Partial<Ann> | null {
+  const W = v[2] - v[0], H = v[3] - v[1];
+  if (!(W > 0 && H > 0)) return null;
+  const has = a.rects.length > 0 || !!a.pts?.length || !!a.paths?.length;
+  if (has && !a.zpos && a.kind !== "area") {
+    const z: ZPos = { pageIndex: a.page - 1, ph: H };
+    if (a.kind === "ink") {
+      const lines = a.paths?.length ? a.paths : a.pts?.length ? [a.pts] : [];
+      z.paths = lines.map((l) => l.flatMap(([x, y]) => [v[0] + x * W, v[3] - y * H]));
+    } else {
+      z.rects = a.rects.map(([x, y, w, h]) => [v[0] + x * W, v[3] - (y + h) * H, v[0] + (x + w) * W, v[3] - y * H] as [number, number, number, number]);
+    }
+    return { zpos: z };
+  }
+  if (!has && a.zpos) {
+    if (a.zpos.paths?.length) {
+      const paths = a.zpos.paths.map((flat) => {
+        const out: Pt[] = [];
+        for (let i = 0; i + 1 < flat.length; i += 2) out.push([(flat[i] - v[0]) / W, (v[3] - flat[i + 1]) / H]);
+        return out;
+      });
+      const all = paths.flat();
+      if (!all.length) return null;
+      const xs = all.map((p) => p[0]), ys = all.map((p) => p[1]);
+      const x = Math.min(...xs), y = Math.min(...ys);
+      return { paths, pts: paths[0], rects: [[x, y, Math.max(...xs) - x, Math.max(...ys) - y]] };
+    }
+    if (a.zpos.rects?.length) {
+      return { rects: a.zpos.rects.map(([x1, y1, x2, y2]) => [(x1 - v[0]) / W, (v[3] - y2) / H, (x2 - x1) / W, (y2 - y1) / H] as Rect) };
+    }
+  }
+  return null;
+}
 const newId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
 function hashStr(s: string): string {
@@ -154,7 +192,8 @@ function PdfPage({
         {anns.flatMap((a): ReactNode[] => {
           const k = a.kind || "highlight";
           if (k === "ink") {
-            return [<svg key={a.id} className="ink" viewBox="0 0 1 1" preserveAspectRatio="none"><polyline points={(a.pts || []).map((p) => p.join(",")).join(" ")} stroke={a.color} /></svg>];
+            const lines = a.paths?.length ? a.paths : [a.pts || []];
+            return [<svg key={a.id} className="ink" viewBox="0 0 1 1" preserveAspectRatio="none">{lines.map((l, li) => <polyline key={li} points={l.map((p) => p.join(",")).join(" ")} stroke={a.color} />)}</svg>];
           }
           return a.rects.map((r, i) => {
             const pos = { left: `${r[0] * 100}%`, top: `${r[1] * 100}%` };
@@ -272,6 +311,31 @@ export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () =
     dirty.current = true;
     setAnns(next);
   }
+
+  // Keep on-screen fractions and PDF-unit positions (used by Zotero sync) in step, using the real page geometry.
+  const geomBusy = useRef(false);
+  useEffect(() => {
+    if (!pdf || !loadedAnns || geomBusy.current) return;
+    const todo = anns.filter((a) => computeGeom(a, [0, 0, 1, 1]) !== null);
+    if (!todo.length) return;
+    geomBusy.current = true;
+    (async () => {
+      const views = new Map<number, View | null>();
+      const patches = new Map<string, Partial<Ann>>();
+      for (const a of todo) {
+        if (!views.has(a.page)) {
+          try { const pg = await pdf.getPage(a.page); views.set(a.page, pg.rotate ? null : (pg.view as View)); } catch { views.set(a.page, null); }
+        }
+        const v = views.get(a.page);
+        const patch = v ? computeGeom(a, v) : null;
+        if (patch) patches.set(a.id, patch);
+      }
+      if (patches.size) {
+        dirty.current = true;
+        setAnns((cur) => cur.map((a) => (patches.has(a.id) ? { ...a, ...patches.get(a.id) } : a)));
+      }
+    })().catch(() => {}).finally(() => { geomBusy.current = false; });
+  }, [pdf, loadedAnns, anns]);
 
   function clearBrowserSelection() {
     window.getSelection()?.removeAllRanges();

@@ -120,6 +120,10 @@ The top bar has one tab per area:
 
 The **Collection** tab is your reference library. Add papers from arXiv (**+ Collection** on any result), books (PDF/EPUB), DOIs, URLs, BibTeX/RIS files or your Zotero library, then organise them into collections and sub-collections, tags, saved searches (`tag:nlp year:2017 is:fav`) and related items. Each item has an info pane with citation export (APA, MLA, Chicago, IEEE, BibTeX, RIS), duplicate merging, and automatic metadata from PDFs and web pages. In the LaTeX editor, **Cite** picks references and keeps `references.bib` up to date.
 
+### Syncing annotations with Zotero
+
+**Collection → Tools → Sync with Zotero** matches highlights, underlines, notes, text and drawings on items linked to Zotero, both ways, so you can mark up a PDF in Zotero on your iPad and keep reading on your Mac (and the reverse). Items need a Zotero link (use *Import from Zotero*). Open a PDF once after updating so the app can record its page sizes; after that, sync as often as you like. Zotero’s version wins if you changed the same annotation on both sides; area boxes stay in the app.
+
 ### Highlighting and annotating PDFs
 
 Select text in any paper or book and a palette appears beside it: pick a colour to **highlight** or **underline**, add a note, or (papers) send it to a **CERIC** slot, which highlights in that slot's soft colour so CERIC highlights stand out from plain ones. Yellow is the default; add custom colours and change opacity or slot colours with the gear. The tool strip above the PDF also has **note, text, area and draw** tools, which work with touch and Apple Pencil.

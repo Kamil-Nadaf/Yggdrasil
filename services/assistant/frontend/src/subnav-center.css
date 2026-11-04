@@ -1,0 +1,8 @@
+/* Sub-navigation bars (Papers, Books, Notes, Tasks, Calendar) are centred.
+   Selectors are a notch more specific than index.css, which loads after this file. */
+.subtabs { justify-content: center; }
+.notes-tabs { justify-content: center; flex-wrap: wrap; }
+.calendar-view .cal2-top { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; }
+.calendar-view .cal2-top > span { display: none; }
+.calendar-view .cal2-top > .btn:last-child { justify-self: end; }
+.calendar-view .cal2-top .cal2-views { justify-content: center; }

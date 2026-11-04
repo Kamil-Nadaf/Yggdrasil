@@ -70,8 +70,8 @@ export function useCericAppend(showToast: (text: string, ok: boolean) => void) {
     setSelectionPaperId(null);
   }
 
-  async function addSelectionToSlot(paper: ArxivPaper, slotKey: string) {
-    if (!selectedText) return;
+  async function addSelectionToSlot(paper: ArxivPaper, slotKey: string): Promise<boolean> {
+    if (!selectedText) return false;
     setAddingSlot(slotKey);
     try {
       const year = paper.submitted ? String(new Date(paper.submitted).getFullYear()) : undefined;
@@ -87,8 +87,10 @@ export function useCericAppend(showToast: (text: string, ok: boolean) => void) {
       setFlashId(paper.id);
       setTimeout(() => setFlashId(null), 900);
       clearSelection();
+      return true;
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Failed to add to analysis slot", false);
+      return false;
     } finally {
       setAddingSlot(null);
     }

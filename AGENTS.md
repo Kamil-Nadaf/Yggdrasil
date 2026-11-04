@@ -1051,7 +1051,25 @@ the right of Editor and Collection. Two sub-panels:
   textareas, chapter/section/track/tier/confidence/concepts/tags fields,
   auto-save on blur, Explain Cold indicator dot, Export to LaTeX button.
 
-No new nav item. Do not add one.
+That Books *tab* (section notes) stays inside Notes. (Superseded 2026-11-04 for the nav: the
+user explicitly asked for a top-level **Books** nav item after Papers — see "Books reading
+library" below.)
+
+### Books reading library — top-level `Books` view (added 2026-11-04)
+
+Nav item after Papers: Library / Collections / Reading goals. Code: `services/assistant/reading.py`
+(router `/api/reading`, wired in `main.py` with `app.include_router`), `frontend/src/views/BooksView.tsx`
+and `views/books/*`, `api/reading.ts`. It extends the same `15-Books/{slug}/` folders:
+`book.pdf|epub`, `cover.*`, `annotations.json` (PDF highlights, served through `/api/pdf-annotations`
+for viewer keys `book-{slug}` via `_pdf_locations`), `highlights.json` (EPUB). Collections live in
+`15-Books/_collections.json`; reading time in `60-Meta/reading-log.json`. All `.md` writes still go
+through python-frontmatter. EPUB reading uses `epubjs`.
+
+Reading goal: active seconds (tab focused, input within 3 min) are posted to `POST /api/reading/session`.
+When a day reaches the goal, the `extra_read` habit ("Extra reading") is ticked once via
+`_write_habits`. The dashboard's old "This week" card was replaced by `ReadingGoalsCard`; the PhD
+day timer (`GoalCard`) is unchanged.
+
 
 ### Export to LaTeX button (in Books section editor)
 
@@ -1203,3 +1221,19 @@ Flexible CERIC replacement. Defaults: Claim, Evidence, Reasoning, Implications, 
 - On rename: migration preview + optional batch rename of old FM keys in `10-Papers/`.
 - APIs: `GET/POST /api/settings/analysis-tags`, `POST .../migrate`.
 - Notes editor, CERIC toolbar, examine prompt, digest, search, indexer all use configured keys.
+
+## v0.4.0 — Collection library, dashboard fit, PDF annotation tools (added 2026-11-04)
+
+- **Collection** (nav label for the `books` view; theme.ts): holds papers *and* books (`kind` paper|book). Backend `reading.py` +
+  `citations.py` (router `/api/reading`): items in `15-Books/{slug}/_book.md`, collections (with `parent`, `zotero_key`) in
+  `15-Books/_collections.json`, saved searches in `15-Books/_searches.json`. Endpoints: `/items`, `/{slug}/cite`, `/merge`,
+  `/searches`, `/latex-bib` (writes `70-LaTeX/{project}/references.bib`), `/import-zotero` (+ `/status`), BibTeX/RIS import/export.
+  `citations.py` must be listed in the Dockerfile and `packaging/build-*.sh` (already done).
+- **+ Collection** button (`components/AddToCollection.tsx`, portal to `document.body`) in Daily Archive, Shortlisted, My List, Search.
+- **Dashboard**: resizable cards, fit-to-screen reset button after Edit (`ScoresView` `fitHeights`, `layout.fit`).
+- **PDF reader** (`components/PdfViewer.tsx`): floating selection palette `PdfSelectionPopup.tsx`; colour prefs in
+  `lib/highlightPrefs.ts` (localStorage `yggdrasil:highlight-prefs`: default colour, palette, opacity, per-CERIC-slot colour).
+  Annotations store hex `color` (opacity applied at render; legacy rgba still drawn as saved) plus optional `kind`
+  (highlight|underline|note|text|area|ink), `slot` (CERIC slot key) and `pts` (ink). Backend stores annotations verbatim.
+  Tool strip uses pointer events (touch/Pencil ready for a future iOS app). `useCericAppend.addSelectionToSlot` returns a boolean.
+  The EPUB reader still uses the old four-colour highlights.

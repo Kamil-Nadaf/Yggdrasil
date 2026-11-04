@@ -1,15 +1,27 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import ActivityTimer from "./ActivityTimer";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import "pdfjs-dist/web/pdf_viewer.css";
 import { api, type ArxivPaper, type PdfAnnotation } from "../api/client";
 import { useCericAppend } from "./CericToolbar";
 import { PreviewToolbar, useFullscreenPane, useZoom } from "./WorkspacePreviewPane";
+import PdfSelectionPopup, { type Markup } from "./PdfSelectionPopup";
+import { colorCss, slotColor, useHighlightPrefs } from "../lib/highlightPrefs";
+import "./pdfAnnotate.css";
 
 export interface PdfDoc {
   url: string;
   title: string;
   /** When known, enables "add to CERIC" from the PDF text and keys the saved highlights. */
   paper?: ArxivPaper;
+  /** Explicit storage key (books use `book-{slug}`); beats the paper id / URL hash. */
+  key?: string;
+  /** Scroll to this page once the document has loaded. */
+  initialPage?: number;
+  /** Called (throttled) with the page at the top of the viewport and the page count. */
+  onPage?: (page: number, total: number) => void;
+  /** Hide controls that only make sense for papers fetched from the web. */
+  embedded?: boolean;
 }
 
 /** Provided by PapersView; null outside it (callers then fall back to a normal link). */
@@ -19,12 +31,12 @@ export function usePdfOpener() {
   return useContext(PdfContext);
 }
 
-const COLORS: { name: string; css: string }[] = [
-  { name: "Yellow", css: "rgba(255, 213, 0, 0.45)" },
-  { name: "Green", css: "rgba(88, 214, 141, 0.45)" },
-  { name: "Blue", css: "rgba(86, 169, 255, 0.42)" },
-  { name: "Pink", css: "rgba(255, 128, 191, 0.45)" },
-];
+type AnnKind = "highlight" | "underline" | "note" | "text" | "area" | "ink";
+type Tool = "select" | "note" | "text" | "area" | "ink";
+type Pt = [number, number];
+/** Stored verbatim by the backend, so extra fields need no server change. */
+type Ann = PdfAnnotation & { kind?: AnnKind; slot?: string; pts?: Pt[] };
+const newId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
 function hashStr(s: string): string {
   let h = 5381;
@@ -36,10 +48,50 @@ type Rect = [number, number, number, number];
 interface Sel { text: string; page: number; rects: Rect[] }
 
 function PdfPage({
-  pdf, num, width, ratio, rootEl, anns, onTextError,
+  pdf, num, width, ratio, rootEl, anns, onTextError, tool, color, opacity, onCreate,
 }: {
-  pdf: PDFDocumentProxy; num: number; width: number; ratio: number; rootEl: HTMLElement | null; anns: PdfAnnotation[]; onTextError?: (m: string) => void;
+  pdf: PDFDocumentProxy; num: number; width: number; ratio: number; rootEl: HTMLElement | null; anns: Ann[]; onTextError?: (m: string) => void;
+  tool: Tool; color: string; opacity: number; onCreate: (a: Partial<Ann>) => void;
 }) {
+  const [drag, setDrag] = useState<[number, number, number, number] | null>(null);
+  const [path, setPath] = useState<Pt[] | null>(null);
+  const [draft, setDraft] = useState<Pt | null>(null);
+  const draftEl = useRef<HTMLTextAreaElement>(null);
+  const hasDraft = !!draft;
+  useEffect(() => { if (hasDraft) { const t = window.setTimeout(() => draftEl.current?.focus(), 30); return () => window.clearTimeout(t); } }, [hasDraft]);
+  const norm = (e: React.PointerEvent): Pt => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    return [Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))];
+  };
+  function down(e: React.PointerEvent) {
+    if (e.button > 0) return;
+    const [x, y] = norm(e);
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    if (tool === "note") onCreate({ kind: "note", page: num, rects: [[x, y, 0.04, 0.03]] });
+    else if (tool === "text") setDraft([x, y]);
+    else if (tool === "area") setDrag([x, y, x, y]);
+    else if (tool === "ink") setPath([[x, y]]);
+  }
+  function move(e: React.PointerEvent) {
+    const [x, y] = norm(e);
+    if (drag) setDrag([drag[0], drag[1], x, y]);
+    else if (path) setPath((p) => (p ? [...p, [x, y]] : p));
+  }
+  function up() {
+    if (drag) {
+      const x = Math.min(drag[0], drag[2]), y = Math.min(drag[1], drag[3]);
+      const w = Math.abs(drag[2] - drag[0]), h = Math.abs(drag[3] - drag[1]);
+      if (w > 0.01 && h > 0.01) onCreate({ kind: "area", page: num, rects: [[x, y, w, h]] });
+      setDrag(null);
+    } else if (path) {
+      if (path.length > 1) {
+        const xs = path.map((p) => p[0]), ys = path.map((p) => p[1]);
+        const x = Math.min(...xs), y = Math.min(...ys);
+        onCreate({ kind: "ink", page: num, pts: path, rects: [[x, y, Math.max(...xs) - x, Math.max(...ys) - y]] });
+      }
+      setPath(null);
+    }
+  }
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const textBox = useRef<HTMLDivElement>(null);
@@ -99,12 +151,37 @@ function PdfPage({
     <div ref={wrap} className="pdfv-page" data-page={num} style={{ width, height }}>
       <canvas ref={canvas} />
       <div className="pdfv-hl">
-        {anns.flatMap((a) =>
-          a.rects.map((r, i) => (
-            <i key={`${a.id}-${i}`} style={{ left: `${r[0] * 100}%`, top: `${r[1] * 100}%`, width: `${r[2] * 100}%`, height: `${r[3] * 100}%`, background: a.color }} />
-          ))
-        )}
+        {anns.flatMap((a): ReactNode[] => {
+          const k = a.kind || "highlight";
+          if (k === "ink") {
+            return [<svg key={a.id} className="ink" viewBox="0 0 1 1" preserveAspectRatio="none"><polyline points={(a.pts || []).map((p) => p.join(",")).join(" ")} stroke={a.color} /></svg>];
+          }
+          return a.rects.map((r, i) => {
+            const pos = { left: `${r[0] * 100}%`, top: `${r[1] * 100}%` };
+            const box = { ...pos, width: `${r[2] * 100}%`, height: `${r[3] * 100}%` };
+            if (k === "text") return <span key={`${a.id}-${i}`} className="tx" style={{ ...pos, color: a.color }}>{a.text}</span>;
+            if (k === "note") return <i key={`${a.id}-${i}`} className="pin" style={{ ...pos, background: a.color }} />;
+            if (k === "underline") return <i key={`${a.id}-${i}`} className="ul" style={{ ...box, borderBottomColor: a.color }} />;
+            if (k === "area") return <i key={`${a.id}-${i}`} className="area" style={{ ...box, background: colorCss(a.color, opacity), borderColor: a.color }} />;
+            return <i key={`${a.id}-${i}`} style={{ ...box, background: colorCss(a.color, opacity) }} />;
+          });
+        })}
+        {drag && <i className="area" style={{ left: `${Math.min(drag[0], drag[2]) * 100}%`, top: `${Math.min(drag[1], drag[3]) * 100}%`, width: `${Math.abs(drag[2] - drag[0]) * 100}%`, height: `${Math.abs(drag[3] - drag[1]) * 100}%`, background: colorCss(color, opacity), borderColor: color }} />}
+        {path && <svg className="ink" viewBox="0 0 1 1" preserveAspectRatio="none"><polyline points={path.map((p) => p.join(",")).join(" ")} stroke={color} /></svg>}
       </div>
+      {tool !== "select" && <div className={`pdfv-tool ${tool}`} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} />}
+      {draft && (
+        <textarea
+          ref={draftEl} className="pdfv-draft" style={{ left: `${draft[0] * 100}%`, top: `${draft[1] * 100}%` }} placeholder="Type…"
+          onPointerDown={(e) => e.stopPropagation()}
+          onBlur={(e) => {
+            const t = e.target.value.trim();
+            if (t) onCreate({ kind: "text", page: num, text: t, rects: [[draft[0], draft[1], 0.3, 0.04]] });
+            setDraft(null);
+          }}
+          onKeyDown={(e) => { if (e.key === "Escape") setDraft(null); }}
+        />
+      )}
       <div ref={textBox} className="textLayer" />
     </div>
   );
@@ -112,15 +189,20 @@ function PdfPage({
 
 /** Right-hand reader: pdf.js pages with selectable text, highlights/notes saved in the vault, and “add to CERIC”. */
 export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () => void }) {
-  const key = useMemo(() => doc.paper?.id || `url-${hashStr(doc.url)}`, [doc.paper?.id, doc.url]);
+  const key = useMemo(() => doc.key || doc.paper?.id || `url-${hashStr(doc.url)}`, [doc.key, doc.paper?.id, doc.url]);
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [err, setErr] = useState("");
   const [ratio, setRatio] = useState(1.3);
   const [pages, setPages] = useState(0);
-  const [anns, setAnns] = useState<PdfAnnotation[]>([]);
+  const [anns, setAnns] = useState<Ann[]>([]);
   const [loadedAnns, setLoadedAnns] = useState(false);
   const [savedCopy, setSavedCopy] = useState(false);
   const [sel, setSel] = useState<Sel | null>(null);
+  const [anchor, setAnchor] = useState<{ x: number; y: number; below: boolean } | null>(null);
+  const prefs = useHighlightPrefs();
+  const [markup, setMarkup] = useState<Markup>("highlight");
+  const [tool, setTool] = useState<Tool>("select");
+  const [toolColor, setToolColor] = useState("#e5484d");
   const [notesOpen, setNotesOpen] = useState(false);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [textFail, setTextFail] = useState(false);
@@ -186,7 +268,7 @@ export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () =
 
   const pageWidth = Math.max(200, boxW - 28) * zoom;
 
-  function commit(next: PdfAnnotation[]) {
+  function commit(next: Ann[]) {
     dirty.current = true;
     setAnns(next);
   }
@@ -194,19 +276,22 @@ export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () =
   function clearBrowserSelection() {
     window.getSelection()?.removeAllRanges();
     setSel(null);
+    setAnchor(null);
     cer.clearSelection();
   }
 
   /** Reads the browser selection after any mouse-up / key-up (also when the drag ends outside the pages). */
   function processSelection(e: Event) {
     const target = e.target as Element | null;
-    if (target?.closest?.(".pdfv-selbar")) return;
+    if (target?.closest?.(".pdfv-selpop, .pdfv-tools, .pdfv-draft")) return;
+    if (tool !== "select") return;
     const s = window.getSelection();
     const text = s?.toString().trim() || "";
     const inside = !!rootEl && !!target && rootEl.contains(target);
     if (!s || !text || s.rangeCount === 0) {
       if (!inside) return;
       setSel(null);
+      setAnchor(null);
       if (doc.paper) cer.handleTextSelect(doc.paper.id);
       // plain click on a highlight → open it in the notes drawer
       const me = e as MouseEvent;
@@ -226,7 +311,7 @@ export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () =
     if (!rootEl || !ancEl || !rootEl.contains(ancEl)) return;
     const startNode = range.startContainer;
     const startEl = (startNode.nodeType === 1 ? (startNode as Element) : startNode.parentElement)?.closest(".pdfv-page") as HTMLElement | null;
-    if (!startEl) { setSel(null); return; }
+    if (!startEl) { setSel(null); setAnchor(null); return; }
     const pr = startEl.getBoundingClientRect();
     let rects = Array.from(range.getClientRects()).filter(
       (r) => r.width > 1 && r.height > 1 && r.left >= pr.left - 2 && r.right <= pr.right + 2 && r.top >= pr.top - 2 && r.bottom <= pr.bottom + 2
@@ -239,15 +324,24 @@ export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () =
       page: Number(startEl.dataset.page),
       rects: rects.map((r) => [(r.left - pr.left) / pr.width, (r.top - pr.top) / pr.height, r.width / pr.width, r.height / pr.height] as Rect),
     });
+    placePopup(range);
     if (doc.paper) cer.handleTextSelect(doc.paper.id);
+  }
+  /** Anchor the palette just under (or above, near the bottom edge) the end of the selection. */
+  function placePopup(range: Range) {
+    const list = Array.from(range.getClientRects()).filter((r) => r.width > 1);
+    const last = list[list.length - 1] || range.getBoundingClientRect();
+    const below = last.bottom + 140 < window.innerHeight;
+    setAnchor({ x: Math.min(last.right, Math.max(last.left, last.left + 40)) - 20, y: below ? last.bottom + 8 : (list[0] || last).top - 8, below });
   }
   const selHandler = useRef(processSelection);
   selHandler.current = processSelection;
   useEffect(() => {
     const h = (e: Event) => { window.setTimeout(() => selHandler.current(e), 0); };
     document.addEventListener("mouseup", h);
+    document.addEventListener("touchend", h);
     document.addEventListener("keyup", h);
-    return () => { document.removeEventListener("mouseup", h); document.removeEventListener("keyup", h); };
+    return () => { document.removeEventListener("mouseup", h); document.removeEventListener("touchend", h); document.removeEventListener("keyup", h); };
   }, []);
 
   function currentPage(): number {
@@ -259,33 +353,101 @@ export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () =
     return 1;
   }
 
+  // Reading position: jump to the saved page once, then report scrolling back to the host.
+  const onPageRef = useRef(doc.onPage);
+  onPageRef.current = doc.onPage;
+  const jumped = useRef(false);
+  useEffect(() => { jumped.current = false; }, [key]);
+  useEffect(() => {
+    if (!rootEl || !pdf || jumped.current) return;
+    jumped.current = true;
+    const target = doc.initialPage || 1;
+    if (target > 1) {
+      window.setTimeout(() => rootEl.querySelector(`.pdfv-page[data-page="${target}"]`)?.scrollIntoView({ block: "start" }), 80);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rootEl, pdf]);
+  useEffect(() => {
+    if (!rootEl || !pages) return;
+    let raf = 0;
+    let last = 0;
+    const report = () => {
+      raf = 0;
+      const p = currentPage();
+      if (p !== last) { last = p; onPageRef.current?.(p, pages); }
+    };
+    const onScroll = () => { if (!raf) raf = window.requestAnimationFrame(report); };
+    rootEl.addEventListener("scroll", onScroll, { passive: true });
+    return () => { rootEl.removeEventListener("scroll", onScroll); if (raf) window.cancelAnimationFrame(raf); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rootEl, pages]);
+
   /** A note without any selected text, pinned to the page you are looking at. */
   function addPageNote() {
-    const a: PdfAnnotation = {
-      id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
-      page: currentPage(), rects: [], text: "", color: COLORS[0].css, note: "", created: new Date().toISOString(),
+    const a: Ann = {
+      id: newId(), page: currentPage(), rects: [], text: "", color: prefs.defaultColor, note: "", created: new Date().toISOString(),
     };
     commit([...anns, a]);
     setNotesOpen(true);
     setFocusId(a.id);
   }
 
-  function highlight(color: string, openNote = false) {
-    if (!sel || sel.rects.length === 0) return;
-    const a: PdfAnnotation = {
-      id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
-      page: sel.page, rects: sel.rects, text: sel.text, color, note: "", created: new Date().toISOString(),
+  /** Turn the selection (or a snapshot of it) into a highlight / underline in `color`. */
+  function applySel(color: string, opts: { note?: boolean; slot?: string; from?: Sel } = {}) {
+    const sl = opts.from || sel;
+    if (!sl || sl.rects.length === 0) return;
+    const a: Ann = {
+      id: newId(), kind: markup, page: sl.page, rects: sl.rects, text: sl.text, color, note: "", created: new Date().toISOString(),
+      ...(opts.slot ? { slot: opts.slot } : {}),
     };
     commit([...anns, a]);
     clearBrowserSelection();
-    if (openNote) { setNotesOpen(true); setFocusId(a.id); }
+    if (opts.note) { setNotesOpen(true); setFocusId(a.id); }
   }
 
-  async function addToCeric(slotKey: string) {
-    if (!doc.paper) return;
-    await cer.addSelectionToSlot(doc.paper, slotKey);
-    setSel(null);
+  async function addToCeric(slotKey: string, index: number) {
+    if (!doc.paper || !sel) return;
+    const snap = sel;
+    const ok = await cer.addSelectionToSlot(doc.paper, slotKey);
+    if (ok) applySel(slotColor(prefs, slotKey, index), { slot: slotKey, from: snap });
+    else setSel(snap);
   }
+
+  /** Pen / area / text / note tools drop a new annotation on a page. */
+  function createFromTool(p: Partial<Ann>) {
+    const k = p.kind as AnnKind;
+    const a: Ann = {
+      id: newId(), kind: k, page: p.page || 1, rects: p.rects || [], text: p.text || "",
+      color: toolColor, note: "", created: new Date().toISOString(), ...(p.pts ? { pts: p.pts } : {}),
+    };
+    commit([...anns, a]);
+    if (k === "note") { setTool("select"); setNotesOpen(true); setFocusId(a.id); }
+  }
+
+  // Keyboard: Esc leaves a tool; "h" highlights the selection in the default colour.
+  const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  keyRef.current = (e) => {
+    const t = e.target as HTMLElement | null;
+    if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
+    if (e.key === "Escape") { setTool("select"); return; }
+    if ((e.key === "h" || e.key === "H") && sel && !e.metaKey && !e.ctrlKey) { e.preventDefault(); applySel(prefs.defaultColor); }
+  };
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => keyRef.current(e);
+    document.addEventListener("keydown", h);
+    return () => document.removeEventListener("keydown", h);
+  }, []);
+  // keep the palette attached to the text while scrolling
+  useEffect(() => {
+    if (!rootEl || !sel) return;
+    const onScroll = () => {
+      const s = window.getSelection();
+      if (s && s.rangeCount && s.toString().trim()) placePopup(s.getRangeAt(0));
+    };
+    rootEl.addEventListener("scroll", onScroll, { passive: true });
+    return () => rootEl.removeEventListener("scroll", onScroll);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rootEl, !!sel]);
 
   function download() {
     const a = document.createElement("a");
@@ -323,15 +485,16 @@ export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () =
 
   return (
     <div className={`pdf-viewer${fullscreen ? " is-full" : ""}`}>
+      {!doc.embedded && <ActivityTimer category="papers" />}
       <div className="pdf-viewer-bar">
         <span className="pdf-viewer-title" title={doc.title}>{doc.title}</span>
-        {!savedCopy && <button type="button" className="btn" onClick={keepCopy} title="Keep a copy of this PDF in your vault">Keep copy</button>}
-        {savedCopy && <span className="muted mono" style={{ fontSize: 11 }} title="Stored in your vault: 10-Papers/pdfs">saved locally ✓</span>}
+        {!doc.embedded && !savedCopy && <button type="button" className="btn" onClick={keepCopy} title="Keep a copy of this PDF in your vault">Keep copy</button>}
+        {!doc.embedded && savedCopy && <span className="muted mono" style={{ fontSize: 11 }} title="Stored in your vault: 10-Papers/pdfs">saved locally ✓</span>}
         <button type="button" className={`btn${notesOpen ? " btn-primary" : ""}`} onClick={() => setNotesOpen((v) => !v)} title="Highlights and notes">
           Notes{anns.length ? ` (${anns.length})` : ""}
         </button>
-        <a className="btn" href={doc.url} target="_blank" rel="noopener noreferrer" title="Open in your browser">↗</a>
-        <button type="button" className="btn" onClick={onClose} title="Close reader">×</button>
+        {!doc.embedded && <a className="btn" href={doc.url} target="_blank" rel="noopener noreferrer" title="Open in your browser">↗</a>}
+        {!doc.embedded && <button type="button" className="btn" onClick={onClose} title="Close reader">×</button>}
       </div>
       <PreviewToolbar
         statusLabel={err ? "error" : pages ? `${pages} page${pages === 1 ? "" : "s"}` : "loading…"}
@@ -346,26 +509,34 @@ export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () =
         onDownload={download}
       />
       <div className="pdfv-stage">
-        {sel && (
-          <div className="pdfv-selbar">
-            <span className="pdfv-selbar-text">“{sel.text.length > 50 ? `${sel.text.slice(0, 50)}…` : sel.text}”</span>
-            <span className="pdfv-selbar-group">
-              {COLORS.map((c) => (
-                <button key={c.name} type="button" className="pdfv-swatch" style={{ background: c.css }} title={`Highlight ${c.name.toLowerCase()}`} onClick={() => highlight(c.css)} />
-              ))}
-              <button type="button" className="btn" onClick={() => highlight(COLORS[0].css, true)} title="Highlight and write a note">+ Note</button>
-            </span>
-            {doc.paper && (
-              <span className="pdfv-selbar-group">
-                <span className="muted" style={{ fontSize: 11 }}>CERIC:</span>
-                {cer.slots.map((s) => (
-                  <button key={s.key} type="button" className="btn" disabled={cer.addingSlot === s.key} onClick={() => addToCeric(s.key)} title={`Add to ${s.label}`}>
-                    {cer.addingSlot === s.key ? "…" : s.letter}
-                  </button>
-                ))}
-              </span>
-            )}
-          </div>
+        <div className="pdfv-tools" role="toolbar" aria-label="Annotation tools">
+          <button type="button" className={`pdfv-tool-btn${tool === "select" && markup === "highlight" ? " on" : ""}`} title="Highlight selected text (select text, then pick a colour)" onClick={() => { setTool("select"); setMarkup("highlight"); }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="3.5" y="3.5" width="17" height="17" rx="2.5" /><text x="12" y="17" textAnchor="middle" fontSize="13" fontWeight="700" fill="currentColor" stroke="none" fontFamily="serif">A</text></svg>
+          </button>
+          <button type="button" className={`pdfv-tool-btn${tool === "select" && markup === "underline" ? " on" : ""}`} title="Underline selected text" onClick={() => { setTool("select"); setMarkup("underline"); }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><text x="12" y="16" textAnchor="middle" fontSize="14" fontWeight="700" fill="currentColor" stroke="none" fontFamily="serif">A</text><path d="M5 20.5h14" /></svg>
+          </button>
+          <button type="button" className={`pdfv-tool-btn${tool === "note" ? " on" : ""}`} title="Note — tap the page to pin a note" onClick={() => setTool(tool === "note" ? "select" : "note")}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M4 4h16v10l-6 6H4z" /><path d="M14 20v-6h6" /></svg>
+          </button>
+          <button type="button" className={`pdfv-tool-btn${tool === "text" ? " on" : ""}`} title="Text — tap the page and type" onClick={() => setTool(tool === "text" ? "select" : "text")}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M5 6V4.5h14V6M12 4.5V20M9 20h6" /></svg>
+          </button>
+          <button type="button" className={`pdfv-tool-btn${tool === "area" ? " on" : ""}`} title="Area — drag a box over a figure or equation" onClick={() => setTool(tool === "area" ? "select" : "area")}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeDasharray="3 2.4"><rect x="3.5" y="3.5" width="17" height="17" rx="1.5" /></svg>
+          </button>
+          <button type="button" className={`pdfv-tool-btn${tool === "ink" ? " on" : ""}`} title="Draw — finger, mouse or Apple Pencil" onClick={() => setTool(tool === "ink" ? "select" : "ink")}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M4 20l1-4L16.5 4.5a2 2 0 0 1 3 3L8 19z" /><path d="M14.5 6.5l3 3" /></svg>
+          </button>
+          <input type="color" value={toolColor} onChange={(e) => setToolColor(e.target.value)} title="Colour for note / text / area / draw" aria-label="Tool colour" />
+          {tool !== "select" && <span className="hint">Esc to stop</span>}
+        </div>
+        {sel && anchor && (
+          <PdfSelectionPopup
+            x={anchor.x} y={anchor.y} below={anchor.below} prefs={prefs} markup={markup} onMarkup={setMarkup} text={sel.text}
+            onPick={(c) => applySel(c)} onNote={() => applySel(prefs.defaultColor, { note: true })}
+            slots={doc.paper ? cer.slots : null} addingSlot={cer.addingSlot} onCeric={(k) => addToCeric(k, cer.slots.findIndex((x) => x.key === k))}
+          />
         )}
         {textFail && <div className="pdfv-warn">Text selection isn’t available for this PDF (see the console for details). You can still add a page note from the Notes drawer.</div>}
         {toast && <div className={`pdfv-toast ${toast.ok ? "ok" : "error"}`}>{toast.text}</div>}
@@ -376,7 +547,7 @@ export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () =
             <div className="pdfv-msg">Loading PDF…</div>
           ) : (
             Array.from({ length: pdf.numPages }, (_, i) => (
-              <PdfPage key={`${key}-${i + 1}`} pdf={pdf} num={i + 1} width={pageWidth} ratio={ratio} rootEl={rootEl} anns={anns.filter((a) => a.page === i + 1)} onTextError={() => setTextFail(true)} />
+              <PdfPage key={`${key}-${i + 1}`} pdf={pdf} num={i + 1} width={pageWidth} ratio={ratio} rootEl={rootEl} anns={anns.filter((a) => a.page === i + 1)} onTextError={() => setTextFail(true)} tool={tool} color={toolColor} opacity={prefs.opacity} onCreate={createFromTool} />
             ))
           )}
         </div>
@@ -384,7 +555,7 @@ export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () =
           <div className="pdfv-notes">
             <div className="pdfv-notes-head">
               <strong>Highlights &amp; notes</strong>
-              <span className="muted" style={{ fontSize: 11 }}>select text in the PDF to add</span>
+              <span className="muted" style={{ fontSize: 11 }}>select text or use the tools above</span>
               <span style={{ flex: 1 }} />
               <button type="button" className="btn" onClick={addPageNote} title="Add a note to the page you are viewing">+ Page note</button>
               {anns.length > 0 && <button type="button" className="btn" onClick={copyMarkdown}>Copy Markdown</button>}
@@ -395,14 +566,16 @@ export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () =
               <div key={a.id} className={`pdfv-note${a.id === focusId ? " focus" : ""}`}>
                 <div className="pdfv-note-top">
                   <button type="button" className="btn" onClick={() => jumpTo(a.page)}>p. {a.page}</button>
-                  {COLORS.map((c) => (
-                    <button key={c.name} type="button" className={`pdfv-swatch small${a.color === c.css ? " on" : ""}`} style={{ background: c.css }} title={c.name}
-                      onClick={() => commit(anns.map((x) => (x.id === a.id ? { ...x, color: c.css } : x)))} />
+                  {a.kind && a.kind !== "highlight" && <span className="muted" style={{ fontSize: 11 }}>{a.kind}</span>}
+                  {a.slot && <span className="muted" style={{ fontSize: 11 }}>{cer.slots.find((x) => x.key === a.slot)?.label || a.slot}</span>}
+                  {prefs.colors.map((c) => (
+                    <button key={c} type="button" className={`pdfv-swatch small${a.color === c ? " on" : ""}`} style={{ background: c }}
+                      onClick={() => commit(anns.map((x) => (x.id === a.id ? { ...x, color: c } : x)))} />
                   ))}
                   <span style={{ flex: 1 }} />
                   <button type="button" className="btn" title="Delete highlight" onClick={() => commit(anns.filter((x) => x.id !== a.id))}>Delete</button>
                 </div>
-                <div className="pdfv-note-quote" style={{ borderLeftColor: a.color }}>{a.text || <span className="muted">Page note</span>}</div>
+                <div className="pdfv-note-quote" style={{ borderLeftColor: a.color }}>{a.kind === "ink" ? <span className="muted">Drawing</span> : a.kind === "area" ? <span className="muted">Area</span> : a.text || <span className="muted">{a.kind === "note" ? "Pinned note" : "Page note"}</span>}</div>
                 <textarea
                   className="pdfv-note-input"
                   placeholder="Add a note…"

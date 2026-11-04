@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { usePdfOpener } from "../components/PdfViewer";
+import AddToCollection from "../components/AddToCollection";
 import ZoteroCollectionSelect, { getZoteroCollection } from "../components/ZoteroCollectionSelect";
 import { api, type ArxivPaper, type ArxivSearchField } from "../api/client";
 import { SlotIndicator, CericSelectionToolbar, useCericAppend } from "../components/CericToolbar";
@@ -317,6 +318,7 @@ export default function ArxivBrowser() {
                         ↗ {p.source === "openalex" ? "Open Paper / DOI" : p.source === "europepmc" ? "Open Europe PMC" : "Open Source"}
                       </a>
                     )}
+                    <AddToCollection paper={p} pdfUrl={pdfUrl} onResult={showToast} />
                     <ZoteroCollectionSelect />
                     <button className="btn btn-primary" onClick={() => handleAddToZotero(p)}>
                       + Add to Zotero

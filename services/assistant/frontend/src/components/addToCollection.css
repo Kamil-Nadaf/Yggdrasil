@@ -1,0 +1,11 @@
+.atc-saved { color: var(--ok, #2e7d32); }
+.atc-pop { position: fixed; z-index: 100000; width: 260px; max-height: 280px; overflow: auto; padding: 6px; display: flex; flex-direction: column; box-shadow: 0 10px 28px rgba(0,0,0,.28); background: var(--surface, var(--bg, #fff)); color: var(--text); }
+.atc-pop button { display: flex; justify-content: space-between; gap: 8px; text-align: left; background: none; border: 0; padding: 6px 8px; border-radius: 5px; cursor: pointer; color: var(--text); font: inherit; font-size: 13px; }
+.atc-pop button:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.atc-pop button:disabled { opacity: .5; cursor: default; }
+.atc-label { font-size: 11px; padding: 4px 8px; color: var(--muted); }
+.atc-sep { height: 1px; background: var(--border); margin: 4px 0; }
+.atc-new { display: flex; gap: 6px; padding: 2px; }
+.atc-new input { flex: 1; min-width: 0; font: inherit; font-size: 13px; padding: 4px 6px; }
+.atc-new button { border: 1px solid var(--border); }
+.atc-failed { color: var(--crit, #b3261e); }

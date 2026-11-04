@@ -8,13 +8,17 @@ import AskView from "./views/AskView";
 import ScoresView from "./views/ScoresView";
 import LaTeXEditor from "./views/LaTeXEditor";
 import PapersView from "./views/PapersView";
+import BooksView from "./views/BooksView";
+import "./subnav-center.css";
+import ActivityTimer from "./components/ActivityTimer";
+import ManualTimerRunner from "./components/ManualTimerRunner";
 import TasksView from "./views/TasksView";
 import CalendarView from "./views/CalendarView";
 import { applyTheme } from "./lib/theme";
 import { APP_WATERMARK } from "./lib/copyright";
 import { startSettingsSync } from "./lib/settingsSync";
 
-export type View = "editor" | "graph" | "ask" | "scores" | "latex" | "papers" | "tasks" | "calendar";
+export type View = "editor" | "graph" | "ask" | "scores" | "latex" | "papers" | "books" | "tasks" | "calendar";
 
 export default function App() {
   const [view, setView] = useState<View>("scores");
@@ -66,6 +70,7 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      <ManualTimerRunner />
       {reinstallBanner && (
         <div className="data-restore-banner" role="status">
           <span>{reinstallBanner}</span>
@@ -99,9 +104,15 @@ export default function App() {
         {view === "calendar" && <CalendarView onOpenTask={openTask} />}
         {view === "graph" && <GraphView onOpenEditor={openEditor} />}
         {view === "ask" && <AskView />}
-        {view === "scores" && <ScoresView onOpenTask={openTask} />}
-        {view === "latex" && <LaTeXEditor />}
+        {view === "scores" && <ScoresView onOpenTask={openTask} onOpenBooks={() => setView("books")} />}
+        {view === "latex" && (
+          <>
+            <ActivityTimer category="writing" />
+            <LaTeXEditor />
+          </>
+        )}
         {view === "papers" && <PapersView />}
+        {view === "books" && <BooksView />}
       </main>
       <SettingsDrawer
         open={settingsOpen}

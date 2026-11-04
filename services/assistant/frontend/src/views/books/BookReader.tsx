@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { reading, type ReadingBook } from "../../api/reading";
+import { reading, type ReadingBook, type ReadingNote } from "../../api/reading";
+import type { ArxivPaper } from "../../api/client";
 import PdfViewer, { type PdfDoc } from "../../components/PdfViewer";
 import ReadingTimerChip from "../../components/ReadingTimerChip";
 import EpubReader from "./EpubReader";
+import BookNotesPanel from "./BookNotesPanel";
+
+/** An arXiv id (new `2301.01234` or old `hep-th/9901001` style) found anywhere in the field. */
+export function arxivIdOf(raw: string): string {
+  const m = (raw || "").match(/(\d{4}\.\d{4,5}|[a-z-]+(?:\.[A-Z]{2})?\/\d{7})(v\d+)?/);
+  return m ? m[1] : "";
+}
 
 interface Props {
   book: ReadingBook;
@@ -15,6 +23,24 @@ export default function BookReader({ book, onBack, onChanged }: Props) {
   const saveTimer = useRef<number | undefined>(undefined);
   const [status, setStatus] = useState(book.status);
   const startPage = useRef(book.last_page || 1);
+  const arxiv = arxivIdOf(book.arxiv);
+  // Papers (arXiv id, or saved as a paper) get CERIC; books get a notes list instead.
+  const isPaper = Boolean(arxiv) || book.kind === "paper";
+  const [notes, setNotes] = useState<ReadingNote[]>([]);
+  const [notesOpen, setNotesOpen] = useState(false);
+
+  useEffect(() => {
+    if (isPaper) return;
+    let live = true;
+    reading.notes(book.slug).then((r) => { if (live) setNotes(r.notes); }).catch(() => {});
+    return () => { live = false; };
+  }, [book.slug, isPaper]);
+
+  async function addNote(text: string, page: number | null, loc = "") {
+    const r = await reading.addNote(book.slug, { text, page, loc });
+    setNotes((n) => [...n, r.note]);
+    onChanged();
+  }
 
   useEffect(() => {
     // Opening a book moves it to "Reading" unless it is finished.
@@ -33,6 +59,21 @@ export default function BookReader({ book, onBack, onChanged }: Props) {
       key: `book-${book.slug}`,
       initialPage: startPage.current,
       embedded: true,
+      ...(isPaper
+        ? {
+            paper: {
+              id: arxiv ? arxiv.replace("/", "_") : book.citekey || book.slug,
+              title: book.title,
+              authors: book.authors,
+              abstract: book.abstract || "",
+              arxiv_url: arxiv ? `https://arxiv.org/abs/${arxiv}` : book.url || "",
+              pdf_url: reading.fileUrl(book.slug),
+              categories: [],
+              submitted: book.year ? `${book.year}-01-01` : "",
+              source: "collection",
+            } as ArxivPaper,
+          }
+        : { notes: { add: (text: string, page: number) => addNote(text, page) } }),
       onPage: (page, total) => {
         pageRef.current = page;
         window.clearTimeout(saveTimer.current);
@@ -43,7 +84,7 @@ export default function BookReader({ book, onBack, onChanged }: Props) {
         }, 1200);
       },
     }),
-    [book.slug, book.title]
+    [book.slug, book.title, isPaper, arxiv]
   );
 
   async function toggleFinished() {
@@ -65,6 +106,11 @@ export default function BookReader({ book, onBack, onChanged }: Props) {
           <strong>{book.title}</strong>
           {book.authors.length > 0 && <span className="muted"> · {book.authors.join(", ")}</span>}
         </div>
+        {!isPaper && (
+          <button type="button" className={`btn${notesOpen ? " btn-primary" : ""}`} onClick={() => setNotesOpen((v) => !v)}>
+            Book notes ({notes.length})
+          </button>
+        )}
         <ReadingTimerChip slug={book.slug} pageRef={pageRef} />
         <button type="button" className={`btn${status === "finished" ? " btn-primary" : ""}`} onClick={() => void toggleFinished()}>
           {status === "finished" ? "Finished ✓" : "Mark finished"}
@@ -74,9 +120,12 @@ export default function BookReader({ book, onBack, onChanged }: Props) {
         {!book.has_file ? (
           <div className="bk-empty muted">This book has no file yet. Go back and choose “Attach file…” from its ⋯ menu.</div>
         ) : book.format === "epub" ? (
-          <EpubReader book={book} pageRef={pageRef} />
+          <EpubReader book={book} pageRef={pageRef} onToNotes={isPaper ? undefined : (text, loc) => addNote(text, null, loc)} />
         ) : (
           <PdfViewer doc={doc} onClose={onBack} />
+        )}
+        {!isPaper && notesOpen && (
+          <BookNotesPanel slug={book.slug} notes={notes} onChange={setNotes} onClose={() => setNotesOpen(false)} />
         )}
       </div>
     </div>

@@ -17,6 +17,8 @@ export interface ReadingBook {
   total_pages: number | null;
   last_position: string;
   highlights: number;
+  /** Quotes saved to this item's notes (books). */
+  note_count?: number;
   last_opened: string | null;
   added: string | null;
   finished: string | null;
@@ -39,6 +41,16 @@ export interface ReadingBook {
   favorite: boolean;
   related: string[];
   zotero_key: string;
+}
+
+export interface ReadingNote {
+  id: string;
+  text: string;
+  page: number | null;
+  comment: string;
+  /** EPUB CFI (books in epub format) so the note can jump back. */
+  loc: string;
+  created: string;
 }
 
 export interface SavedSearch { id: string; name: string; q: string }
@@ -277,6 +289,14 @@ export const reading = {
   zoteroStatus: () => call<ZoteroImportStatus>("GET", "/api/reading/import-zotero/status"),
   syncAnnotations: () => call<AnnotationSyncStatus & { ok: boolean; started: boolean }>("POST", "/api/reading/sync-annotations"),
   annotationSyncStatus: () => call<AnnotationSyncStatus>("GET", "/api/reading/sync-annotations/status"),
+
+  notes: (slug: string) => call<{ notes: ReadingNote[] }>("GET", `/api/reading/${slug}/notes`),
+  addNote: (slug: string, n: { text: string; page?: number | null; comment?: string; loc?: string }) =>
+    call<{ ok: boolean; note: ReadingNote; count: number }>("POST", `/api/reading/${slug}/notes`, n),
+  saveNotes: (slug: string, notes: ReadingNote[]) => call<{ ok: boolean }>("PUT", `/api/reading/${slug}/notes`, { notes }),
+  notesLatex: (slug: string, o: { project?: string; pages?: boolean; heading?: boolean; comments?: boolean }) =>
+    call<{ ok: boolean; latex: string; citekey: string; count: number }>("POST", `/api/reading/${slug}/notes/latex`, o),
+  notesMarkdown: (slug: string) => call<{ markdown: string; count: number }>("GET", `/api/reading/${slug}/notes/markdown`),
 
   fileUrl: (slug: string) => `/api/reading/${slug}/file`,
   coverUrl: (slug: string) => `/api/reading/${slug}/cover`,

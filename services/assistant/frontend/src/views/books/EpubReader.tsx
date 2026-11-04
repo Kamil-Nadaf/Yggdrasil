@@ -26,7 +26,11 @@ function cssVar(name: string, fallback: string): string {
   return v || fallback;
 }
 
-export default function EpubReader({ book: meta, pageRef }: { book: ReadingBook; pageRef: MutableRefObject<number | undefined> }) {
+export default function EpubReader({ book: meta, pageRef, onToNotes }: {
+  book: ReadingBook; pageRef: MutableRefObject<number | undefined>;
+  /** Books: save the selected text to the book's notes (shown as “→ Notes”). */
+  onToNotes?: (text: string, loc: string, chapter: string) => Promise<void>;
+}) {
   const host = useRef<HTMLDivElement>(null);
   const bookRef = useRef<Book | null>(null);
   const rendRef = useRef<Rendition | null>(null);
@@ -257,6 +261,18 @@ export default function EpubReader({ book: meta, pageRef }: { book: ReadingBook;
     if (openNote) { setPanel("notes"); setFocusId(h.id); }
   }
 
+  async function toNotes() {
+    if (!sel || !onToNotes) return;
+    const s = sel;
+    try {
+      await onToNotes(s.text, s.cfi, chapterFor(s.chapter) || "");
+      addHighlight(COLORS[0].css);
+      showToast("Added to notes ✓");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Couldn’t add to notes");
+    }
+  }
+
   function goTo(cfi: string) {
     void rendRef.current?.display(cfi);
   }
@@ -314,6 +330,7 @@ export default function EpubReader({ book: meta, pageRef }: { book: ReadingBook;
                 <button key={c.name} type="button" className="pdfv-swatch" style={{ background: c.css }} title={`Highlight ${c.name.toLowerCase()}`} onClick={() => addHighlight(c.css)} />
               ))}
               <button type="button" className="btn" onClick={() => addHighlight(COLORS[0].css, true)}>+ Note</button>
+              {onToNotes && <button type="button" className="btn btn-primary" onClick={() => void toNotes()} title="Save this text to the book's notes (importable into LaTeX)">→ Notes</button>}
               <button type="button" className="btn" onClick={() => setSel(null)} aria-label="Dismiss">×</button>
             </span>
           </div>

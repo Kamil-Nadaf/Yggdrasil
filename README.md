@@ -284,3 +284,6 @@ The Gate is the integrity mechanism — it forces you to think before AI assists
 ## For Agents (Cursor / Copilot / Claude Code)
 
 See **AGENTS.md** for the full build specification.
+
+### Book notes and papers
+In **Collection**, papers (anything with an arXiv ID, or saved as a paper) open with the CERIC row when you select text. Books don't: select text and choose **→ Notes** to collect quotes (with page numbers) in the *Book notes* panel, add your own comments, then in the **LaTeX** editor click **notes** to insert them as quoted text with `\cite` entries (the book is added to the project's `references.bib`).

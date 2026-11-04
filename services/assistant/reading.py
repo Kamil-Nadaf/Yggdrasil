@@ -38,6 +38,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+import book_notes
 import citations
 from starlette.concurrency import run_in_threadpool
 
@@ -218,6 +219,24 @@ class ImportRefs(BaseModel):
 
 class HighlightsPayload(BaseModel):
     highlights: list[dict[str, Any]] = []
+
+
+class NoteAdd(BaseModel):
+    text: str
+    page: Optional[int] = None
+    comment: str = ""
+    loc: str = ""
+
+
+class NotesPayload(BaseModel):
+    notes: list[dict[str, Any]] = []
+
+
+class NotesLatexPayload(BaseModel):
+    project: str = ""  # LaTeX project folder; when set, \cite keys are created and added to its references.bib
+    pages: bool = True
+    heading: bool = True
+    comments: bool = True
 
 
 class CollectionsPayload(BaseModel):
@@ -563,6 +582,7 @@ def make_router(get_vault: Callable[[], Path], write_habits: Callable[[str, dict
             "favorite": bool(fm.get("favorite")),
             "related": [r for r in (fm.get("related") or []) if isinstance(r, str)],
             "zotero_key": fm.get("zotero_key") or "",
+            "note_count": count_json_list(d / "notes.json", "notes"),
         }
 
     def unique_slug(base: str) -> str:
@@ -1181,7 +1201,7 @@ def make_router(get_vault: Callable[[], Path], write_habits: Callable[[str, dict
             if not book_file(dk) and (src := book_file(dr)):
                 os.replace(src[0], dk / src[0].name)
                 upd["format"] = src[1]
-                for extra in ("annotations.json", "highlights.json"):
+                for extra in ("annotations.json", "highlights.json", "notes.json"):
                     if (dr / extra).is_file() and not (dk / extra).exists():
                         os.replace(dr / extra, dk / extra)
             if not cover_file(dk) and (cv := cover_file(dr)):
@@ -1612,6 +1632,69 @@ def make_router(get_vault: Callable[[], Path], write_habits: Callable[[str, dict
         existing_book(slug)
         purge(slug)
         return {"ok": True, "slug": slug}
+
+    # ── Reading notes (selected text sent "to notes"; imported into the LaTeX editor) ──
+
+    def read_notes(d: Path) -> list[dict[str, Any]]:
+        data = _json_read(d / "notes.json", {})
+        items = data.get("notes") if isinstance(data, dict) else []
+        return [n for n in items if isinstance(n, dict)] if isinstance(items, list) else []
+
+    def clean_note(n: dict[str, Any]) -> dict[str, Any]:
+        pg = n.get("page")
+        return {
+            "id": str(n.get("id") or f"n_{secrets.token_hex(4)}")[:40],
+            "text": book_notes.clean_text(str(n.get("text") or ""))[:6000],
+            "page": int(pg) if isinstance(pg, (int, float)) and pg > 0 else None,
+            "comment": str(n.get("comment") or "")[:4000],
+            "loc": str(n.get("loc") or "")[:300],
+            "created": str(n.get("created") or datetime.now(timezone.utc).isoformat()),
+        }
+
+    @router.get("/{slug}/notes")
+    async def get_notes(slug: str):
+        return {"notes": read_notes(existing_book(slug))}
+
+    @router.post("/{slug}/notes")
+    async def add_note(slug: str, payload: NoteAdd):
+        d = existing_book(slug)
+        note = clean_note({"text": payload.text, "page": payload.page, "comment": payload.comment, "loc": payload.loc})
+        if not note["text"]:
+            raise HTTPException(status_code=400, detail="Nothing selected")
+        notes = read_notes(d)
+        if len(notes) >= 2000:
+            raise HTTPException(status_code=400, detail="Too many notes")
+        notes.append(note)
+        _json_write(d / "notes.json", {"notes": notes})
+        return {"ok": True, "note": note, "count": len(notes)}
+
+    @router.put("/{slug}/notes")
+    async def put_notes(slug: str, payload: NotesPayload):
+        d = existing_book(slug)
+        if len(payload.notes) > 2000:
+            raise HTTPException(status_code=400, detail="Too many notes")
+        notes = [clean_note(n) for n in payload.notes]
+        _json_write(d / "notes.json", {"notes": [n for n in notes if n["text"]]})
+        return {"ok": True}
+
+    @router.post("/{slug}/notes/latex")
+    async def notes_latex(slug: str, payload: NotesLatexPayload):
+        d = existing_book(slug)
+        item = summary(d) or {}
+        notes = read_notes(d)
+        if not notes:
+            raise HTTPException(status_code=404, detail="This item has no notes yet")
+        key = ""
+        if payload.project.strip():
+            res = await latex_bib(LatexBibPayload(project=payload.project, slugs=[slug]))
+            key = res["keys"].get(slug, "")
+        tex = book_notes.build_latex(item, notes, citekey=key, pages=payload.pages, heading=payload.heading, comments=payload.comments)
+        return {"ok": True, "latex": tex, "citekey": key, "count": len(notes)}
+
+    @router.get("/{slug}/notes/markdown")
+    async def notes_markdown(slug: str):
+        d = existing_book(slug)
+        return {"markdown": book_notes.build_markdown(summary(d) or {}, read_notes(d))}
 
     @router.get("/{slug}/highlights")
     async def get_highlights(slug: str):

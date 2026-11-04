@@ -22,6 +22,8 @@ export interface PdfDoc {
   onPage?: (page: number, total: number) => void;
   /** Hide controls that only make sense for papers fetched from the web. */
   embedded?: boolean;
+  /** Books: selected text can be sent straight to the book's notes (no CERIC). */
+  notes?: { add: (text: string, page: number) => Promise<void> };
 }
 
 /** Provided by PapersView; null outside it (callers then fall back to a normal link). */
@@ -469,6 +471,18 @@ export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () =
     if (opts.note) { setNotesOpen(true); setFocusId(a.id); }
   }
 
+  async function toNotes() {
+    if (!doc.notes || !sel) return;
+    const snap = sel;
+    try {
+      await doc.notes.add(snap.text, snap.page);
+      applySel(prefs.defaultColor, { from: snap });
+      showToast("Added to notes ✓", true);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Couldn’t add to notes", false);
+    }
+  }
+
   async function addToCeric(slotKey: string, index: number) {
     if (!doc.paper || !sel) return;
     const snap = sel;
@@ -599,6 +613,7 @@ export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () =
           <PdfSelectionPopup
             x={anchor.x} y={anchor.y} below={anchor.below} prefs={prefs} markup={markup} onMarkup={setMarkup} text={sel.text}
             onPick={(c) => applySel(c)} onNote={() => applySel(prefs.defaultColor, { note: true })}
+            onToNotes={doc.notes ? () => void toNotes() : undefined}
             slots={doc.paper ? cer.slots : null} addingSlot={cer.addingSlot} onCeric={(k) => addToCeric(k, cer.slots.findIndex((x) => x.key === k))}
           />
         )}

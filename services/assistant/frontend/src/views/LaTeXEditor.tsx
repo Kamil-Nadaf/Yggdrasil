@@ -27,6 +27,7 @@ import IconFigure from "../components/IconFigure";
 import LatexAssetViewer from "../components/LatexAssetViewer";
 import LatexFigurePicker from "../components/LatexFigurePicker";
 import CitePicker, { type CiteCommand } from "./books/CitePicker";
+import NotesImportPicker from "./books/NotesImportPicker";
 import { apiErrorMessage } from "../lib/apiError";
 import { downloadBlobUrl, downloadBase64 } from "../lib/download";
 import { imageExt, imageFileName, imageFilesFrom } from "../lib/pastedImages";
@@ -240,6 +241,7 @@ function EditorPane({
         <button type="button" className="latex-fmt-btn" title="Inline math" aria-label="Inline math" {...pressKeepFocus(() => onTool("math"))}>$x$</button>
         <button type="button" className="latex-fmt-btn" title="Display math" aria-label="Display math" {...pressKeepFocus(() => onTool("displaymath"))}>⟦⟧</button>
         <button type="button" className="latex-fmt-btn" title="Cite" aria-label="Cite" {...pressKeepFocus(() => onTool("cite"))}>cite</button>
+        <button type="button" className="latex-fmt-btn" title="Import notes from a book" aria-label="Import notes" {...pressKeepFocus(() => onTool("notes"))}>notes</button>
         <button type="button" className="latex-fmt-btn" title="Label" aria-label="Label" {...pressKeepFocus(() => onTool("label"))}>lbl</button>
         <button type="button" className="latex-fmt-btn" title="Reference" aria-label="Reference" {...pressKeepFocus(() => onTool("ref"))}>ref</button>
         <span className="latex-fmt-sep" />
@@ -446,6 +448,7 @@ export default function LaTeXEditor() {
   const [viewAsset, setViewAsset] = useState<string | null>(null);
   const [figureOpen, setFigureOpen] = useState(false);
   const [citeOpen, setCiteOpen] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
   // Always points at the latest closure so the CodeMirror paste/drop handlers (created once) see current state.
   const imageInsertRef = useRef<(files: File[]) => void>(() => {});
   const editorVisible = viewMode !== "pdf";
@@ -560,6 +563,29 @@ export default function LaTeXEditor() {
       }
     }
     view.dispatch({ changes, selection: { anchor: sel.from + text.length } });
+    view.focus();
+    setDirty(true);
+    setSaveMsg({ text: note, ok: true });
+    setTimeout(() => setSaveMsg(null), 4000);
+  }
+
+  /** Insert LaTeX built from a book's saved notes at the cursor; make sure the document loads references.bib. */
+  function insertNotes(latex: string, count: number, bibPath: string) {
+    setNotesOpen(false);
+    const view = viewRef.current;
+    if (!view || !latex.trim()) return;
+    const sel = view.state.selection.main;
+    const changes: { from: number; to?: number; insert: string }[] = [{ from: sel.from, to: sel.to, insert: latex }];
+    const doc = view.state.doc.toString();
+    let note = `Imported ${count} note${count === 1 ? "" : "s"}`;
+    if (bibPath && !/\\bibliography\s*\{|\\addbibresource|\\begin\{thebibliography\}|\\printbibliography/.test(doc)) {
+      const end = doc.lastIndexOf("\\end{document}");
+      if (end >= 0) {
+        changes.push({ from: end, insert: "\\bibliographystyle{plain}\n\\bibliography{references}\n\n" });
+        note += "; added \\bibliography{references}";
+      }
+    }
+    view.dispatch({ changes, selection: { anchor: sel.from + latex.length } });
     view.focus();
     setDirty(true);
     setSaveMsg({ text: note, ok: true });
@@ -724,6 +750,9 @@ export default function LaTeXEditor() {
         break;
       case "cite":
         setCiteOpen(true);
+        break;
+      case "notes":
+        setNotesOpen(true);
         break;
       case "label":
         wrapOrInsert("\\label{", "}", "sec:id");
@@ -1538,6 +1567,13 @@ export default function LaTeXEditor() {
           fileInputRef.current?.click();
         }}
       />
+      {notesOpen && (
+        <NotesImportPicker
+          project={filename.includes("/") ? filename.split("/")[0] : ""}
+          onClose={() => setNotesOpen(false)}
+          onInsert={insertNotes}
+        />
+      )}
       {citeOpen && (
         <CitePicker
           project={filename.includes("/") ? filename.split("/")[0] : ""}

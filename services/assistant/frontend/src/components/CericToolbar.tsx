@@ -78,7 +78,7 @@ export function useCericAppend(showToast: (text: string, ok: boolean) => void) {
       await api.papers.appendSlot(paper.id, slotKey, selectedText, {
         title: paper.title,
         authors: paper.authors,
-        arxiv: paper.id,
+        arxiv: /^(\d{4}\.\d{4,5}|[a-z-]+(\.[A-Z]{2})?_\d{7})(v\d+)?$/.test(paper.id) ? paper.id : undefined,
         year,
       });
       const label = slots.find((s) => s.key === slotKey)?.label || slotKey;

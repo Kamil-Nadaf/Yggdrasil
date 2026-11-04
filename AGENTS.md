@@ -1264,3 +1264,9 @@ Types: highlight/underline/note/text/ink sync; `area` stays local (Zotero image 
 `itemType: annotation`; Zotero documents annotation writes poorly, so rejected creates are surfaced in the dialog (pull still works). Colours map to Zotero's
 8-colour palette on push; our custom colours are kept locally.
 
+
+### Book notes → LaTeX, papers get CERIC (v0.4.3)
+- Collection items open in `BookReader`. **Paper** = has an arXiv id (`arxivIdOf`) or `kind === "paper"`: `PdfDoc.paper` is set, so the PDF selection popup shows the CERIC row (`id` = arXiv id with `/`→`_`, else citekey/slug; `CericToolbar` only sends `arxiv` when the id looks like one). **Book** = everything else: no CERIC; `PdfDoc.notes.add` gives a "→ Notes" pill (EPUB: `onToNotes`, stores the CFI in `loc`).
+- Notes live in `15-Books/{slug}/notes.json` (`{id,text,page,comment,loc,created}`); endpoints `GET/POST/PUT /api/reading/{slug}/notes`, `POST .../notes/latex` (optional `project` also writes the `references.bib` entry and returns the citekey), `GET .../notes/markdown`. `book_notes.py` cleans PDF text (hyphenation, ligatures), escapes LaTeX and builds `\begin{quote}…\cite[p.~N]{key}\end{quote}`. `summary()` exposes `note_count`.
+- UI: reader "Book notes (n)" panel (`BookNotesPanel`, comments, copy MD/LaTeX); LaTeX editor toolbar "notes" → `NotesImportPicker` inserts at the cursor and adds `\bibliography{references}` if missing.
+- Tests: `test_book_notes.py` (incl. a real pdflatex compile when installed), `test_book_notes_api.py`. No new Python deps, so this ships as a hot update.

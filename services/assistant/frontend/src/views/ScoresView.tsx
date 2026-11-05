@@ -2,7 +2,12 @@ import { useEffect, useMemo, useRef, useState, Fragment, type CSSProperties, typ
 import "./dashboard-resize.css";
 import FitContent from "../components/FitContent";
 import ReadingGoalsCard from "../components/ReadingGoalsCard";
-import { api, type ActiveMainTask, type Goal, type Subtask } from "../api/client";
+import { api, type ActiveMainTask, type Goal, type Subtask, type TaskPriorityDef, type TaskStatusDef } from "../api/client";
+import StatusPill from "../components/StatusPill";
+import { PriorityPill, TimerButton } from "./tasks/TaskBits";
+import { useNow } from "./tasks/useTaskData";
+import { ensureTaskStatuses, getCachedTaskStatuses, TASK_STATUSES_EVENT } from "../lib/taskStatuses";
+import { ensureTaskOptions, getCachedPriorities, TASK_OPTIONS_EVENT } from "../lib/taskOptions";
 import {
   type HabitDef,
   loadHabitDefs,
@@ -664,6 +669,21 @@ export default function ScoresView({
   const [addingHabit, setAddingHabit] = useState(false);
   const [editingHabits, setEditingHabits] = useState(false);
   const [allTasks, setAllTasks] = useState<(ActiveMainTask & { active: boolean })[]>([]);
+  const [taskStatuses, setTaskStatuses] = useState<TaskStatusDef[]>(() => getCachedTaskStatuses());
+  const [taskPriorities, setTaskPriorities] = useState<TaskPriorityDef[]>(() => getCachedPriorities());
+  const timerNow = useNow(allTasks.some((t) => t.active && t.timer_started_at));
+  useEffect(() => {
+    void ensureTaskStatuses(() => api.taskStatuses.get()).then(setTaskStatuses);
+    void ensureTaskOptions().then(() => setTaskPriorities(getCachedPriorities()));
+    const onS = () => setTaskStatuses(getCachedTaskStatuses());
+    const onO = () => setTaskPriorities(getCachedPriorities());
+    window.addEventListener(TASK_STATUSES_EVENT, onS);
+    window.addEventListener(TASK_OPTIONS_EVENT, onO);
+    return () => {
+      window.removeEventListener(TASK_STATUSES_EVENT, onS);
+      window.removeEventListener(TASK_OPTIONS_EVENT, onO);
+    };
+  }, []);
   const [heights, setHeights] = useState<Partial<Record<DashWidget, number>>>(() => loadHeights());
   const [goals, setGoals] = useState<Goal[]>([]);
   const [addingGoal, setAddingGoal] = useState(false);
@@ -715,6 +735,11 @@ export default function ScoresView({
                 deadline: m.deadline,
                 subtask_done: m.subtask_done,
                 subtask_total: m.subtask_total,
+                status_id: m.status_id,
+                priority_id: m.priority_id,
+                estimate_min: m.estimate_min,
+                tracked_sec: m.tracked_sec,
+                timer_started_at: m.timer_started_at,
                 active: activeIds.has(`${pr.slug}:${m.id}`) || m.is_active,
               }))
             )
@@ -912,6 +937,26 @@ export default function ScoresView({
       return null;
     });
   }, [habitByDate, range.days]);
+
+  async function quickPatch(t: ActiveMainTask & { active: boolean }, body: Record<string, unknown>) {
+    setAllTasks((prev) =>
+      prev.map((x) => (x.project_slug === t.project_slug && x.main_task_id === t.main_task_id ? { ...x, ...body } : x))
+    );
+    try {
+      await api.taskItems.update(t.project_slug, t.main_task_id, body);
+      api.tasks.completedByDay(range.start, range.end).then((r) => setTaskCompletionDays(r.days)).catch(() => undefined);
+    } finally {
+      void reload();
+    }
+  }
+
+  async function quickTimer(t: ActiveMainTask & { active: boolean }) {
+    try {
+      await api.taskItems.timer(t.project_slug, t.main_task_id, t.timer_started_at ? "stop" : "start");
+    } finally {
+      void reload();
+    }
+  }
 
   async function toggleSubtask(t: ActiveMainTask & { active: boolean }, st: Subtask) {
     const key = `${t.project_slug}:${t.main_task_id}`;
@@ -1157,6 +1202,11 @@ export default function ScoresView({
                       {subs.length ? subs.filter(isSubDone).length : t.subtask_done}/{subs.length || t.subtask_total}{t.deadline ? ` · due ${t.deadline}` : ""}
                     </span>
                     <button type="button" className="dash-task-open" title="Open in Tasks" onClick={() => onOpenTask?.(t.project_slug, t.main_task_id)}>↗</button>
+                  </div>
+                  <div className="dash-task-quick">
+                    <StatusPill statuses={taskStatuses} statusId={t.status_id} onChange={(sid) => void quickPatch(t, { status_id: sid })} />
+                    <PriorityPill priorities={taskPriorities} value={t.priority_id} onChange={(pid) => void quickPatch(t, { priority_id: pid })} />
+                    <TimerButton item={t} now={timerNow} onToggle={() => void quickTimer(t)} />
                   </div>
                   {open && <SubtaskStepper subs={subs} onToggle={(st) => toggleSubtask(t, st)} />}
                 </div>

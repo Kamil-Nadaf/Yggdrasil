@@ -57,6 +57,7 @@ import { APP_COPYRIGHT, APP_LICENSE, APP_OWNER } from "../lib/copyright";
 import { DEFAULT_ANALYSIS_TAGS, setCachedAnalysisTags, tagToKey } from "../lib/analysisTags";
 import { DEFAULT_TASK_STATUSES, setCachedTaskStatuses, STATUS_ICON_GLYPH, STATUS_ICON_CYCLE } from "../lib/taskStatuses";
 import type { TaskStatusDef, StatusIcon } from "../api/client";
+import TaskOptionsSettings from "./TaskOptionsSettings";
 import { flushSettingsNow } from "../lib/settingsSync";
 
 interface McpConnection {
@@ -242,6 +243,7 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
     editor: false,
     analysisTags: false,
     taskStatuses: false,
+    taskOptions: false,
     data: false,
     git: false,
     webdav: false,
@@ -1544,6 +1546,10 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
             )}
             {taskStatusesMsg && <div className="settings-info" style={{ marginTop: 8 }}>{taskStatusesMsg}</div>}
           </div>
+        </CollapsibleSection>
+
+        <CollapsibleSection id="taskOptions" title="Task Priorities & Tags" open={!!openSections.taskOptions} onToggle={() => toggle("taskOptions")}>
+          <TaskOptionsSettings />
         </CollapsibleSection>
 
         <CollapsibleSection id="updates" title="Updates" open={!!openSections.updates} onToggle={() => toggle("updates")}>

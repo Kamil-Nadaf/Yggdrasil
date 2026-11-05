@@ -5067,3 +5067,6 @@ h2 { font-size: 15px; color: var(--accent); }
   font-size: 13px;
 }
 .note-tags-hint { font-size: 11px; color: var(--muted); }
+
+/* Dashboard Active Tasks: quick status / priority / timer row */
+.dash-task-quick { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 4px 0 6px; }

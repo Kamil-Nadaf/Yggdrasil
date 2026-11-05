@@ -35,6 +35,10 @@ Routes:
   PUT  /api/task-projects/{slug}/main-tasks/{id}/subtasks/{sid}
   DELETE /api/task-projects/{slug}/main-tasks/{id}/subtasks/{sid}
   GET  /api/tasks/active-summary
+  GET  /api/tasks/all
+  GET|PUT|DELETE /api/task-items/{slug}/{id} (+ /timer, /files)
+  PUT  /api/task-projects/{slug}/options
+  GET|POST /api/settings/task-options
   GET  /api/tasks/completed-by-day
   GET  /api/graph
   GET  /api/zotero/search
@@ -106,6 +110,18 @@ from task_statuses import (
     DEFAULT_TASK_STATUSES,
     normalize_task_statuses,
     load_task_statuses,
+)
+from task_options import (
+    clean_allowed,
+    clean_date,
+    clean_estimate,
+    clean_relations,
+    clean_tag_ids,
+    load_priorities,
+    load_tags,
+    normalize_priorities,
+    normalize_tags,
+    timer_elapsed_sec,
 )
 from goals import load_goals, normalize_goals
 from notifications import (
@@ -371,6 +387,14 @@ def current_analysis_keys() -> list[str]:
 
 def current_task_statuses() -> list[dict]:
     return load_task_statuses(load_app_settings(VAULT))
+
+
+def current_task_priorities() -> list[dict]:
+    return load_priorities(load_app_settings(VAULT))
+
+
+def current_task_tags() -> list[dict]:
+    return load_tags(load_app_settings(VAULT))
 
 
 def current_goals() -> list[dict]:
@@ -2996,6 +3020,14 @@ def _now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+def _project_options(fm: dict) -> dict:
+    """Which custom statuses/priorities/tags this project offers. None = all of them."""
+    def pick(key: str):
+        v = fm.get(key)
+        return [str(x) for x in v] if isinstance(v, list) else None
+    return {"status_ids": pick("status_ids"), "priority_ids": pick("priority_ids"), "tag_ids": pick("tag_ids")}
+
+
 def _project_from_dir(d: Path) -> Optional[dict]:
     meta = d / "_project.md"
     if not meta.exists():
@@ -3008,6 +3040,7 @@ def _project_from_dir(d: Path) -> Optional[dict]:
         "pinned": d.name == PINNED_PROJECT_SLUG,
         "created_at": post.metadata.get("created_at") or "",
         "main_task_count": len(main_tasks),
+        "options": _project_options(post.metadata),
     }
 
 
@@ -3039,9 +3072,36 @@ def _subtask_counts(d: Path, main_task_id: str) -> tuple[int, int]:
     return done, total
 
 
-def _main_task_from_post(d: Path, task_id: str, post) -> dict:
+MAX_TIMER_SEC = 12 * 3600  # a timer left running overnight only counts a half day
+
+
+def _task_extras(d: Path, item_id: str, post) -> dict:
+    """Fields shared by main tasks and subtasks (priority, dates, estimate, tags, timer, links, files)."""
     fm = post.metadata
-    done, total = _subtask_counts(d, task_id)
+    files_dir = d / "_files" / item_id
+    files = []
+    if files_dir.is_dir():
+        for f in sorted(files_dir.iterdir()):
+            if f.is_file():
+                files.append({"name": f.name, "size": f.stat().st_size})
+    est = fm.get("estimate_min")
+    raw_tags = fm.get("tags")
+    return {
+        "priority_id": fm.get("priority_id") or None,
+        "start": str(fm.get("start")) if fm.get("start") else None,
+        "estimate_min": int(est) if isinstance(est, (int, float)) and est else None,
+        "tags": [str(t) for t in raw_tags] if isinstance(raw_tags, list) else [],
+        "tracked_sec": int(fm.get("tracked_sec") or 0),
+        "timer_started_at": fm.get("timer_started_at") or None,
+        "relations": clean_relations(fm.get("relations"), f"{d.name}/{item_id}"),
+        "files": files,
+        "has_note": bool((post.content or "").strip()),
+    }
+
+
+def _main_task_from_post(d: Path, task_id: str, post, counts: Optional[tuple[int, int]] = None) -> dict:
+    fm = post.metadata
+    done, total = counts if counts is not None else _subtask_counts(d, task_id)
     return {
         "id": task_id,
         "project_slug": d.name,
@@ -3052,6 +3112,7 @@ def _main_task_from_post(d: Path, task_id: str, post) -> dict:
         "created_at": fm.get("created_at") or "",
         "subtask_done": done,
         "subtask_total": total,
+        **_task_extras(d, task_id, post),
     }
 
 
@@ -3068,7 +3129,47 @@ def _subtask_from_post(d: Path, subtask_id: str, post) -> dict:
         "done": status_id == "done",
         "completed_at": fm.get("completed_at") or None,
         "created_at": fm.get("created_at") or "",
+        **_task_extras(d, subtask_id, post),
     }
+
+
+EXTRA_KEYS = ("priority_id", "start", "estimate_min", "tags", "note", "relations")
+
+
+class TaskExtras(BaseModel):
+    priority_id: Optional[str] = None
+    start: Optional[str] = None
+    estimate_min: Optional[int] = None
+    tags: Optional[list[str]] = None
+    note: Optional[str] = None
+    relations: Optional[list[dict]] = None
+
+
+def _apply_extras(post, data: dict, self_ref: str) -> None:
+    """Validate and write the shared extra fields — only the keys present in `data`."""
+    try:
+        if "priority_id" in data:
+            pid = data["priority_id"]
+            valid = {p["id"] for p in current_task_priorities()}
+            post.metadata["priority_id"] = pid if pid in valid else None
+        if "start" in data:
+            post.metadata["start"] = clean_date(data["start"])
+        if "estimate_min" in data:
+            post.metadata["estimate_min"] = clean_estimate(data["estimate_min"])
+        if "tags" in data:
+            post.metadata["tags"] = clean_tag_ids(data["tags"])
+        if "relations" in data:
+            post.metadata["relations"] = clean_relations(data["relations"], self_ref)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if data.get("note") is not None:
+        post.content = str(data["note"])
+
+
+def _remove_item_files(d: Path, item_id: str) -> None:
+    files_dir = d / "_files" / item_id
+    if files_dir.is_dir():
+        shutil.rmtree(files_dir, ignore_errors=True)
 
 
 def _main_task_path(slug: str, task_id: str) -> Path:
@@ -3141,7 +3242,7 @@ async def list_main_tasks(slug: str):
     return {"main_tasks": out}
 
 
-class MainTaskCreate(BaseModel):
+class MainTaskCreate(TaskExtras):
     name: str
     deadline: Optional[str] = None
     status_id: Optional[str] = None
@@ -3167,11 +3268,12 @@ async def create_main_task(slug: str, payload: MainTaskCreate):
             "created_at": _now_iso(),
         }
     )
+    _apply_extras(post, payload.model_dump(exclude_unset=True), f"{slug}/{task_id}")
     (d / f"{task_id}.md").write_text(frontmatter.dumps(post))
     return {"ok": True, "main_task": _main_task_from_post(d, task_id, post)}
 
 
-class MainTaskUpdate(BaseModel):
+class MainTaskUpdate(TaskExtras):
     name: Optional[str] = None
     deadline: Optional[str] = None
     is_active: Optional[bool] = None
@@ -3185,10 +3287,14 @@ async def update_main_task(slug: str, task_id: str, payload: MainTaskUpdate):
         raise HTTPException(status_code=404, detail="Main task not found")
     post = frontmatter.load(str(path))
     data = payload.model_dump(exclude_unset=True)
+    extras = {k: data.pop(k) for k in EXTRA_KEYS if k in data}
     if "status_id" in data:
         data["status_id"] = _normalize_status_id(data["status_id"])
+    if "name" in data and not str(data["name"] or "").strip():
+        raise HTTPException(status_code=400, detail="Name is required")
     for k, v in data.items():
         post.metadata[k] = v
+    _apply_extras(post, extras, f"{slug}/{task_id}")
     path.write_text(frontmatter.dumps(post))
     return {"ok": True, "main_task": _main_task_from_post(project_dir(slug), task_id, post)}
 
@@ -3202,7 +3308,9 @@ async def delete_main_task(slug: str, task_id: str):
     for p in d.glob("st-*.md"):
         post = frontmatter.load(str(p))
         if post.metadata.get("main_task_id") == task_id:
+            _remove_item_files(d, p.stem)
             p.unlink()
+    _remove_item_files(d, task_id)
     path.unlink()
     return {"ok": True, "id": task_id}
 
@@ -3221,7 +3329,7 @@ async def list_subtasks(slug: str, task_id: str):
     return {"subtasks": out}
 
 
-class SubtaskCreate(BaseModel):
+class SubtaskCreate(TaskExtras):
     name: str
     deadline: Optional[str] = None
     status_id: Optional[str] = None
@@ -3249,11 +3357,12 @@ async def create_subtask(slug: str, task_id: str, payload: SubtaskCreate):
             "created_at": _now_iso(),
         }
     )
+    _apply_extras(post, payload.model_dump(exclude_unset=True), f"{slug}/{subtask_id}")
     (d / f"{subtask_id}.md").write_text(frontmatter.dumps(post))
     return {"ok": True, "subtask": _subtask_from_post(d, subtask_id, post)}
 
 
-class SubtaskUpdate(BaseModel):
+class SubtaskUpdate(TaskExtras):
     name: Optional[str] = None
     deadline: Optional[str] = None
     status_id: Optional[str] = None
@@ -3266,6 +3375,7 @@ async def update_subtask(slug: str, task_id: str, subtask_id: str, payload: Subt
         raise HTTPException(status_code=404, detail="Subtask not found")
     post = frontmatter.load(str(path))
     data = payload.model_dump(exclude_unset=True)
+    extras = {k: data.pop(k) for k in EXTRA_KEYS if k in data}
     if "status_id" in data:
         data["status_id"] = _normalize_status_id(data["status_id"])
         was_done = _status_id_of(post.metadata) == "done"
@@ -3274,8 +3384,11 @@ async def update_subtask(slug: str, task_id: str, subtask_id: str, payload: Subt
             post.metadata["completed_at"] = _now_iso()
         elif not now_done and was_done:
             post.metadata["completed_at"] = None
+    if "name" in data and not str(data["name"] or "").strip():
+        raise HTTPException(status_code=400, detail="Name is required")
     for k, v in data.items():
         post.metadata[k] = v
+    _apply_extras(post, extras, f"{slug}/{subtask_id}")
     path.write_text(frontmatter.dumps(post))
     return {"ok": True, "subtask": _subtask_from_post(project_dir(slug), subtask_id, post)}
 
@@ -3285,8 +3398,319 @@ async def delete_subtask(slug: str, task_id: str, subtask_id: str):
     path = _subtask_path(slug, subtask_id)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Subtask not found")
+    _remove_item_files(project_dir(slug), subtask_id)
     path.unlink()
     return {"ok": True, "id": subtask_id}
+
+
+# ── Task items: one addressing scheme for main tasks and subtasks (the Task panel, timers, files) ──
+
+_ITEM_ID_RE = re.compile(r"^(mt|st)-[a-f0-9]{12}$")
+TASK_FILE_MAX_BYTES = 20 * 1024 * 1024
+
+
+def _item_path(slug: str, item_id: str) -> Path:
+    if not _ITEM_ID_RE.fullmatch(item_id or ""):
+        raise HTTPException(status_code=400, detail="Invalid task id")
+    path = project_dir(slug) / f"{item_id}.md"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Task not found")
+    return path
+
+
+def _item_out(slug: str, item_id: str, post) -> dict:
+    d = project_dir(slug)
+    if item_id.startswith("mt-"):
+        return {"kind": "main", **_main_task_from_post(d, item_id, post)}
+    return {"kind": "subtask", **_subtask_from_post(d, item_id, post)}
+
+
+@app.get("/api/task-items/{slug}/{item_id}")
+async def get_task_item(slug: str, item_id: str):
+    path = _item_path(slug, item_id)
+    post = frontmatter.load(str(path))
+    return {"item": _item_out(slug, item_id, post), "note": post.content or ""}
+
+
+@app.put("/api/task-items/{slug}/{item_id}")
+async def update_task_item(slug: str, item_id: str, payload: dict):
+    path = _item_path(slug, item_id)
+    if item_id.startswith("mt-"):
+        return await update_main_task(slug, item_id, MainTaskUpdate(**payload))
+    parent = frontmatter.load(str(path)).metadata.get("main_task_id") or ""
+    return await update_subtask(slug, parent, item_id, SubtaskUpdate(**payload))
+
+
+@app.delete("/api/task-items/{slug}/{item_id}")
+async def delete_task_item(slug: str, item_id: str):
+    path = _item_path(slug, item_id)
+    if item_id.startswith("mt-"):
+        return await delete_main_task(slug, item_id)
+    parent = frontmatter.load(str(path)).metadata.get("main_task_id") or ""
+    return await delete_subtask(slug, parent, item_id)
+
+
+def _stop_running_timers(except_ref: str = "") -> None:
+    """Only one timer runs at a time: bank the elapsed seconds of every other running one."""
+    now = _now_iso()
+    for d in tasks_dir().iterdir():
+        if not d.is_dir():
+            continue
+        for p in list(d.glob("mt-*.md")) + list(d.glob("st-*.md")):
+            if f"{d.name}/{p.stem}" == except_ref:
+                continue
+            try:
+                post = frontmatter.load(str(p))
+            except Exception:
+                continue
+            started = post.metadata.get("timer_started_at")
+            if not started:
+                continue
+            gained = min(MAX_TIMER_SEC, timer_elapsed_sec(started, now))
+            post.metadata["tracked_sec"] = int(post.metadata.get("tracked_sec") or 0) + gained
+            post.metadata["timer_started_at"] = None
+            p.write_text(frontmatter.dumps(post))
+
+
+class TimerPayload(BaseModel):
+    action: str  # "start" | "stop"
+
+
+@app.post("/api/task-items/{slug}/{item_id}/timer")
+async def task_item_timer(slug: str, item_id: str, payload: TimerPayload):
+    path = _item_path(slug, item_id)
+    if payload.action not in ("start", "stop"):
+        raise HTTPException(status_code=400, detail="action must be start or stop")
+    post = frontmatter.load(str(path))
+    now = _now_iso()
+    started = post.metadata.get("timer_started_at")
+    if payload.action == "start":
+        _stop_running_timers(except_ref=f"{slug}/{item_id}")
+        if not started:
+            post.metadata["timer_started_at"] = now
+    elif started:
+        gained = min(MAX_TIMER_SEC, timer_elapsed_sec(started, now))
+        post.metadata["tracked_sec"] = int(post.metadata.get("tracked_sec") or 0) + gained
+        post.metadata["timer_started_at"] = None
+    path.write_text(frontmatter.dumps(post))
+    return {"ok": True, "item": _item_out(slug, item_id, post)}
+
+
+def _safe_task_filename(name: str) -> str:
+    base = Path(str(name or "")).name
+    base = re.sub(r"[^A-Za-z0-9._ -]", "_", base).strip(" .")
+    if not base:
+        raise HTTPException(status_code=400, detail="Invalid file name")
+    return base[:160]
+
+
+class TaskFilePayload(BaseModel):
+    name: str
+    content_b64: str
+
+
+@app.post("/api/task-items/{slug}/{item_id}/files")
+async def upload_task_file(slug: str, item_id: str, payload: TaskFilePayload):
+    _item_path(slug, item_id)
+    import base64
+
+    try:
+        content = base64.b64decode(payload.content_b64, validate=True)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid file data: {exc}") from exc
+    if len(content) > TASK_FILE_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="File is larger than 20 MB")
+    name = _safe_task_filename(payload.name)
+    files_dir = project_dir(slug) / "_files" / item_id
+    files_dir.mkdir(parents=True, exist_ok=True)
+    target = files_dir / name
+    n = 1
+    while target.exists():
+        n += 1
+        target = files_dir / f"{Path(name).stem}-{n}{Path(name).suffix}"
+    target.write_bytes(content)
+    return {"ok": True, "file": {"name": target.name, "size": len(content)}}
+
+
+@app.get("/api/task-items/{slug}/{item_id}/files/{name}")
+async def get_task_file(slug: str, item_id: str, name: str):
+    _item_path(slug, item_id)
+    target = project_dir(slug) / "_files" / item_id / _safe_task_filename(name)
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(str(target), filename=target.name)
+
+
+@app.delete("/api/task-items/{slug}/{item_id}/files/{name}")
+async def delete_task_file(slug: str, item_id: str, name: str):
+    _item_path(slug, item_id)
+    target = project_dir(slug) / "_files" / item_id / _safe_task_filename(name)
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    target.unlink()
+    return {"ok": True}
+
+
+@app.get("/api/tasks/all")
+async def tasks_all():
+    """Every main task and subtask in one pass — feeds List/Board/Timeline/Gantt and the Task panel pickers."""
+    _ensure_pinned_project()
+    items: list[dict] = []
+    projects: list[dict] = []
+    for d in sorted(tasks_dir().iterdir()):
+        if not d.is_dir():
+            continue
+        project = _project_from_dir(d)
+        if not project:
+            continue
+        projects.append(project)
+        subs: list[dict] = []
+        counts: dict[str, list[int]] = {}
+        for p in sorted(d.glob("st-*.md")):
+            sub = _subtask_from_post(d, p.stem, frontmatter.load(str(p)))
+            subs.append(sub)
+            c = counts.setdefault(sub["main_task_id"] or "", [0, 0])
+            c[1] += 1
+            c[0] += 1 if sub["status_id"] == "done" else 0
+        names: dict[str, str] = {}
+        for p in sorted(d.glob("mt-*.md")):
+            mt = _main_task_from_post(d, p.stem, frontmatter.load(str(p)), tuple(counts.get(p.stem, [0, 0])))  # type: ignore[arg-type]
+            names[mt["id"]] = mt["name"]
+            items.append({"kind": "main", "ref": f"{d.name}/{mt['id']}", "project_name": project["name"], "main_task_name": "", **mt})
+        for sub in subs:
+            items.append(
+                {
+                    "kind": "subtask",
+                    "ref": f"{d.name}/{sub['id']}",
+                    "project_name": project["name"],
+                    "main_task_name": names.get(sub["main_task_id"] or "", ""),
+                    **sub,
+                }
+            )
+    refs = {i["ref"] for i in items}
+    blocking: dict[str, list[str]] = {}
+    for it in items:
+        it["relations"] = [r for r in it["relations"] if r["target"] in refs]
+        for r in it["relations"]:
+            if r["type"] == "blocked_by":
+                blocking.setdefault(r["target"], []).append(it["ref"])
+    for it in items:
+        it["blocking"] = blocking.get(it["ref"], [])
+    return {"items": items, "projects": projects}
+
+
+class ProjectOptionsPayload(BaseModel):
+    status_ids: Optional[list[str]] = None
+    priority_ids: Optional[list[str]] = None
+    tag_ids: Optional[list[str]] = None
+
+
+@app.put("/api/task-projects/{slug}/options")
+async def set_project_options(slug: str, payload: ProjectOptionsPayload):
+    """Choose which of the custom statuses/priorities/tags this project offers (null = all of them)."""
+    d = project_dir(slug)
+    meta = d / "_project.md"
+    if not meta.exists():
+        raise HTTPException(status_code=404, detail="Project not found")
+    data = payload.model_dump(exclude_unset=True)
+    valid = {
+        "status_ids": [s["id"] for s in current_task_statuses()],
+        "priority_ids": [p["id"] for p in current_task_priorities()],
+        "tag_ids": [t["id"] for t in current_task_tags()],
+    }
+    post = frontmatter.load(str(meta))
+    for key, value in data.items():
+        try:
+            cleaned = clean_allowed(value, valid[key])
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        if key == "status_ids" and cleaned is not None and not cleaned:
+            raise HTTPException(status_code=400, detail="A project needs at least one status")
+        post.metadata[key] = cleaned
+    meta.write_text(frontmatter.dumps(post))
+    return {"ok": True, "project": _project_from_dir(d)}
+
+
+def _task_option_usage() -> dict[str, dict[str, int]]:
+    priorities: dict[str, int] = {}
+    tags: dict[str, int] = {}
+    for d in tasks_dir().iterdir():
+        if not d.is_dir():
+            continue
+        for p in list(d.glob("mt-*.md")) + list(d.glob("st-*.md")):
+            try:
+                fm = frontmatter.load(str(p)).metadata
+            except Exception:
+                continue
+            pid = fm.get("priority_id")
+            if pid:
+                priorities[str(pid)] = priorities.get(str(pid), 0) + 1
+            for t in fm.get("tags") or []:
+                tags[str(t)] = tags.get(str(t), 0) + 1
+    return {"priorities": priorities, "tags": tags}
+
+
+def _purge_task_options(priority_ids: set[str], tag_ids: set[str]) -> None:
+    """Strip deleted priorities/tags from every task so no dangling ids are left behind."""
+    if not priority_ids and not tag_ids:
+        return
+    for d in tasks_dir().iterdir():
+        if not d.is_dir():
+            continue
+        for p in list(d.glob("mt-*.md")) + list(d.glob("st-*.md")):
+            try:
+                post = frontmatter.load(str(p))
+            except Exception:
+                continue
+            changed = False
+            if post.metadata.get("priority_id") in priority_ids:
+                post.metadata["priority_id"] = None
+                changed = True
+            tags = post.metadata.get("tags")
+            if isinstance(tags, list) and any(str(t) in tag_ids for t in tags):
+                post.metadata["tags"] = [t for t in tags if str(t) not in tag_ids]
+                changed = True
+            if changed:
+                p.write_text(frontmatter.dumps(post))
+
+
+@app.get("/api/settings/task-options")
+async def get_task_options():
+    return {
+        "task_priorities": current_task_priorities(),
+        "task_tags": current_task_tags(),
+        "usage": _task_option_usage(),
+    }
+
+
+class TaskOptionsPayload(BaseModel):
+    task_priorities: Optional[list[dict[str, Any]]] = None
+    task_tags: Optional[list[dict[str, Any]]] = None
+
+
+@app.post("/api/settings/task-options")
+async def set_task_options(payload: TaskOptionsPayload):
+    settings = load_app_settings(VAULT)
+    removed_p: set[str] = set()
+    removed_t: set[str] = set()
+    try:
+        if payload.task_priorities is not None:
+            new_p = normalize_priorities(payload.task_priorities)
+            removed_p = {p["id"] for p in current_task_priorities()} - {p["id"] for p in new_p}
+            settings["task_priorities"] = new_p
+        if payload.task_tags is not None:
+            new_t = normalize_tags(payload.task_tags)
+            removed_t = {t["id"] for t in current_task_tags()} - {t["id"] for t in new_t}
+            settings["task_tags"] = new_t
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    saved = save_app_settings(VAULT, settings)
+    _purge_task_options(removed_p, removed_t)
+    return {
+        "ok": True,
+        "task_priorities": load_priorities(saved),
+        "task_tags": load_tags(saved),
+    }
 
 
 @app.get("/api/tasks/active-summary")
@@ -3314,6 +3738,11 @@ async def tasks_active_summary():
                     "deadline": mt["deadline"],
                     "subtask_done": mt["subtask_done"],
                     "subtask_total": mt["subtask_total"],
+                    "status_id": mt["status_id"],
+                    "priority_id": mt["priority_id"],
+                    "estimate_min": mt["estimate_min"],
+                    "tracked_sec": mt["tracked_sec"],
+                    "timer_started_at": mt["timer_started_at"],
                 }
             )
     return {"active": out}

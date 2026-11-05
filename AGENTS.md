@@ -48,8 +48,8 @@ A browser-based reading tool with **eight views**, navigated via a horizontal to
 | **Daily Archive** | `search` | 3-panel Overleaf-style workflow: Daily Papers → Shortlisted → My List (reading pane), resizable via `react-resizable-panels` |
 | **Search** | `browse` | Direct arXiv search (keyword / author / title / arXiv ID-URL fields, paginated) without leaving the app; supports the same select-text→CERIC toolbar as Daily Archive |
 | **Notes** | `editor` | Fill 5 active-reading slots + Adversarial Question for a single paper; has an internal **Collection** tab listing all papers with filters + progress bars |
-| **Tasks** | `tasks` | Project → main task → subtask tree, collapsible per project (pinned "Daily Habits" first) + Kanban (To Do / Done, keyed off subtask `done`) via `@dnd-kit/core`; vault `80-Tasks/` |
-| **Calendar** | `calendar` | Month view of every task/subtask deadline; click an item to open it in Tasks; desktop deadline reminders |
+| **Tasks** | `tasks` | Tabs Calendar · List · Board · Timeline · Gantt over projects → main tasks → subtasks, with a slide-in task panel (status, priority, start–deadline, estimate, timer, tags, subtasks, related items, note + Export to notes, files); vault `80-Tasks/` |
+| **Calendar** | *(tab inside Tasks)* | Month/week/day/schedule view of events + every task/subtask deadline; click a deadline to open it in the task panel; desktop deadline reminders |
 | **Graph** | `graph` | D3 force-directed graph of [[wikilink]] connections between notes |
 | **Ask** | `ask` | Search own notes via `/locate` and `/ask`; optional `/examine` after CERIC complete |
 | **LaTeX** | `latex` | Overleaf-style LaTeX editor: write → live PDF preview → save to vault, 3-pane resizable (file tree / editor / preview) |
@@ -115,7 +115,7 @@ yggdrasil/
                 │                                and Data Sync (Cloud/WebDAV) sections
                 └── views/
                     ├── ScoresView.tsx     (Dashboard)
-                    ├── CalendarView.tsx   (Calendar — deadlines by date)
+                    ├── CalendarView.tsx   (Calendar tab inside Tasks)
                     ├── ArxivSearch.tsx    (Daily Archive — 3-panel)
                     ├── ArxivBrowser.tsx   (Search)
                     ├── Triage.tsx
@@ -527,7 +527,8 @@ DELETE /api/task-projects/{slug}/main-tasks/{id}/subtasks/{sid}
 
 GET  /api/tasks/active-summary
   → { active: [{project_slug, project_name, main_task_id, main_task_name,
-                deadline, subtask_done, subtask_total}] }
+                deadline, subtask_done, subtask_total, status_id, priority_id,
+                estimate_min, tracked_sec, timer_started_at}] }
   Every `is_active` main task across every project — feeds the Dashboard's
   one-progress-bar-per-active-main-task list.
 
@@ -540,6 +541,37 @@ GET  /api/tasks/calendar
   → { items: [{kind: "main"|"subtask", id, name, deadline, status_id, done,
                project_slug, project_name, main_task_id, main_task_name}] }
   Every main task and subtask with a valid deadline, sorted by date. Read-only; feeds the Calendar view.
+
+GET  /api/tasks/all
+  → { items: [TaskItem], projects: [TaskProject] } — every main task and
+  subtask in one pass (kind "main"|"subtask", ref "slug/id", project_name,
+  main_task_name, relations pruned to existing targets, derived `blocking[]`).
+  Feeds List / Board / Timeline / Gantt and the relation picker.
+
+Task item fields (main tasks and subtasks share them; stored as frontmatter in
+the task's `.md`, note text is the markdown body): `priority_id`, `start`
+(YYYY-MM-DD), `estimate_min`, `tags[]` (ids), `tracked_sec`, `timer_started_at`,
+`relations[] {type: "blocked_by"|"related", target: "slug/id"}`, `files[]`
+(`_files/{id}/` next to the task), `has_note`. Create/update bodies for
+main tasks and subtasks accept `priority_id, start, estimate_min, tags, note,
+relations` alongside the old fields.
+
+GET|PUT|DELETE /api/task-items/{slug}/{id}
+  One addressing scheme for main tasks (`mt-…`) and subtasks (`st-…`). GET also
+  returns the `note`. PUT/DELETE delegate to the main-task / subtask handlers.
+POST /api/task-items/{slug}/{id}/timer   body {action: "start"|"stop"}
+  Only one timer runs at a time — starting one stops (and banks the time of) any
+  other; a single stretch is capped at 12 h (`MAX_TIMER_SEC`).
+POST /api/task-items/{slug}/{id}/files   body {name, content_b64}  (20 MB cap,
+  filename sanitised + de-duplicated); GET|DELETE …/files/{name}.
+PUT  /api/task-projects/{slug}/options   body {status_ids?, priority_ids?, tag_ids?}
+  Per-project subset of the global custom lists (null = everything; at least one
+  status). Projects expose it as `options` on `GET /api/task-projects`.
+GET|POST /api/settings/task-options
+  → { task_priorities: [{id,name,color}], task_tags: [{id,name,color}], usage }.
+  Priorities need at least one entry; tags may be empty. Removing an option
+  clears it from every task that used it. Statuses stay on
+  `/api/settings/task-statuses`. Pure helpers live in `task_options.py`.
 
 GET  /api/notifications/settings        → { enabled, desktop }
 POST /api/notifications/settings        body { enabled } → { enabled, desktop }
@@ -601,30 +633,46 @@ percentages. Sections, top to bottom:
 - **Activity** — week/month/year habit heatmap; the "Subtasks done" row is
   sourced from `/api/tasks/completed-by-day`, not from points.
 
-### Tasks view (`TasksView.tsx`, nav id `tasks`)
+### Tasks view (`views/TasksView.tsx`, nav id `tasks`)
 
-3-level tree — project → main task → subtask, each project a collapsible
-group (`▸`/`▾`). `_daily-habits` ("Daily Habits") is a permanent pinned
-project, always listed first, can't be deleted. `[+ New Project]` creates
-another. Header also has a status filter (`all` / To Do / In Progress /
-Done) and a "Sort by status" toggle, applied client-side to both main tasks
-and subtasks currently loaded.
+`TasksView` is a thin shell (SubTabs **Calendar · List · Board · Timeline ·
+Gantt**, project filter, "Show done", `+ New task`, `+ Project`, per-project
+"Project options") around `useTaskData()` (`views/tasks/useTaskData.ts`: one
+`GET /api/tasks/all`, the custom status/priority/tag lists, optimistic `patch`,
+`toggleTimer`). The last tab/project/filter is remembered in localStorage.
+Everything is in `views/tasks/` and styled by `tasks.css` using **only the
+app-wide theme tokens** (`--bg --surface --border --text --muted --accent --ok
+--crit`), so every theme (dark, paper, tactile, observatory, manuscript,
+notebook, custom) applies automatically.
 
-Expanding a project lists its main tasks; each main task row shows a `★`/`☆`
-active toggle (controls Dashboard visibility), a `StatusPill`
-(`components/StatusPill.tsx` — ○ To Do / ◐ In Progress / ● Done; click opens
-a dropdown of the other two, ClickUp-style; icon + label only, no hue, per
-the e-ink theme), a live "x/y subtasks" count + fill-weight progress bar, a
-`DeadlinePicker` (plain native date input), and expands to its subtasks
-(checkbox + name + its own `StatusPill` + independent `DeadlinePicker`). The
-subtask checkbox is a quick-complete shortcut (jumps to Done, or back to To
-Do) layered on the same `status` field the pill writes — not separate state.
-
-A List/Kanban toggle switches to a 3-column (To Do / In Progress / Done)
-board of **main task** cards gathered across every project (name, parent
-project name, "x/y subtasks" if any) — drag between columns via
-`@dnd-kit/core`, writing `main_task.status`, the exact field the List
-view's pill reads/writes.
+- **List** — grouped by Status or Project; rows show star, status pill,
+  priority, tags, dates, estimate, timer; expand a main task for subtasks and an
+  inline "+ Add subtask".
+- **Board** — columns = statuses (narrowed to the project's allowed statuses
+  when one project is selected), `@dnd-kit/core` drag writes `status_id`;
+  optional subtask cards.
+- **Timeline** — project swimlanes, overlapping tasks packed into lanes;
+  dateless tasks listed under "No dates". **Gantt** — one row per task with
+  subtasks nested, progress fill, and arrows for `blocked_by` links. Bars drag
+  horizontally to reschedule (`shiftBody`); zoom and Today controls
+  (`TimeChart.tsx`, `lib/taskDates.ts`).
+- **Calendar** — the existing `CalendarView`, unchanged; clicking a deadline
+  opens the task panel. The old standalone Calendar nav item was removed.
+- **Task panel** (`TaskPanel.tsx`) — autosaves: status, priority, start →
+  deadline, estimate ("4h", "90m", "1h 30m" via `parseMinutes`), timer, tags,
+  star, subtasks, related items (Related to / Blocked by / Blocking — "Blocking"
+  writes `blocked_by` on the other task), markdown note, files. **Copy note**
+  copies the text; **Export to notes** (`ExportNoteDialog.tsx`) appends to an
+  existing note (end, or top after front matter) or creates a new one in any
+  Notes folder, optionally with a "From task:" line.
+- **Custom lists** — statuses, priorities and tags are all user-defined in
+  Settings (Task Statuses; Task Priorities & Tags → `TaskOptionsSettings.tsx`).
+  "Project options" picks which of them a project offers (`lib/taskOptions.ts`
+  `allowedFor`). Priority/status are labelled by name/glyph; colour is a
+  secondary accent (e-ink safe).
+- **Dashboard** — each starred task in the Active Tasks card has a quick row:
+  status pill, priority pill and start/stop timer (live clock), so tasks can be
+  updated without opening Tasks.
 
 ### Calendar view (`CalendarView.tsx`, nav id `calendar`)
 

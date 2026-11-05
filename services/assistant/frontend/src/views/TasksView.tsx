@@ -1,47 +1,128 @@
-import SubTabs from "../components/SubTabs";
 import { useCallback, useEffect, useState } from "react";
-import {
-  DndContext,
-  DragOverlay,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  useDroppable,
-  useDraggable,
-  type DragEndEvent,
-  type DragStartEvent,
-} from "@dnd-kit/core";
-import { api, type TaskProject, type MainTask, type Subtask, type TaskStatusDef } from "../api/client";
+import { api } from "../api/client";
+import type { TaskItem, TaskProject } from "../api/client";
 import { LatexPromptModal } from "../components/LatexMenuBar";
-import DeadlinePicker from "../components/DeadlinePicker";
-import StatusPill from "../components/StatusPill";
-import {
-  ensureTaskStatuses,
-  getCachedTaskStatuses,
-  TASK_STATUSES_EVENT,
-  STATUS_ICON_GLYPH,
-} from "../lib/taskStatuses";
+import SubTabs from "../components/SubTabs";
+import { allowedFor } from "../lib/taskOptions";
+import CalendarView from "./CalendarView";
+import BoardView from "./tasks/BoardView";
+import GanttView from "./tasks/GanttView";
+import ListView from "./tasks/ListView";
+import TaskPanel from "./tasks/TaskPanel";
+import TimelineView from "./tasks/TimelineView";
+import { doneStatusId } from "./tasks/TaskBits";
+import { useNow, useTaskData } from "./tasks/useTaskData";
+import "./tasks/tasks.css";
 
-type Mode = "list" | "kanban";
-type StatusFilter = "all" | string;
+type Tab = "calendar" | "list" | "board" | "timeline" | "gantt";
+const TABS: { id: Tab; label: string }[] = [
+  { id: "calendar", label: "Calendar" },
+  { id: "list", label: "List" },
+  { id: "board", label: "Board" },
+  { id: "timeline", label: "Timeline" },
+  { id: "gantt", label: "Gantt" },
+];
+const TAB_KEY = "yggdrasil:tasks-tab";
+const PROJECT_KEY = "yggdrasil:tasks-project";
+const DONE_KEY = "yggdrasil:tasks-show-done";
 
-function mtKey(projectSlug: string, mainTaskId: string) {
-  return `${projectSlug}:${mainTaskId}`;
+function readLS(key: string, fallback: string): string {
+  try {
+    return localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+function writeLS(key: string, v: string) {
+  try {
+    localStorage.setItem(key, v);
+  } catch {
+    /* optional */
+  }
 }
 
-function ProgressBar({ done, total }: { done: number; total: number }) {
-  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+/** Project-level choice of which custom statuses / priorities / tags this project offers. */
+function ProjectOptionsPopover({
+  project,
+  data,
+  onClose,
+  onDeleted,
+}: {
+  project: TaskProject;
+  data: ReturnType<typeof useTaskData>;
+  onClose: () => void;
+  onDeleted: () => void;
+}) {
+  const [status, setStatus] = useState<Set<string>>(() => new Set(allowedFor(data.statuses, project.options.status_ids).map((x) => x.id)));
+  const [pri, setPri] = useState<Set<string>>(() => new Set(allowedFor(data.priorities, project.options.priority_ids).map((x) => x.id)));
+  const [tag, setTag] = useState<Set<string>>(() => new Set(allowedFor(data.tags, project.options.tag_ids).map((x) => x.id)));
+  const [err, setErr] = useState<string | null>(null);
+
+  const toggle = (set: Set<string>, setter: (s: Set<string>) => void, id: string) => {
+    const n = new Set(set);
+    if (n.has(id)) n.delete(id);
+    else n.add(id);
+    setter(n);
+  };
+  // "Everything ticked" is stored as null so newly created global options appear automatically.
+  const norm = (set: Set<string>, all: { id: string }[]) => (all.every((x) => set.has(x.id)) ? null : all.filter((x) => set.has(x.id)).map((x) => x.id));
+
+  async function save() {
+    if (status.size === 0) {
+      setErr("Keep at least one status.");
+      return;
+    }
+    if (pri.size === 0 && data.priorities.length) {
+      setErr("Keep at least one priority.");
+      return;
+    }
+    try {
+      await api.taskProjects.setOptions(project.slug, {
+        status_ids: norm(status, data.statuses),
+        priority_ids: norm(pri, data.priorities),
+        tag_ids: norm(tag, data.tags),
+      });
+      await data.reload();
+      onClose();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Save failed");
+    }
+  }
+
+  async function del() {
+    if (!window.confirm(`Delete project "${project.name}" and everything inside it?`)) return;
+    await api.taskProjects.delete(project.slug);
+    await data.reload();
+    onDeleted();
+  }
+
+  const group = (title: string, all: { id: string; name: string }[], set: Set<string>, setter: (s: Set<string>) => void, empty: string) => (
+    <fieldset className="tk-opt-group">
+      <legend>{title}</legend>
+      {all.length === 0 && <div className="muted" style={{ fontSize: 12 }}>{empty}</div>}
+      {all.map((o) => (
+        <label key={o.id} className="tk-check">
+          <input type="checkbox" checked={set.has(o.id)} onChange={() => toggle(set, setter, o.id)} /> {o.name}
+        </label>
+      ))}
+    </fieldset>
+  );
+
   return (
-    <div className="task-progress-bar" title={`${pct}%`}>
-      <div className="task-progress-fill" style={{ width: `${pct}%` }} />
+    <div className="tk-pop tk-opts" role="dialog" aria-label="Project options">
+      <div className="tk-pop-title">{project.name} — choose from your custom lists</div>
+      {group("Statuses", data.statuses, status, setStatus, "")}
+      {group("Priorities", data.priorities, pri, setPri, "")}
+      {group("Tags", data.tags, tag, setTag, "No tags yet — define them in Settings → Task Priorities & Tags.")}
+      {err && <div style={{ color: "var(--crit)", fontSize: 12 }}>{err}</div>}
+      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        {!project.pinned && <button type="button" className="btn btn-crit" onClick={() => void del()}>Delete project</button>}
+        <span style={{ flex: 1 }} />
+        <button type="button" className="btn" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn btn-primary" onClick={() => void save()}>Save</button>
+      </div>
     </div>
   );
-}
-
-interface KanbanCardData {
-  mainTask: MainTask;
-  projectSlug: string;
-  projectName: string;
 }
 
 export default function TasksView({
@@ -51,440 +132,191 @@ export default function TasksView({
   focus?: { projectSlug: string; mainTaskId: string } | null;
   onFocusConsumed?: () => void;
 }) {
-  const [projects, setProjects] = useState<TaskProject[]>([]);
-  const [statuses, setStatuses] = useState<TaskStatusDef[]>(() => getCachedTaskStatuses());
-  const [loading, setLoading] = useState(true);
-  const [mode, setMode] = useState<Mode>("list");
-  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
-  const [mainTasksByProject, setMainTasksByProject] = useState<Record<string, MainTask[]>>({});
-  const [expandedMainTasks, setExpandedMainTasks] = useState<Set<string>>(new Set());
-  const [subtasksByKey, setSubtasksByKey] = useState<Record<string, Subtask[]>>({});
-  const [newProjectOpen, setNewProjectOpen] = useState(false);
-  const [newMainTaskName, setNewMainTaskName] = useState<Record<string, string>>({});
-  const [newSubtaskName, setNewSubtaskName] = useState<Record<string, string>>({});
-  const [msg, setMsg] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [sortByStatus, setSortByStatus] = useState(false);
-  const [kanbanCards, setKanbanCards] = useState<KanbanCardData[]>([]);
-  const [activeCardId, setActiveCardId] = useState<string | null>(null);
+  const data = useTaskData();
+  const [tab, setTab] = useState<Tab>(() => (TABS.some((t) => t.id === readLS(TAB_KEY, "")) ? (readLS(TAB_KEY, "list") as Tab) : "list"));
+  const [projectFilter, setProjectFilter] = useState<string>(() => readLS(PROJECT_KEY, "all"));
+  const [showDone, setShowDone] = useState(() => readLS(DONE_KEY, "1") === "1");
+  const [openRef, setOpenRef] = useState<string | null>(null);
+  const [newOpen, setNewOpen] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newProject, setNewProject] = useState("");
+  const [optsOpen, setOptsOpen] = useState(false);
+  const [projectModal, setProjectModal] = useState(false);
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const { items, projects, statuses } = data;
+  const doneId = doneStatusId(statuses);
+  const anyRunning = items.some((i) => i.timer_started_at);
+  const now = useNow(anyRunning);
 
-  // The status a subtask jumps to via the quick-complete checkbox — the
-  // literal "done" status if it still exists, else whatever is last in order.
-  const doneStatusId = statuses.find((s) => s.id === "done")?.id ?? statuses[statuses.length - 1]?.id ?? "done";
-  const todoStatusId = statuses[0]?.id ?? "todo";
-
-  function statusRank(id: string): number {
-    const i = statuses.findIndex((s) => s.id === id);
-    return i === -1 ? statuses.length : i;
-  }
-
-  function flash(text: string) {
-    setMsg(text);
-    setTimeout(() => setMsg(null), 2500);
-  }
-
+  // A filter pointing at a deleted project falls back to "all".
   useEffect(() => {
-    ensureTaskStatuses(() => api.taskStatuses.get()).then(setStatuses);
-    const onUpdate = () => setStatuses(getCachedTaskStatuses());
-    window.addEventListener(TASK_STATUSES_EVENT, onUpdate);
-    return () => window.removeEventListener(TASK_STATUSES_EVENT, onUpdate);
-  }, []);
+    if (projectFilter !== "all" && projects.length && !projects.some((p) => p.slug === projectFilter)) setProjectFilter("all");
+  }, [projects, projectFilter]);
 
-  const refreshProjects = useCallback(async () => {
-    const r = await api.taskProjects.list();
-    setProjects(r.projects);
-    return r.projects;
-  }, []);
-
-  const loadMainTasks = useCallback(async (slug: string) => {
-    const r = await api.mainTasks.list(slug);
-    setMainTasksByProject((prev) => ({ ...prev, [slug]: r.main_tasks }));
-    return r.main_tasks;
-  }, []);
-
-  const loadSubtasks = useCallback(async (slug: string, mainTaskId: string) => {
-    const r = await api.subtasks.list(slug, mainTaskId);
-    setSubtasksByKey((prev) => ({ ...prev, [mtKey(slug, mainTaskId)]: r.subtasks }));
-    return r.subtasks;
-  }, []);
-
-  useEffect(() => {
-    refreshProjects().finally(() => setLoading(false));
-  }, [refreshProjects]);
-
-  // Dashboard bar click → expand and reveal that project/main task.
+  // Dashboard / calendar → open a specific task.
   useEffect(() => {
     if (!focus) return;
-    (async () => {
-      setExpandedProjects((prev) => new Set(prev).add(focus.projectSlug));
-      await loadMainTasks(focus.projectSlug);
-      const key = mtKey(focus.projectSlug, focus.mainTaskId);
-      setExpandedMainTasks((prev) => new Set(prev).add(key));
-      await loadSubtasks(focus.projectSlug, focus.mainTaskId);
-      onFocusConsumed?.();
-    })();
+    setOpenRef(`${focus.projectSlug}/${focus.mainTaskId}`);
+    if (tab === "calendar") setTab("list");
+    onFocusConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focus]);
 
-  const refreshKanban = useCallback(async () => {
-    const projectList = projects.length ? projects : await refreshProjects();
-    const cards: KanbanCardData[] = [];
-    for (const project of projectList) {
-      const mainTasks = await loadMainTasks(project.slug);
-      for (const mt of mainTasks) {
-        cards.push({ mainTask: mt, projectSlug: project.slug, projectName: project.name });
-      }
+  const changeTab = (t: Tab) => {
+    setTab(t);
+    writeLS(TAB_KEY, t);
+  };
+  const changeProject = (v: string) => {
+    setProjectFilter(v);
+    writeLS(PROJECT_KEY, v);
+    setOptsOpen(false);
+  };
+
+  const visible: TaskItem[] = items.filter(
+    (i) => (projectFilter === "all" || i.project_slug === projectFilter) && (showDone || i.status_id !== doneId)
+  );
+  const selectedProject = projects.find((p) => p.slug === projectFilter);
+
+  const startNew = () => {
+    setNewProject(selectedProject?.slug || projects.find((p) => !p.pinned)?.slug || projects[0]?.slug || "");
+    setNewName("");
+    setNewOpen(true);
+  };
+
+  const createTask = useCallback(async () => {
+    const n = newName.trim();
+    if (!n || !newProject) return;
+    const proj = projects.find((p) => p.slug === newProject);
+    const allowed = allowedFor(statuses, proj?.options?.status_ids);
+    try {
+      const r = await api.mainTasks.create(newProject, { name: n, status_id: allowed[0]?.id });
+      setNewOpen(false);
+      await data.reload();
+      setOpenRef(`${newProject}/${r.main_task.id}`);
+    } catch (e) {
+      data.setError(e instanceof Error ? e.message : "Could not create task");
     }
-    setKanbanCards(cards);
-  }, [projects, refreshProjects, loadMainTasks]);
-
-  useEffect(() => {
-    if (mode === "kanban") void refreshKanban();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
-
-  async function toggleProjectExpand(slug: string) {
-    setExpandedProjects((prev) => {
-      const next = new Set(prev);
-      if (next.has(slug)) next.delete(slug);
-      else next.add(slug);
-      return next;
-    });
-    if (!mainTasksByProject[slug]) await loadMainTasks(slug);
-  }
-
-  async function toggleMainTaskExpand(slug: string, id: string) {
-    const key = mtKey(slug, id);
-    setExpandedMainTasks((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-    if (!subtasksByKey[key]) await loadSubtasks(slug, id);
-  }
+  }, [newName, newProject, projects, statuses, data]);
 
   async function createProject(name: string) {
-    setNewProjectOpen(false);
+    setProjectModal(false);
     try {
-      await api.taskProjects.create(name);
-      await refreshProjects();
-      flash(`Created ${name}`);
-    } catch (error) {
-      flash(error instanceof Error ? error.message : "Could not create project");
+      const r = await api.taskProjects.create(name);
+      await data.reload();
+      changeProject(r.project.slug);
+    } catch (e) {
+      data.setError(e instanceof Error ? e.message : "Could not create project");
     }
   }
 
-  async function deleteProject(project: TaskProject) {
-    if (project.pinned) return;
-    if (!window.confirm(`Delete project "${project.name}" and everything inside it?`)) return;
-    await api.taskProjects.delete(project.slug);
-    await refreshProjects();
-  }
-
-  async function createMainTask(slug: string) {
-    const name = (newMainTaskName[slug] || "").trim();
-    if (!name) return;
-    await api.mainTasks.create(slug, { name });
-    setNewMainTaskName((prev) => ({ ...prev, [slug]: "" }));
-    await loadMainTasks(slug);
-    await refreshProjects();
-  }
-
-  async function deleteMainTask(slug: string, id: string) {
-    if (!window.confirm("Delete this main task and its subtasks?")) return;
-    await api.mainTasks.delete(slug, id);
-    await loadMainTasks(slug);
-    await refreshProjects();
-  }
-
-  async function toggleActive(slug: string, mt: MainTask) {
-    await api.mainTasks.update(slug, mt.id, { is_active: !mt.is_active });
-    await loadMainTasks(slug);
-  }
-
-  async function updateMainTaskStatus(slug: string, mt: MainTask, statusId: string) {
-    await api.mainTasks.update(slug, mt.id, { status_id: statusId });
-    await loadMainTasks(slug);
-  }
-
-  async function updateDeadline(slug: string, mt: MainTask, deadline: string | null) {
-    await api.mainTasks.update(slug, mt.id, { deadline });
-    await loadMainTasks(slug);
-  }
-
-  async function createSubtask(slug: string, mainTaskId: string) {
-    const key = mtKey(slug, mainTaskId);
-    const name = (newSubtaskName[key] || "").trim();
-    if (!name) return;
-    await api.subtasks.create(slug, mainTaskId, { name });
-    setNewSubtaskName((prev) => ({ ...prev, [key]: "" }));
-    await loadSubtasks(slug, mainTaskId);
-    await loadMainTasks(slug);
-  }
-
-  async function updateSubtaskStatus(slug: string, mainTaskId: string, st: Subtask, statusId: string) {
-    await api.subtasks.update(slug, mainTaskId, st.id, { status_id: statusId });
-    await loadSubtasks(slug, mainTaskId);
-    await loadMainTasks(slug);
-  }
-
-  /** Checkbox: quick shortcut that jumps straight to Done, or back to To Do if already Done. */
-  async function quickToggleSubtask(slug: string, mainTaskId: string, st: Subtask) {
-    await updateSubtaskStatus(slug, mainTaskId, st, st.status_id === doneStatusId ? todoStatusId : doneStatusId);
-  }
-
-  async function updateSubtaskDeadline(slug: string, mainTaskId: string, st: Subtask, deadline: string | null) {
-    await api.subtasks.update(slug, mainTaskId, st.id, { deadline });
-    await loadSubtasks(slug, mainTaskId);
-  }
-
-  async function deleteSubtask(slug: string, mainTaskId: string, id: string) {
-    await api.subtasks.delete(slug, mainTaskId, id);
-    await loadSubtasks(slug, mainTaskId);
-    await loadMainTasks(slug);
-  }
-
-  function onDragStart(e: DragStartEvent) {
-    setActiveCardId(String(e.active.id));
-  }
-
-  async function onDragEnd(e: DragEndEvent) {
-    setActiveCardId(null);
-    const over = e.over?.id;
-    if (!over || !statuses.some((s) => s.id === over)) return;
-    const statusId = String(over);
-    const id = String(e.active.id);
-    const card = kanbanCards.find((c) => c.mainTask.id === id);
-    if (!card || card.mainTask.status_id === statusId) return;
-    await api.mainTasks.update(card.projectSlug, id, { status_id: statusId });
-    setKanbanCards((prev) =>
-      prev.map((c) => (c.mainTask.id === id ? { ...c, mainTask: { ...c.mainTask, status_id: statusId } } : c))
-    );
-  }
-
-  function orderMainTasks(list: MainTask[]): MainTask[] {
-    const filtered = statusFilter === "all" ? list : list.filter((mt) => mt.status_id === statusFilter);
-    return sortByStatus ? [...filtered].sort((a, b) => statusRank(a.status_id) - statusRank(b.status_id)) : filtered;
-  }
-
-  function orderSubtasks(list: Subtask[]): Subtask[] {
-    const filtered = statusFilter === "all" ? list : list.filter((st) => st.status_id === statusFilter);
-    return sortByStatus ? [...filtered].sort((a, b) => statusRank(a.status_id) - statusRank(b.status_id)) : filtered;
-  }
-
-  if (loading) return <div className="muted">Loading…</div>;
-
-  const activeCard = activeCardId ? kanbanCards.find((c) => c.mainTask.id === activeCardId) : null;
+  const viewProps = { data, items: visible, now, projectFilter, onOpen: (it: TaskItem) => setOpenRef(it.ref) };
 
   return (
-    <div className="tasks-view">
-      <SubTabs
-        label="Tasks"
-        value={mode}
-        onChange={setMode}
-        tabs={[
-          { id: "list", label: "List" },
-          { id: "kanban", label: "Kanban" },
-        ]}
-      />
-      <div className="tasks-header">
-        <h1 style={{ margin: 0 }}>Tasks</h1>
-        {mode === "list" && (
+    <div className="tk-page">
+      <SubTabs tabs={TABS} value={tab} onChange={changeTab} label="Task views" />
+
+      <div className="tk-toolbar">
+        <div className="tk-pop-anchor">
+          <button type="button" className="btn btn-primary" onClick={startNew}>+ New task</button>
+          {newOpen && (
+            <div className="tk-pop" role="dialog" aria-label="New task">
+              <input
+                autoFocus
+                type="text"
+                placeholder="Task name"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void createTask();
+                  if (e.key === "Escape") setNewOpen(false);
+                }}
+              />
+              <select value={newProject} onChange={(e) => setNewProject(e.target.value)} aria-label="Project">
+                {projects.map((p) => (
+                  <option key={p.slug} value={p.slug}>{p.name}</option>
+                ))}
+              </select>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <button type="button" className="btn" onClick={() => setNewOpen(false)}>Cancel</button>
+                <button type="button" className="btn btn-primary" disabled={!newName.trim()} onClick={() => void createTask()}>Create &amp; open</button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {tab !== "calendar" && (
           <>
-            <button className="btn btn-primary" onClick={() => setNewProjectOpen(true)}>+ New Project</button>
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} title="Filter by status">
-              <option value="all">All statuses</option>
-              {statuses.map((s) => (
-                <option key={s.id} value={s.id}>{STATUS_ICON_GLYPH[s.icon]} {s.name}</option>
+            <select value={projectFilter} onChange={(e) => changeProject(e.target.value)} aria-label="Project filter">
+              <option value="all">All projects</option>
+              {projects.map((p) => (
+                <option key={p.slug} value={p.slug}>{p.name}</option>
               ))}
             </select>
-            <button
-              type="button"
-              className={`btn${sortByStatus ? " btn-primary" : ""}`}
-              aria-pressed={sortByStatus}
-              onClick={() => setSortByStatus((v) => !v)}
-            >
-              Sort by status
-            </button>
+            <label className="tk-check">
+              <input
+                type="checkbox"
+                checked={showDone}
+                onChange={(e) => {
+                  setShowDone(e.target.checked);
+                  writeLS(DONE_KEY, e.target.checked ? "1" : "0");
+                }}
+              />{" "}
+              Show done
+            </label>
           </>
         )}
-        {msg && <span className="ok mono" style={{ fontSize: 12 }}>{msg}</span>}
+        <button type="button" className="btn" onClick={() => setProjectModal(true)}>+ Project</button>
+        {selectedProject && tab !== "calendar" && (
+          <div className="tk-pop-anchor">
+            <button type="button" className="btn" onClick={() => setOptsOpen((v) => !v)} aria-expanded={optsOpen}>Project options</button>
+            {optsOpen && (
+              <ProjectOptionsPopover
+                key={selectedProject.slug}
+                project={selectedProject}
+                data={data}
+                onClose={() => setOptsOpen(false)}
+                onDeleted={() => {
+                  setOptsOpen(false);
+                  changeProject("all");
+                }}
+              />
+            )}
+          </div>
+        )}
       </div>
 
-      {mode === "list" ? (
-        <div className="task-projects">
-          {projects.map((project) => {
-            const open = expandedProjects.has(project.slug);
-            const mainTasks = orderMainTasks(mainTasksByProject[project.slug] || []);
-            return (
-              <div key={project.slug} className="task-project card">
-                <div className="task-project-head">
-                  <button type="button" className="task-expand" onClick={() => toggleProjectExpand(project.slug)}>
-                    {open ? "▾" : "▸"}
-                  </button>
-                  <span className="task-project-name">{project.name}</span>
-                  <span className="muted mono">{project.main_task_count} main task{project.main_task_count === 1 ? "" : "s"}</span>
-                  <div className="task-row-actions">
-                    {!project.pinned && (
-                      <button className="btn btn-crit" onClick={() => deleteProject(project)}>Delete</button>
-                    )}
-                  </div>
-                </div>
-                {open && (
-                  <div className="task-project-body">
-                    {mainTasks.map((mt) => {
-                      const key = mtKey(project.slug, mt.id);
-                      const mtOpen = expandedMainTasks.has(key);
-                      const subtasks = orderSubtasks(subtasksByKey[key] || []);
-                      return (
-                        <div key={mt.id} className="task-main">
-                          <div className="task-main-head">
-                            <button type="button" className="task-expand" onClick={() => toggleMainTaskExpand(project.slug, mt.id)}>
-                              {mtOpen ? "▾" : "▸"}
-                            </button>
-                            <button
-                              type="button"
-                              className={`task-star${mt.is_active ? " active" : ""}`}
-                              title={mt.is_active ? "Active — showing on Dashboard" : "Mark active — show on Dashboard"}
-                              onClick={() => toggleActive(project.slug, mt)}
-                            >
-                              {mt.is_active ? "★" : "☆"}
-                            </button>
-                            <span className="task-main-name">{mt.name}</span>
-                            <div className="task-col-progress">
-                              <span className="muted mono">{mt.subtask_done}/{mt.subtask_total} subtasks</span>
-                              <ProgressBar done={mt.subtask_done} total={mt.subtask_total} />
-                            </div>
-                            <div className="task-col-status">
-                              <StatusPill statuses={statuses} statusId={mt.status_id} onChange={(s) => updateMainTaskStatus(project.slug, mt, s)} />
-                            </div>
-                            <div className="task-col-date">
-                              <DeadlinePicker value={mt.deadline} onChange={(d) => updateDeadline(project.slug, mt, d)} title="Main task deadline" />
-                            </div>
-                            <button className="btn btn-crit" onClick={() => deleteMainTask(project.slug, mt.id)}>Delete</button>
-                          </div>
-                          {mtOpen && (
-                            <div className="task-sub-list">
-                              {subtasks.map((st) => (
-                                <div key={st.id} className={`task-row${st.status_id === doneStatusId ? " done" : ""}`}>
-                                  <span className="task-expand spacer" />
-                                  <button
-                                    type="button"
-                                    className={`task-check${st.status_id === doneStatusId ? " checked" : ""}`}
-                                    onClick={() => quickToggleSubtask(project.slug, mt.id, st)}
-                                    title="Quick-complete (jumps to Done)"
-                                  >
-                                    {st.status_id === doneStatusId ? "●" : "○"}
-                                  </button>
-                                  <span className="task-title">{st.name}</span>
-                                  <div className="task-col-progress" />
-                                  <div className="task-col-status">
-                                    <StatusPill statuses={statuses} statusId={st.status_id} onChange={(s) => updateSubtaskStatus(project.slug, mt.id, st, s)} />
-                                  </div>
-                                  <div className="task-col-date">
-                                    <DeadlinePicker
-                                      value={st.deadline}
-                                      onChange={(d) => updateSubtaskDeadline(project.slug, mt.id, st, d)}
-                                      title="Subtask deadline"
-                                    />
-                                  </div>
-                                  <button className="btn btn-crit" onClick={() => deleteSubtask(project.slug, mt.id, st.id)}>Delete</button>
-                                </div>
-                              ))}
-                              <div className="task-sub-add">
-                                <input
-                                  type="text"
-                                  placeholder="New subtask…"
-                                  value={newSubtaskName[key] || ""}
-                                  onChange={(e) => setNewSubtaskName((prev) => ({ ...prev, [key]: e.target.value }))}
-                                  onKeyDown={(e) => { if (e.key === "Enter") createSubtask(project.slug, mt.id); }}
-                                />
-                                <button className="btn" onClick={() => createSubtask(project.slug, mt.id)}>Add</button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                    <div className="task-sub-add">
-                      <input
-                        type="text"
-                        placeholder="New main task…"
-                        value={newMainTaskName[project.slug] || ""}
-                        onChange={(e) => setNewMainTaskName((prev) => ({ ...prev, [project.slug]: e.target.value }))}
-                        onKeyDown={(e) => { if (e.key === "Enter") createMainTask(project.slug); }}
-                      />
-                      <button className="btn" onClick={() => createMainTask(project.slug)}>Add main task</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+      {data.error && (
+        <div className="tk-error" role="alert">
+          {data.error} <button type="button" className="tk-link" onClick={() => data.setError(null)}>dismiss</button>
         </div>
-      ) : (
-        <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
-          <div className="task-kanban">
-            {statuses.map((s) => (
-              <KanbanColumn key={s.id} status={s} cards={kanbanCards.filter((c) => c.mainTask.status_id === s.id)} />
-            ))}
-          </div>
-          <DragOverlay>
-            {activeCard ? (
-              <div className="task-kanban-card dragging">
-                <div className="task-kanban-title">{activeCard.mainTask.name}</div>
-              </div>
-            ) : null}
-          </DragOverlay>
-        </DndContext>
+      )}
+
+      {tab === "calendar" && <CalendarView onOpenTask={(slug, id) => setOpenRef(`${slug}/${id}`)} />}
+      {tab !== "calendar" && data.loading && <div className="muted tk-empty">Loading…</div>}
+      {tab === "list" && !data.loading && <ListView {...viewProps} />}
+      {tab === "board" && !data.loading && <BoardView {...viewProps} />}
+      {tab === "timeline" && !data.loading && <TimelineView {...viewProps} />}
+      {tab === "gantt" && !data.loading && <GanttView {...viewProps} />}
+
+      {openRef && (
+        <TaskPanel
+          key={openRef}
+          itemRef={openRef}
+          data={data}
+          now={now}
+          onClose={() => setOpenRef(null)}
+          onOpenOther={(r) => setOpenRef(r)}
+        />
       )}
 
       <LatexPromptModal
-        open={newProjectOpen}
-        title="New Project"
+        open={projectModal}
+        title="New project"
         label="Project name"
         confirmLabel="Create"
-        onClose={() => setNewProjectOpen(false)}
-        onConfirm={createProject}
+        onClose={() => setProjectModal(false)}
+        onConfirm={(v) => v.trim() && void createProject(v.trim())}
       />
-    </div>
-  );
-}
-
-function KanbanCard({ card }: { card: KanbanCardData }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: card.mainTask.id });
-  const style = transform
-    ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`, opacity: isDragging ? 0.4 : 1 }
-    : undefined;
-  return (
-    <div ref={setNodeRef} className="task-kanban-card" style={style} {...listeners} {...attributes}>
-      <div className="task-kanban-title">{card.mainTask.name}</div>
-      <div className="muted mono" style={{ fontSize: 11 }}>{card.projectName}</div>
-      {card.mainTask.subtask_total > 0 && (
-        <div className="muted mono" style={{ fontSize: 11 }}>
-          {card.mainTask.subtask_done}/{card.mainTask.subtask_total} subtasks
-        </div>
-      )}
-    </div>
-  );
-}
-
-function KanbanColumn({ status, cards }: { status: TaskStatusDef; cards: KanbanCardData[] }) {
-  const { setNodeRef, isOver } = useDroppable({ id: status.id });
-  return (
-    <div ref={setNodeRef} className={`task-kanban-col${isOver ? " over" : ""}`} style={{ borderTopColor: status.color }}>
-      <div className="task-kanban-col-head">
-        <span>{STATUS_ICON_GLYPH[status.icon]} {status.name.toUpperCase()}</span>
-        <span className="muted mono">{cards.length}</span>
-      </div>
-      <div className="task-kanban-col-body">
-        {cards.map((c) => (
-          <KanbanCard key={c.mainTask.id} card={c} />
-        ))}
-      </div>
     </div>
   );
 }

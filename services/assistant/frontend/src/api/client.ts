@@ -221,12 +221,68 @@ export interface ZoteroAddResult {
   item?: unknown;
 }
 
+export interface TaskProjectOptions {
+  /** null = every option from the global list is available in this project. */
+  status_ids: string[] | null;
+  priority_ids: string[] | null;
+  tag_ids: string[] | null;
+}
+
 export interface TaskProject {
   slug: string;
   name: string;
   pinned: boolean;
   created_at: string;
   main_task_count: number;
+  options: TaskProjectOptions;
+}
+
+export interface TaskPriorityDef {
+  id: string;
+  name: string;
+  color: string;
+}
+
+export interface TaskTagDef {
+  id: string;
+  name: string;
+  color: string;
+}
+
+export type TaskRelationType = "blocked_by" | "related";
+
+export interface TaskRelation {
+  type: TaskRelationType;
+  /** "project-slug/item-id" */
+  target: string;
+}
+
+export interface TaskFile {
+  name: string;
+  size: number;
+}
+
+/** Fields shared by main tasks and subtasks. */
+export interface TaskExtras {
+  priority_id: string | null;
+  start: string | null;
+  estimate_min: number | null;
+  tags: string[];
+  tracked_sec: number;
+  timer_started_at: string | null;
+  relations: TaskRelation[];
+  files: TaskFile[];
+  has_note: boolean;
+}
+
+/** Writable counterpart of TaskExtras (all optional on create/update). */
+export interface TaskExtrasInput {
+  priority_id?: string | null;
+  start?: string | null;
+  estimate_min?: number | null;
+  tags?: string[];
+  note?: string;
+  relations?: TaskRelation[];
 }
 
 /** A user-defined shape token — grayscale-safe status differentiation, color is secondary. */
@@ -247,7 +303,7 @@ export interface Goal {
   end_date: string;
 }
 
-export interface MainTask {
+export interface MainTask extends TaskExtras {
   id: string;
   project_slug: string;
   name: string;
@@ -259,7 +315,7 @@ export interface MainTask {
   subtask_total: number;
 }
 
-export interface Subtask {
+export interface Subtask extends TaskExtras {
   id: string;
   main_task_id: string;
   project_slug: string;
@@ -279,7 +335,26 @@ export interface ActiveMainTask {
   deadline: string | null;
   subtask_done: number;
   subtask_total: number;
+  status_id: string;
+  priority_id: string | null;
+  estimate_min: number | null;
+  tracked_sec: number;
+  timer_started_at: string | null;
 }
+
+/** One entry from /api/tasks/all — a main task or subtask with its project context. */
+export type TaskItem = (
+  | ({ kind: "main" } & Omit<MainTask, never>)
+  | ({ kind: "subtask" } & Omit<Subtask, never>)
+) & {
+  ref: string; // "slug/id"
+  project_name: string;
+  main_task_name: string;
+  blocking: string[];
+};
+
+/** Full single-item payload (adds the note body). */
+export type TaskItemDetail = { item: TaskItem; note: string };
 
 /** A main task or subtask with a deadline — one entry on the Calendar view. */
 export interface CalendarItem {
@@ -489,14 +564,16 @@ export const api = {
     list: () => req<{ projects: TaskProject[] }>("GET", "/api/task-projects"),
     create: (name: string) => req<{ ok: boolean; project: TaskProject }>("POST", "/api/task-projects", { name }),
     delete: (slug: string) => req<{ ok: boolean; slug: string }>("DELETE", `/api/task-projects/${encodeURIComponent(slug)}`),
+    setOptions: (slug: string, body: Partial<TaskProjectOptions>) =>
+      req<{ ok: boolean; project: TaskProject }>("PUT", `/api/task-projects/${encodeURIComponent(slug)}/options`, body),
   },
 
   mainTasks: {
     list: (projectSlug: string) =>
       req<{ main_tasks: MainTask[] }>("GET", `/api/task-projects/${encodeURIComponent(projectSlug)}/main-tasks`),
-    create: (projectSlug: string, body: { name: string; deadline?: string | null; status_id?: string }) =>
+    create: (projectSlug: string, body: { name: string; deadline?: string | null; status_id?: string } & TaskExtrasInput) =>
       req<{ ok: boolean; main_task: MainTask }>("POST", `/api/task-projects/${encodeURIComponent(projectSlug)}/main-tasks`, body),
-    update: (projectSlug: string, id: string, body: { name?: string; deadline?: string | null; is_active?: boolean; status_id?: string }) =>
+    update: (projectSlug: string, id: string, body: { name?: string; deadline?: string | null; is_active?: boolean; status_id?: string } & TaskExtrasInput) =>
       req<{ ok: boolean; main_task: MainTask }>(
         "PUT",
         `/api/task-projects/${encodeURIComponent(projectSlug)}/main-tasks/${encodeURIComponent(id)}`,
@@ -515,13 +592,13 @@ export const api = {
         "GET",
         `/api/task-projects/${encodeURIComponent(projectSlug)}/main-tasks/${encodeURIComponent(mainTaskId)}/subtasks`
       ),
-    create: (projectSlug: string, mainTaskId: string, body: { name: string; deadline?: string | null; status_id?: string }) =>
+    create: (projectSlug: string, mainTaskId: string, body: { name: string; deadline?: string | null; status_id?: string } & TaskExtrasInput) =>
       req<{ ok: boolean; subtask: Subtask }>(
         "POST",
         `/api/task-projects/${encodeURIComponent(projectSlug)}/main-tasks/${encodeURIComponent(mainTaskId)}/subtasks`,
         body
       ),
-    update: (projectSlug: string, mainTaskId: string, id: string, body: { name?: string; deadline?: string | null; status_id?: string }) =>
+    update: (projectSlug: string, mainTaskId: string, id: string, body: { name?: string; deadline?: string | null; status_id?: string } & TaskExtrasInput) =>
       req<{ ok: boolean; subtask: Subtask }>(
         "PUT",
         `/api/task-projects/${encodeURIComponent(projectSlug)}/main-tasks/${encodeURIComponent(mainTaskId)}/subtasks/${encodeURIComponent(id)}`,
@@ -534,7 +611,51 @@ export const api = {
       ),
   },
 
+  taskItems: {
+    get: (slug: string, id: string) =>
+      req<TaskItemDetail>("GET", `/api/task-items/${encodeURIComponent(slug)}/${encodeURIComponent(id)}`),
+    update: (slug: string, id: string, body: Record<string, unknown>) =>
+      req<{ ok: boolean }>("PUT", `/api/task-items/${encodeURIComponent(slug)}/${encodeURIComponent(id)}`, body),
+    delete: (slug: string, id: string) =>
+      req<{ ok: boolean }>("DELETE", `/api/task-items/${encodeURIComponent(slug)}/${encodeURIComponent(id)}`),
+    timer: (slug: string, id: string, action: "start" | "stop") =>
+      req<{ ok: boolean; item: TaskItem }>(
+        "POST",
+        `/api/task-items/${encodeURIComponent(slug)}/${encodeURIComponent(id)}/timer`,
+        { action }
+      ),
+    uploadFile: (slug: string, id: string, name: string, content_b64: string) =>
+      req<{ ok: boolean; file: TaskFile }>(
+        "POST",
+        `/api/task-items/${encodeURIComponent(slug)}/${encodeURIComponent(id)}/files`,
+        { name, content_b64 }
+      ),
+    fileUrl: (slug: string, id: string, name: string) =>
+      `/api/task-items/${encodeURIComponent(slug)}/${encodeURIComponent(id)}/files/${encodeURIComponent(name)}`,
+    deleteFile: (slug: string, id: string, name: string) =>
+      req<{ ok: boolean }>(
+        "DELETE",
+        `/api/task-items/${encodeURIComponent(slug)}/${encodeURIComponent(id)}/files/${encodeURIComponent(name)}`
+      ),
+  },
+
+  taskOptions: {
+    get: () =>
+      req<{
+        task_priorities: TaskPriorityDef[];
+        task_tags: TaskTagDef[];
+        usage: { priorities: Record<string, number>; tags: Record<string, number> };
+      }>("GET", "/api/settings/task-options"),
+    set: (body: { task_priorities?: TaskPriorityDef[]; task_tags?: TaskTagDef[] }) =>
+      req<{ ok: boolean; task_priorities: TaskPriorityDef[]; task_tags: TaskTagDef[] }>(
+        "POST",
+        "/api/settings/task-options",
+        body
+      ),
+  },
+
   tasks: {
+    all: () => req<{ items: TaskItem[]; projects: TaskProject[] }>("GET", "/api/tasks/all"),
     activeSummary: () => req<{ active: ActiveMainTask[] }>("GET", "/api/tasks/active-summary"),
     calendar: () => req<{ items: CalendarItem[] }>("GET", "/api/tasks/calendar"),
     completedByDay: (start: string, end: string) =>

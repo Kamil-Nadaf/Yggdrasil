@@ -73,3 +73,20 @@ def test_routes(monkeypatch):
     assert c.get("/api/update/check").json()["available"]
     assert c.post("/api/update/install").status_code == 400
     assert c.post("/api/update/restart").status_code == 400
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="helper uses a plain delay on Windows")
+def test_relaunch_helper_waits_for_old_process(tmp_path):
+    import subprocess, time
+    marker = tmp_path / "started"
+    old = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    helper = subprocess.Popen([sys.executable, "-c", updater._RELAUNCH_HELPER, str(old.pid),
+                               sys.executable, "-c", f"open({str(marker)!r}, 'w').write('x')"])
+    try:
+        time.sleep(1.2)
+        assert not marker.exists()  # old copy still alive: the new one must not start yet
+        old.kill(); old.wait()
+        helper.wait(timeout=15)
+        assert marker.exists()
+    finally:
+        old.kill(); helper.kill()

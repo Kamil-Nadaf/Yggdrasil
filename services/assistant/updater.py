@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import zipfile
 from pathlib import Path
 from typing import Callable
@@ -181,16 +182,59 @@ def _relaunch_argv() -> list[str]:
     return [sys.executable, *sys.argv]
 
 
+# Runs in a detached helper process. It waits until the old app has really exited (the old copy holds the
+# fixed port), force-kills it if it lingers, then starts the new copy. On Windows os.kill(pid, 0) would
+# terminate the process, so there it keeps the plain delay.
+_RELAUNCH_HELPER = """
+import os, signal, subprocess, sys, time
+pid = int(sys.argv[1])
+argv = sys.argv[2:]
+def alive():
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+if os.name == "nt":
+    time.sleep(2.5)
+else:
+    deadline = time.time() + 6
+    while alive() and time.time() < deadline:
+        time.sleep(0.2)
+    if alive():
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+        for _ in range(25):
+            if not alive():
+                break
+            time.sleep(0.2)
+    time.sleep(0.5)
+subprocess.Popen(argv)
+"""
+
+
+def _log(msg: str) -> None:
+    """Write to the launcher's startup log when running inside the desktop app (never raises)."""
+    try:
+        blog = getattr(sys.modules.get("__main__"), "blog", None)
+        if callable(blog):
+            blog(msg)
+    except Exception:
+        pass
+
+
 def restart_app() -> None:
-    """Start a fresh copy after this one has exited (the app keeps a fixed port, so wait for it to free up)."""
+    """Start a fresh copy after this one has exited (the app keeps a fixed port, so the helper waits for it to free up)."""
     argv = _relaunch_argv()
-    helper = "import subprocess, sys, time; time.sleep(2.5); subprocess.Popen(sys.argv[1:])"
+    _log(f"restart: pid {os.getpid()} will exit, relaunch via {argv[0]}")
     kwargs: dict = {"env": os.environ.copy(), "stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
     if os.name == "nt":
         kwargs["creationflags"] = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
     else:
         kwargs["start_new_session"] = True
-    subprocess.Popen([sys.executable, "-c", helper, *argv], **kwargs)
+    subprocess.Popen([sys.executable, "-c", _RELAUNCH_HELPER, str(os.getpid()), *argv], **kwargs)
 
     def _exit() -> None:
         main_mod = sys.modules.get("__main__")
@@ -199,6 +243,16 @@ def restart_app() -> None:
                 proc.terminate()
             except Exception:
                 pass
+        # Close the window first so the OS tears it down cleanly; a hard exit alone can leave a ghost window.
+        try:
+            import webview
+
+            for w in list(webview.windows):
+                w.destroy()
+        except Exception as exc:
+            _log(f"restart: window close failed: {exc}")
+        time.sleep(0.6)
+        _log("restart: exiting")
         os._exit(0)
 
     threading.Timer(0.8, _exit).start()

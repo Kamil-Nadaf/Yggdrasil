@@ -150,12 +150,19 @@ def app_port() -> int:
     override = os.environ.get("YGG_PORT")
     if override:
         return int(override)
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.bind(("127.0.0.1", DEFAULT_APP_PORT))
-            return DEFAULT_APP_PORT
-    except OSError:
-        return free_port()
+    # SO_REUSEADDR matches what uvicorn does when it binds: without it, macOS refuses the port while
+    # connections from a just-closed server linger in TIME_WAIT, and we would wrongly fall back to a
+    # random port (which resets the web view's localStorage: theme, API keys, provider settings).
+    # The retries give a previous copy that is still shutting down (in-app update restart) time to let go.
+    for _ in range(40):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.bind(("127.0.0.1", DEFAULT_APP_PORT))
+                return DEFAULT_APP_PORT
+        except OSError:
+            time.sleep(0.25)
+    return free_port()
 
 
 def wait_for_server(url: str, tries: int = 80) -> None:

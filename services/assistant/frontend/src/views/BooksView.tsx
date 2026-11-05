@@ -169,10 +169,15 @@ export default function BooksView() {
   }, [books, q, searching, col, section, sort, inAnyCollection, tagName, dupes]);
 
   const opened = openSlug ? books.find((b) => b.slug === openSlug) || null : null;
+  const openIdx = opened ? shown.findIndex((b) => b.slug === opened.slug) : -1;
   if (opened) {
     return (
       <div className="books-view books-view--reader">
-        <BookReader key={opened.slug} book={opened} onBack={() => { setOpenSlug(null); void refresh(); }} onChanged={() => void refresh()} />
+        <BookReader
+          key={opened.slug} book={opened} onBack={() => { setOpenSlug(null); void refresh(); }} onChanged={() => void refresh()}
+          onPrev={openIdx > 0 ? () => setOpenSlug(shown[openIdx - 1].slug) : undefined}
+          onNext={openIdx >= 0 && openIdx < shown.length - 1 ? () => setOpenSlug(shown[openIdx + 1].slug) : undefined}
+        />
       </div>
     );
   }

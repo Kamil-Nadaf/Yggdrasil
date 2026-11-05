@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import ePub from "epubjs";
 import type { Book, NavItem, Rendition } from "epubjs";
-import { useCollapsed } from "../../lib/useCollapsed";
+import BookIcon from "../../components/BookIcons";
 import { reading, type EpubHighlight, type ReadingBook } from "../../api/reading";
 
 const COLORS: { name: string; css: string }[] = [
@@ -27,10 +27,11 @@ function cssVar(name: string, fallback: string): string {
   return v || fallback;
 }
 
-export default function EpubReader({ book: meta, pageRef, onToNotes }: {
+export default function EpubReader({ book: meta, pageRef, onToNotes, lead, trail }: {
   book: ReadingBook; pageRef: MutableRefObject<number | undefined>;
   /** Books: save the selected text to the book's notes (shown as “→ Notes”). */
   onToNotes?: (text: string, loc: string, chapter: string) => Promise<void>;
+  lead?: ReactNode; trail?: ReactNode;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const bookRef = useRef<Book | null>(null);
@@ -45,7 +46,6 @@ export default function EpubReader({ book: meta, pageRef, onToNotes }: {
   const [panel, setPanel] = useState<"none" | "toc" | "notes">("none");
   const [highlights, setHighlights] = useState<EpubHighlight[]>([]);
   const [loadedHl, setLoadedHl] = useState(false);
-  const [slim, toggleSlim] = useCollapsed("epub-controls");
   const [sel, setSel] = useState<Sel | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [chapter, setChapter] = useState("");
@@ -303,29 +303,25 @@ export default function EpubReader({ book: meta, pageRef, onToNotes }: {
 
   return (
     <div className="pdf-viewer epub-viewer">
-      <div className="pdf-viewer-bar">
-        <button type="button" className="btn pdfv-collapse" onClick={toggleSlim} aria-expanded={!slim} title={slim ? "Show text and layout controls" : "Hide text and layout controls"}>
-          {slim ? "▾ Tools" : "▴ Tools"}
+      <div className="pdfv-topbar" role="toolbar" aria-label="Reader toolbar">
+        {lead}
+        <span className="pdfv-tb-title" title={chapterLabel || meta.title}>{chapterLabel || meta.title}</span>
+        <button type="button" className={`pdfv-ib${panel === "toc" ? " on" : ""}`} onClick={() => setPanel(panel === "toc" ? "none" : "toc")} aria-pressed={panel === "toc"} title="Contents"><BookIcon name="contents" size={17} /></button>
+        <button type="button" className={`pdfv-ib${panel === "notes" ? " on" : ""}`} onClick={() => setPanel(panel === "notes" ? "none" : "notes")} aria-pressed={panel === "notes"} title={`Highlights & notes${highlights.length ? ` (${highlights.length})` : ""}`}>
+          <BookIcon name="annot" size={17} />{highlights.length > 0 && <em className="pdfv-badge">{highlights.length}</em>}
         </button>
-        <span className="pdf-viewer-title" title={chapterLabel || meta.title}>{chapterLabel || meta.title}</span>
-        <button type="button" className={`btn${panel === "toc" ? " btn-primary" : ""}`} onClick={() => setPanel(panel === "toc" ? "none" : "toc")} aria-pressed={panel === "toc"}>Contents</button>
-        <button type="button" className={`btn${panel === "notes" ? " btn-primary" : ""}`} onClick={() => setPanel(panel === "notes" ? "none" : "notes")} aria-pressed={panel === "notes"}>
-          Notes{highlights.length ? ` (${highlights.length})` : ""}
-        </button>
+        <span className="pdfv-tb-sep" />
+        <button type="button" className="pdfv-ib txt" onClick={() => setFontSize((s) => Math.max(80, s - 10))} disabled={fontSize <= 80} aria-label="Smaller text" title="Smaller text">A−</button>
+        <span className="pdfv-zoom-pct">{fontSize}%</span>
+        <button type="button" className="pdfv-ib txt" onClick={() => setFontSize((s) => Math.min(200, s + 10))} disabled={fontSize >= 200} aria-label="Larger text" title="Larger text">A+</button>
+        <button type="button" className="pdfv-ib" onClick={() => setFlow(flow === "paginated" ? "scrolled-doc" : "paginated")} title={flow === "paginated" ? "Switch to continuous scrolling" : "Switch to pages"}><BookIcon name={flow === "paginated" ? "rows" : "reading"} size={17} /></button>
+        <span className="pdfv-tb-sep" />
+        <button type="button" className="pdfv-ib" onClick={() => void rendRef.current?.prev()} aria-label="Previous page" title="Previous page"><BookIcon name="back" size={16} /></button>
+        <span className="pdfv-zoom-pct">{status === "ready" ? `${percent}%` : "…"}</span>
+        <button type="button" className="pdfv-ib" onClick={() => void rendRef.current?.next()} aria-label="Next page" title="Next page"><BookIcon name="next" size={16} /></button>
+        <span className="pdfv-tb-sep" />
+        {trail}
       </div>
-      {!slim && <div className="epub-toolbar">
-        <button type="button" className="btn" onClick={() => setFontSize((s) => Math.max(80, s - 10))} disabled={fontSize <= 80} aria-label="Smaller text">A−</button>
-        <span className="mono muted" style={{ fontSize: 11 }}>{fontSize}%</span>
-        <button type="button" className="btn" onClick={() => setFontSize((s) => Math.min(200, s + 10))} disabled={fontSize >= 200} aria-label="Larger text">A+</button>
-        <button type="button" className="btn" onClick={() => setFlow(flow === "paginated" ? "scrolled-doc" : "paginated")} title="Switch between pages and continuous scrolling">
-          {flow === "paginated" ? "Pages" : "Scroll"}
-        </button>
-        <span style={{ flex: 1 }} />
-        <button type="button" className="btn" onClick={() => void rendRef.current?.prev()} aria-label="Previous page">‹</button>
-        <span className="mono muted" style={{ fontSize: 11, minWidth: 38, textAlign: "center" }}>{status === "ready" ? `${percent}%` : "…"}</span>
-        <button type="button" className="btn" onClick={() => void rendRef.current?.next()} aria-label="Next page">›</button>
-      </div>}
-
       <div className="pdfv-stage">
         {sel && (
           <div className="pdfv-selbar">

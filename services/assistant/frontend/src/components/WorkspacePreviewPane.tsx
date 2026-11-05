@@ -21,6 +21,7 @@ export function useZoom(initial = 1) {
     zoom,
     zoomIn,
     zoomOut,
+    resetZoom: () => setZoom(initial),
     atMinZoom: zoom <= ZOOM_STEPS[0],
     atMaxZoom: zoom >= ZOOM_STEPS[ZOOM_STEPS.length - 1],
   };

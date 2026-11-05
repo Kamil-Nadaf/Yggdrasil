@@ -1,5 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ActivityTimer from "./ActivityTimer";
+import BookIcon from "./BookIcons";
+import ReaderSidebar, { type FindHit, type SidebarTab } from "./ReaderSidebar";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import "pdfjs-dist/web/pdf_viewer.css";
 import { api, type ArxivPaper, type PdfAnnotation } from "../api/client";
@@ -89,10 +91,12 @@ type Rect = [number, number, number, number];
 interface Sel { text: string; page: number; rects: Rect[] }
 
 function PdfPage({
-  pdf, num, width, ratio, rootEl, anns, onTextError, tool, color, opacity, onCreate,
+  pdf, num, width, ratio, rootEl, anns, onTextError, tool, color, opacity, onCreate, find, findNth,
 }: {
   pdf: PDFDocumentProxy; num: number; width: number; ratio: number; rootEl: HTMLElement | null; anns: Ann[]; onTextError?: (m: string) => void;
   tool: Tool; color: string; opacity: number; onCreate: (a: Partial<Ann>) => void;
+  /** Search term to mark in the text layer, and which marked span (on this page) is the current hit. */
+  find: string; findNth: number | null;
 }) {
   const [drag, setDrag] = useState<[number, number, number, number] | null>(null);
   const [path, setPath] = useState<Pt[] | null>(null);
@@ -139,6 +143,7 @@ function PdfPage({
   const [visible, setVisible] = useState(false);
   const [height, setHeight] = useState(width * ratio);
   const done = useRef(0);
+  const [rendered, setRendered] = useState(0);
 
   useEffect(() => {
     const el = wrap.current;
@@ -183,10 +188,25 @@ function PdfPage({
         console.error("PDF text layer failed", err);
         onTextError?.(err instanceof Error ? err.message : String(err));
       }
-      if (!cancelled) done.current = width;
+      if (!cancelled) { done.current = width; setRendered((n) => n + 1); }
     })().catch(() => { /* cancelled renders throw */ });
     return () => { cancelled = true; task?.cancel(); };
   }, [visible, width, pdf, num]);
+
+  // Mark search matches in the text layer (matches that span two text runs are not marked).
+  useEffect(() => {
+    const tl = textBox.current;
+    if (!tl) return;
+    const q = find.trim().toLowerCase();
+    let n = 0;
+    tl.querySelectorAll("span").forEach((sp) => {
+      if (sp.classList.contains("markedContent") || sp.querySelector("span")) return;
+      const m = !!q && (sp.textContent || "").toLowerCase().includes(q);
+      sp.classList.toggle("pdfv-find", m);
+      sp.classList.toggle("cur", m && findNth !== null && n === findNth);
+      if (m) n++;
+    });
+  }, [find, findNth, rendered]);
 
   return (
     <div ref={wrap} className="pdfv-page" data-page={num} style={{ width, height }}>
@@ -230,7 +250,11 @@ function PdfPage({
 }
 
 /** Right-hand reader: pdf.js pages with selectable text, highlights/notes saved in the vault, and “add to CERIC”. */
-export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () => void }) {
+export default function PdfViewer({ doc, onClose, lead, trail }: {
+  doc: PdfDoc; onClose: () => void;
+  /** Embedded (Collection) reader: buttons placed at the start / end of the thin top bar. */
+  lead?: ReactNode; trail?: ReactNode;
+}) {
   const key = useMemo(() => doc.key || doc.paper?.id || `url-${hashStr(doc.url)}`, [doc.key, doc.paper?.id, doc.url]);
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [err, setErr] = useState("");
@@ -247,13 +271,30 @@ export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () =
   const [tool, setTool] = useState<Tool>("select");
   const [toolColor, setToolColor] = useState("#e5484d");
   const [notesOpen, setNotesOpen] = useState(false);
+  const embedded = !!doc.embedded;
+  const [sbHidden, toggleSb, setSbHidden] = useCollapsed("reader-sidebar", typeof window !== "undefined" && window.innerWidth < 900);
+  const [sbTab, setSbTab] = useState<SidebarTab>("thumbs");
+  const [curPage, setCurPage] = useState(1);
+  const [findInput, setFindInput] = useState("");
+  const [findQ, setFindQ] = useState("");
+  const [hits, setHits] = useState<FindHit[]>([]);
+  const [hitIdx, setHitIdx] = useState(-1);
+  const [findBusy, setFindBusy] = useState<{ done: number; total: number } | null>(null);
+  const findToken = useRef(0);
+  const findInputEl = useRef<HTMLInputElement>(null);
+  const textCache = useRef<Map<number, string[]>>(new Map());
+  const sbOpen = embedded && !sbHidden;
+  /** Show the highlights/notes list: in the sidebar (Collection reader) or the drawer below the pages. */
+  function openNotes() {
+    if (embedded) { setSbHidden(false); setSbTab("notes"); } else setNotesOpen(true);
+  }
   const [focusId, setFocusId] = useState<string | null>(null);
   const [textFail, setTextFail] = useState(false);
   const [toast, setToast] = useState<{ text: string; ok: boolean } | null>(null);
   const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
   const [boxW, setBoxW] = useState(0);
   const dirty = useRef(false);
-  const { zoom, zoomIn, zoomOut, atMinZoom, atMaxZoom } = useZoom(1);
+  const { zoom, zoomIn, zoomOut, atMinZoom, atMaxZoom, resetZoom } = useZoom(1);
   const { fullscreen, setFullscreen } = useFullscreenPane();
 
   function showToast(text: string, ok: boolean) {
@@ -369,7 +410,7 @@ export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () =
         const x = (me.clientX - pr.left) / pr.width;
         const y = (me.clientY - pr.top) / pr.height;
         const hit = anns.find((a) => a.page === Number(pageEl.dataset.page) && a.rects.some((r) => x >= r[0] && x <= r[0] + r[2] && y >= r[1] && y <= r[1] + r[3]));
-        if (hit) { setNotesOpen(true); setFocusId(hit.id); }
+        if (hit) { openNotes(); setFocusId(hit.id); }
       }
       return;
     }
@@ -442,7 +483,7 @@ export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () =
     const report = () => {
       raf = 0;
       const p = currentPage();
-      if (p !== last) { last = p; onPageRef.current?.(p, pages); }
+      if (p !== last) { last = p; setCurPage(p); onPageRef.current?.(p, pages); }
     };
     const onScroll = () => { if (!raf) raf = window.requestAnimationFrame(report); };
     rootEl.addEventListener("scroll", onScroll, { passive: true });
@@ -456,7 +497,7 @@ export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () =
       id: newId(), page: currentPage(), rects: [], text: "", color: prefs.defaultColor, note: "", created: new Date().toISOString(),
     };
     commit([...anns, a]);
-    setNotesOpen(true);
+    openNotes();
     setFocusId(a.id);
   }
 
@@ -470,7 +511,7 @@ export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () =
     };
     commit([...anns, a]);
     clearBrowserSelection();
-    if (opts.note) { setNotesOpen(true); setFocusId(a.id); }
+    if (opts.note) { openNotes(); setFocusId(a.id); }
   }
 
   async function toNotes() {
@@ -501,7 +542,7 @@ export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () =
       color: toolColor, note: "", created: new Date().toISOString(), ...(p.pts ? { pts: p.pts } : {}),
     };
     commit([...anns, a]);
-    if (k === "note") { setTool("select"); setNotesOpen(true); setFocusId(a.id); }
+    if (k === "note") { setTool("select"); openNotes(); setFocusId(a.id); }
   }
 
   // Keyboard: Esc leaves a tool; "h" highlights the selection in the default colour.
@@ -561,40 +602,76 @@ export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () =
     showToast("Highlights copied as Markdown", true);
   }
 
+  async function pageItems(p: number): Promise<string[]> {
+    const c = textCache.current.get(p);
+    if (c) return c;
+    const pg = await pdf!.getPage(p);
+    const tc = await pg.getTextContent();
+    const arr = tc.items.map((it) => ("str" in it ? it.str : ""));
+    textCache.current.set(p, arr);
+    return arr;
+  }
+  useEffect(() => { textCache.current.clear(); findToken.current++; setHits([]); setFindQ(""); setFindInput(""); setHitIdx(-1); setFindBusy(null); }, [key]);
+
+  async function runSearch(raw: string) {
+    const q = raw.trim();
+    const tok = ++findToken.current;
+    setFindQ(q); setHitIdx(-1); setHits([]);
+    if (!q || !pdf) { setFindBusy(null); return; }
+    setSbHidden(false); setSbTab("search");
+    const lq = q.toLowerCase();
+    const out: FindHit[] = [];
+    const total = pdf.numPages;
+    setFindBusy({ done: 0, total });
+    for (let p = 1; p <= total; p++) {
+      if (tok !== findToken.current) return;
+      let items: string[];
+      try { items = await pageItems(p); } catch { continue; }
+      let nth = 0;
+      items.forEach((t, i) => {
+        if (!t.toLowerCase().includes(lq)) return;
+        const ctx = [items[i - 1] || "", t, items[i + 1] || ""].join(" ").replace(/\s+/g, " ").trim();
+        const at = ctx.toLowerCase().indexOf(lq);
+        const snippet = ctx.length > 120 ? `${at > 40 ? "…" : ""}${ctx.slice(Math.max(0, at - 40), at + 80)}…` : ctx;
+        out.push({ page: p, nth: nth++, snippet });
+      });
+      if (p % 15 === 0 || p === total) { setHits([...out]); setFindBusy({ done: p, total }); }
+    }
+    if (tok !== findToken.current) return;
+    setFindBusy(null);
+    setHits([...out]);
+    if (out.length) goHit(0, out);
+  }
+
+  function goHit(i: number, list: FindHit[] = hits) {
+    const h = list[i];
+    if (!h || !rootEl) return;
+    setHitIdx(i);
+    rootEl.querySelector(`.pdfv-page[data-page="${h.page}"]`)?.scrollIntoView({ block: "start" });
+    let tries = 0;
+    const t = window.setInterval(() => {
+      const el = rootEl.querySelector(`.pdfv-page[data-page="${h.page}"] .pdfv-find.cur`);
+      tries++;
+      if (el) { el.scrollIntoView({ block: "center" }); window.clearInterval(t); } else if (tries > 20) window.clearInterval(t);
+    }, 150);
+  }
+  function stepHit(d: number) {
+    if (!hits.length) return;
+    goHit((hitIdx + d + hits.length) % hits.length);
+  }
+  useEffect(() => {
+    if (!embedded) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") { e.preventDefault(); findInputEl.current?.focus(); findInputEl.current?.select(); }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [embedded]);
+
   const sorted = useMemo(() => [...anns].sort((a, b) => a.page - b.page || a.created.localeCompare(b.created)), [anns]);
 
-  return (
-    <div className={`pdf-viewer${fullscreen ? " is-full" : ""}`}>
-      {!doc.embedded && <ActivityTimer category="papers" />}
-      <div className={`pdf-viewer-bar${doc.embedded ? " compact" : ""}`}>
-        <button type="button" className="btn pdfv-collapse" onClick={() => { toggleSlim(); setTool("select"); }} aria-expanded={!slim} title={slim ? "Show zoom and annotation tools" : "Hide zoom and annotation tools"}>
-          {slim ? "▾ Tools" : "▴ Tools"}
-        </button>
-        {doc.embedded
-          ? <span className="pdf-viewer-title muted">{pages ? `${pages} page${pages === 1 ? "" : "s"}` : ""}</span>
-          : <span className="pdf-viewer-title" title={doc.title}>{doc.title}</span>}
-        {!doc.embedded && !savedCopy && <button type="button" className="btn" onClick={keepCopy} title="Keep a copy of this PDF in your vault">Keep copy</button>}
-        {!doc.embedded && savedCopy && <span className="muted mono" style={{ fontSize: 11 }} title="Stored in your vault: 10-Papers/pdfs">saved locally ✓</span>}
-        <button type="button" className={`btn${notesOpen ? " btn-primary" : ""}`} onClick={() => setNotesOpen((v) => !v)} title="Highlights and notes">
-          Notes{anns.length ? ` (${anns.length})` : ""}
-        </button>
-        {!doc.embedded && <a className="btn" href={doc.url} target="_blank" rel="noopener noreferrer" title="Open in your browser">↗</a>}
-        {!doc.embedded && <button type="button" className="btn" onClick={onClose} title="Close reader">×</button>}
-      </div>
-      {!slim && <PreviewToolbar
-        statusLabel={err ? "error" : pages ? `${pages} page${pages === 1 ? "" : "s"}` : "loading…"}
-        zoom={zoom}
-        atMinZoom={atMinZoom}
-        atMaxZoom={atMaxZoom}
-        onZoomIn={zoomIn}
-        onZoomOut={zoomOut}
-        fullscreen={fullscreen}
-        onEnterFullscreen={() => setFullscreen(true)}
-        onExitFullscreen={() => setFullscreen(false)}
-        onDownload={download}
-      />}
-      <div className="pdfv-stage">
-        {!slim && <div className="pdfv-tools" role="toolbar" aria-label="Annotation tools">
+  const toolButtons = (
+    <>
           <button type="button" className={`pdfv-tool-btn${tool === "select" && markup === "highlight" ? " on" : ""}`} title="Highlight selected text (select text, then pick a colour)" onClick={() => { setTool("select"); setMarkup("highlight"); }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="3.5" y="3.5" width="17" height="17" rx="2.5" /><text x="12" y="17" textAnchor="middle" fontSize="13" fontWeight="700" fill="currentColor" stroke="none" fontFamily="serif">A</text></svg>
           </button>
@@ -614,66 +691,174 @@ export default function PdfViewer({ doc, onClose }: { doc: PdfDoc; onClose: () =
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M4 20l1-4L16.5 4.5a2 2 0 0 1 3 3L8 19z" /><path d="M14.5 6.5l3 3" /></svg>
           </button>
           <input type="color" value={toolColor} onChange={(e) => setToolColor(e.target.value)} title="Colour for note / text / area / draw" aria-label="Tool colour" />
-          {tool !== "select" && <span className="hint">Esc to stop</span>}
-        </div>}
-        {sel && anchor && (
-          <PdfSelectionPopup
-            x={anchor.x} y={anchor.y} below={anchor.below} prefs={prefs} markup={markup} onMarkup={setMarkup} text={sel.text}
-            onPick={(c) => applySel(c)} onNote={() => applySel(prefs.defaultColor, { note: true })}
-            onToNotes={doc.notes ? () => void toNotes() : undefined}
-            slots={doc.paper ? cer.slots : null} addingSlot={cer.addingSlot} onCeric={(k) => addToCeric(k, cer.slots.findIndex((x) => x.key === k))}
-          />
-        )}
-        {textFail && <div className="pdfv-warn">Text selection isn’t available for this PDF (see the console for details). You can still add a page note from the Notes drawer.</div>}
-        {toast && <div className={`pdfv-toast ${toast.ok ? "ok" : "error"}`}>{toast.text}</div>}
-        <div ref={setRootEl} className="pdfv-scroll">
-          {err ? (
-            <div className="pdfv-msg">{err}</div>
-          ) : !pdf ? (
-            <div className="pdfv-msg">Loading PDF…</div>
-          ) : (
-            Array.from({ length: pdf.numPages }, (_, i) => (
-              <PdfPage key={`${key}-${i + 1}`} pdf={pdf} num={i + 1} width={pageWidth} ratio={ratio} rootEl={rootEl} anns={anns.filter((a) => a.page === i + 1)} onTextError={() => setTextFail(true)} tool={tool} color={toolColor} opacity={prefs.opacity} onCreate={createFromTool} />
-            ))
-          )}
-        </div>
-        {notesOpen && (
-          <div className="pdfv-notes">
-            <div className="pdfv-notes-head">
-              <strong>Highlights &amp; notes</strong>
-              <span className="muted" style={{ fontSize: 11 }}>select text or use the tools above</span>
-              <span style={{ flex: 1 }} />
-              <button type="button" className="btn" onClick={addPageNote} title="Add a note to the page you are viewing">+ Page note</button>
-              {anns.length > 0 && <button type="button" className="btn" onClick={copyMarkdown}>Copy Markdown</button>}
-              <button type="button" className="btn" onClick={() => setNotesOpen(false)}>×</button>
-            </div>
-            {sorted.length === 0 && <div className="muted" style={{ padding: 10, fontSize: 13 }}>Nothing yet. Select text in the PDF, then choose a highlight colour or “+ Note”.</div>}
-            {sorted.map((a) => (
-              <div key={a.id} className={`pdfv-note${a.id === focusId ? " focus" : ""}`}>
-                <div className="pdfv-note-top">
-                  <button type="button" className="btn" onClick={() => jumpTo(a.page)}>p. {a.page}</button>
-                  {a.kind && a.kind !== "highlight" && <span className="muted" style={{ fontSize: 11 }}>{a.kind}</span>}
-                  {a.slot && <span className="muted" style={{ fontSize: 11 }}>{cer.slots.find((x) => x.key === a.slot)?.label || a.slot}</span>}
-                  {prefs.colors.map((c) => (
-                    <button key={c} type="button" className={`pdfv-swatch small${a.color === c ? " on" : ""}`} style={{ background: c }}
-                      onClick={() => commit(anns.map((x) => (x.id === a.id ? { ...x, color: c } : x)))} />
-                  ))}
-                  <span style={{ flex: 1 }} />
-                  <button type="button" className="btn" title="Delete highlight" onClick={() => commit(anns.filter((x) => x.id !== a.id))}>Delete</button>
-                </div>
-                <div className="pdfv-note-quote" style={{ borderLeftColor: a.color }}>{a.kind === "ink" ? <span className="muted">Drawing</span> : a.kind === "area" ? <span className="muted">Area</span> : a.text || <span className="muted">{a.kind === "note" ? "Pinned note" : "Page note"}</span>}</div>
-                <textarea
-                  className="pdfv-note-input"
-                  placeholder="Add a note…"
-                  autoFocus={a.id === focusId}
-                  defaultValue={a.note}
-                  rows={2}
-                  onBlur={(e) => { if (e.target.value !== a.note) commit(anns.map((x) => (x.id === a.id ? { ...x, note: e.target.value } : x))); }}
-                />
-              </div>
+    </>
+  );
+
+  const notesList = (
+    <div className="pdfv-notes-list">
+      <div className="pdfv-notes-head">
+        <strong>Highlights &amp; notes</strong>
+        <span style={{ flex: 1 }} />
+        <button type="button" className="btn" onClick={addPageNote} title="Add a note to the page you are viewing">+ Page note</button>
+        {anns.length > 0 && <button type="button" className="btn" onClick={copyMarkdown}>Copy Markdown</button>}
+        {!embedded && <button type="button" className="btn" onClick={() => setNotesOpen(false)}>×</button>}
+      </div>
+      {sorted.length === 0 && <div className="muted" style={{ padding: 10, fontSize: 13 }}>Nothing yet. Select text in the PDF, then choose a highlight colour or “+ Note”.</div>}
+      {sorted.map((a) => (
+        <div key={a.id} className={`pdfv-note${a.id === focusId ? " focus" : ""}`}>
+          <div className="pdfv-note-top">
+            <button type="button" className="btn" onClick={() => jumpTo(a.page)}>p. {a.page}</button>
+            {a.kind && a.kind !== "highlight" && <span className="muted" style={{ fontSize: 11 }}>{a.kind}</span>}
+            {a.slot && <span className="muted" style={{ fontSize: 11 }}>{cer.slots.find((x) => x.key === a.slot)?.label || a.slot}</span>}
+            {prefs.colors.map((c) => (
+              <button key={c} type="button" className={`pdfv-swatch small${a.color === c ? " on" : ""}`} style={{ background: c }}
+                onClick={() => commit(anns.map((x) => (x.id === a.id ? { ...x, color: c } : x)))} />
             ))}
+            <span style={{ flex: 1 }} />
+            <button type="button" className="btn" title="Delete highlight" onClick={() => commit(anns.filter((x) => x.id !== a.id))}>Delete</button>
+          </div>
+          <div className="pdfv-note-quote" style={{ borderLeftColor: a.color }}>{a.kind === "ink" ? <span className="muted">Drawing</span> : a.kind === "area" ? <span className="muted">Area</span> : a.text || <span className="muted">{a.kind === "note" ? "Pinned note" : "Page note"}</span>}</div>
+          <textarea
+            className="pdfv-note-input"
+            placeholder="Add a note…"
+            autoFocus={a.id === focusId}
+            defaultValue={a.note}
+            rows={2}
+            onBlur={(e) => { if (e.target.value !== a.note) commit(anns.map((x) => (x.id === a.id ? { ...x, note: e.target.value } : x))); }}
+          />
+        </div>
+      ))}
+    </div>
+  );
+
+  const pagesEl = (
+    <div ref={setRootEl} className="pdfv-scroll">
+      {err ? (
+        <div className="pdfv-msg">{err}</div>
+      ) : !pdf ? (
+        <div className="pdfv-msg">Loading PDF…</div>
+      ) : (
+        Array.from({ length: pdf.numPages }, (_, i) => (
+          <PdfPage key={`${key}-${i + 1}`} pdf={pdf} num={i + 1} width={pageWidth} ratio={ratio} rootEl={rootEl} anns={anns.filter((a) => a.page === i + 1)} onTextError={() => setTextFail(true)} tool={tool} color={toolColor} opacity={prefs.opacity} onCreate={createFromTool}
+            find={findQ} findNth={hits[hitIdx]?.page === i + 1 ? hits[hitIdx].nth : null} />
+        ))
+      )}
+    </div>
+  );
+
+  const floating = (
+    <>
+      {sel && anchor && (
+        <PdfSelectionPopup
+          x={anchor.x} y={anchor.y} below={anchor.below} prefs={prefs} markup={markup} onMarkup={setMarkup} text={sel.text}
+          onPick={(c) => applySel(c)} onNote={() => applySel(prefs.defaultColor, { note: true })}
+          onToNotes={doc.notes ? () => void toNotes() : undefined}
+          slots={doc.paper ? cer.slots : null} addingSlot={cer.addingSlot} onCeric={(k) => addToCeric(k, cer.slots.findIndex((x) => x.key === k))}
+        />
+      )}
+      {textFail && <div className="pdfv-warn">Text selection isn’t available for this PDF (see the console for details). You can still add a page note from the Notes list.</div>}
+      {toast && <div className={`pdfv-toast ${toast.ok ? "ok" : "error"}`}>{toast.text}</div>}
+    </>
+  );
+
+  if (embedded) {
+    const ib = (on = false) => `pdfv-ib${on ? " on" : ""}`;
+    return (
+      <div className={`pdf-viewer pdfv-books${fullscreen ? " is-full" : ""}`}>
+        <div className="pdfv-topbar" role="toolbar" aria-label="Reader toolbar">
+          <button type="button" className={ib(sbOpen)} onClick={toggleSb} aria-pressed={sbOpen} title={sbOpen ? "Hide sidebar" : "Show sidebar (contents, pages, search, notes)"}><BookIcon name="sidebar" size={17} /></button>
+          {lead}
+          <span className="pdfv-tb-title" title={doc.title}>{doc.title}</span>
+          <span className="pdfv-pg" title="Page">
+            <input key={curPage} defaultValue={curPage} aria-label="Page number" inputMode="numeric"
+              onKeyDown={(e) => { if (e.key === "Enter") { const n = Math.min(pages || 1, Math.max(1, parseInt((e.target as HTMLInputElement).value, 10) || 1)); jumpTo(n); (e.target as HTMLInputElement).blur(); } }} />
+            <span className="muted">/ {pages || "…"}</span>
+          </span>
+          <span className="pdfv-find-box">
+            <BookIcon name="search" size={14} />
+            <input
+              ref={findInputEl} type="search" value={findInput} placeholder="Search" aria-label="Search in document"
+              onChange={(e) => setFindInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { if (findInput.trim() === findQ && hits.length) stepHit(e.shiftKey ? -1 : 1); else void runSearch(findInput); }
+                else if (e.key === "Escape") { setFindInput(""); void runSearch(""); (e.target as HTMLInputElement).blur(); }
+              }}
+            />
+            {findQ && <span className="pdfv-find-count muted">{findBusy ? "…" : hits.length ? `${hitIdx + 1}/${hits.length}` : "0"}</span>}
+            {findQ && hits.length > 1 && (
+              <>
+                <button type="button" className="pdfv-ib sm" onClick={() => stepHit(-1)} title="Previous match (Shift+Enter)"><BookIcon name="up" size={13} /></button>
+                <button type="button" className="pdfv-ib sm" onClick={() => stepHit(1)} title="Next match (Enter)"><BookIcon name="down" size={13} /></button>
+              </>
+            )}
+          </span>
+          <span className="pdfv-tb-sep" />
+          <button type="button" className={ib()} onClick={zoomOut} disabled={atMinZoom} title="Zoom out"><BookIcon name="zoomout" size={17} /></button>
+          <button type="button" className="pdfv-zoom-pct" onClick={resetZoom} title="Fit to width">{Math.round(zoom * 100)}%</button>
+          <button type="button" className={ib()} onClick={zoomIn} disabled={atMaxZoom} title="Zoom in"><BookIcon name="zoomin" size={17} /></button>
+          <button type="button" className={ib()} onClick={() => setFullscreen(!fullscreen)} title={fullscreen ? "Exit full screen (Esc)" : "Full screen"}><BookIcon name="expand" size={16} /></button>
+          <button type="button" className={ib()} onClick={download} title="Download PDF"><BookIcon name="download" size={16} /></button>
+          <span className="pdfv-tb-sep" />
+          <span className="pdfv-tb-tools">{toolButtons}</span>
+          {tool !== "select" && <span className="pdfv-hint">Esc</span>}
+          <span className="pdfv-tb-sep" />
+          {trail}
+        </div>
+        <div className="pdfv-body">
+          {sbOpen && (
+            <ReaderSidebar
+              pdf={pdf} ratio={ratio} current={curPage} onJump={jumpTo} tab={sbTab} onTab={setSbTab}
+              query={findQ} hits={hits} hitIndex={hitIdx} searching={findBusy} onHit={(i) => goHit(i)}
+              notesCount={anns.length} notes={notesList}
+            />
+          )}
+          <div className="pdfv-stage">
+            {floating}
+            {pagesEl}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`pdf-viewer${fullscreen ? " is-full" : ""}`}>
+      {!doc.embedded && <ActivityTimer category="papers" />}
+      <div className="pdf-viewer-bar">
+        <button type="button" className="btn pdfv-collapse" onClick={() => { toggleSlim(); setTool("select"); }} aria-expanded={!slim} title={slim ? "Show zoom and annotation tools" : "Hide zoom and annotation tools"}>
+          {slim ? "▾ Tools" : "▴ Tools"}
+        </button>
+        <span className="pdf-viewer-title" title={doc.title}>{doc.title}</span>
+        {!savedCopy && <button type="button" className="btn" onClick={keepCopy} title="Keep a copy of this PDF in your vault">Keep copy</button>}
+        {savedCopy && <span className="muted mono" style={{ fontSize: 11 }} title="Stored in your vault: 10-Papers/pdfs">saved locally ✓</span>}
+        <button type="button" className={`btn${notesOpen ? " btn-primary" : ""}`} onClick={() => setNotesOpen((v) => !v)} title="Highlights and notes">
+          Notes{anns.length ? ` (${anns.length})` : ""}
+        </button>
+        <a className="btn" href={doc.url} target="_blank" rel="noopener noreferrer" title="Open in your browser">↗</a>
+        <button type="button" className="btn" onClick={onClose} title="Close reader">×</button>
+      </div>
+      {!slim && <PreviewToolbar
+        statusLabel={err ? "error" : pages ? `${pages} page${pages === 1 ? "" : "s"}` : "loading…"}
+        zoom={zoom}
+        atMinZoom={atMinZoom}
+        atMaxZoom={atMaxZoom}
+        onZoomIn={zoomIn}
+        onZoomOut={zoomOut}
+        fullscreen={fullscreen}
+        onEnterFullscreen={() => setFullscreen(true)}
+        onExitFullscreen={() => setFullscreen(false)}
+        onDownload={download}
+      />}
+      <div className="pdfv-stage">
+        {!slim && (
+          <div className="pdfv-tools" role="toolbar" aria-label="Annotation tools">
+            {toolButtons}
+            {tool !== "select" && <span className="hint">Esc to stop</span>}
           </div>
         )}
+        {floating}
+        {pagesEl}
+        {notesOpen && <div className="pdfv-notes">{notesList}</div>}
       </div>
     </div>
   );

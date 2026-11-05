@@ -3,7 +3,7 @@ import { reading, type ReadingBook, type ReadingNote } from "../../api/reading";
 import type { ArxivPaper } from "../../api/client";
 import PdfViewer, { type PdfDoc } from "../../components/PdfViewer";
 import ReadingTimerChip from "../../components/ReadingTimerChip";
-import { useCollapsed } from "../../lib/useCollapsed";
+import BookIcon from "../../components/BookIcons";
 import EpubReader from "./EpubReader";
 import BookNotesPanel from "./BookNotesPanel";
 
@@ -17,9 +17,12 @@ interface Props {
   book: ReadingBook;
   onBack: () => void;
   onChanged: () => void;
+  /** Open the previous (-1) / next (+1) item of the list being browsed; undefined when there is none. */
+  onPrev?: () => void;
+  onNext?: () => void;
 }
 
-export default function BookReader({ book, onBack, onChanged }: Props) {
+export default function BookReader({ book, onBack, onChanged, onPrev, onNext }: Props) {
   const pageRef = useRef<number | undefined>(undefined);
   const saveTimer = useRef<number | undefined>(undefined);
   const [status, setStatus] = useState(book.status);
@@ -29,12 +32,11 @@ export default function BookReader({ book, onBack, onChanged }: Props) {
   const isPaper = Boolean(arxiv) || book.kind === "paper";
   const [notes, setNotes] = useState<ReadingNote[]>([]);
   const [notesOpen, setNotesOpen] = useState(false);
-  const [barSlim, toggleBar] = useCollapsed("reader-bar");
 
   useEffect(() => {
     if (isPaper) return;
     let live = true;
-    reading.notes(book.slug).then((r) => { if (live) setNotes(r.notes); }).catch(() => {});
+    reading.notes(book.slug).then((r) => { if (live) setNotes(r.notes || []); }).catch(() => {});
     return () => { live = false; };
   }, [book.slug, isPaper]);
 
@@ -100,33 +102,41 @@ export default function BookReader({ book, onBack, onChanged }: Props) {
     }
   }
 
+  const authors = book.authors.length ? ` — ${book.authors.join(", ")}` : "";
+  const lead = (
+    <>
+      <button type="button" className="pdfv-ib" onClick={onBack} title="Back to library" aria-label="Back to library"><BookIcon name="arrowleft" size={18} /></button>
+      <button type="button" className="pdfv-ib" onClick={onPrev} disabled={!onPrev} title="Previous item in this list" aria-label="Previous item"><BookIcon name="up" size={17} /></button>
+      <button type="button" className="pdfv-ib" onClick={onNext} disabled={!onNext} title="Next item in this list" aria-label="Next item"><BookIcon name="down" size={17} /></button>
+    </>
+  );
+  const trail = (
+    <>
+      {!isPaper && (
+        <button type="button" className={`pdfv-ib${notesOpen ? " on" : ""}`} onClick={() => setNotesOpen((v) => !v)} title={`Book notes (${notes.length}) — quotes you sent with “→ Notes”`} aria-label="Book notes">
+          <BookIcon name="quote" size={17} />{notes.length > 0 && <em className="pdfv-badge">{notes.length}</em>}
+        </button>
+      )}
+      <ReadingTimerChip slug={book.slug} pageRef={pageRef} />
+      <button type="button" className={`pdfv-ib${status === "finished" ? " done" : ""}`} onClick={() => void toggleFinished()} aria-pressed={status === "finished"}
+        title={status === "finished" ? "Finished — click to mark as reading again" : "Mark as finished"}>
+        <BookIcon name="finished" size={18} />
+      </button>
+    </>
+  );
+
   return (
     <div className="bk-reader">
-      <div className={`bk-reader-bar${barSlim ? " slim" : ""}`}>
-        <button type="button" className="btn" onClick={onBack}>← Library</button>
-        <div className="bk-reader-title" title={book.title}>
-          <strong>{book.title}</strong>
-          {book.authors.length > 0 && <span className="muted"> · {book.authors.join(", ")}</span>}
-        </div>
-        {!isPaper && (
-          <button type="button" className={`btn${notesOpen ? " btn-primary" : ""}`} onClick={() => setNotesOpen((v) => !v)}>
-            Book notes ({notes.length})
-          </button>
-        )}
-        {/* The timer keeps logging reading time even while the bar is collapsed. */}
-        <span className="bk-reader-extra"><ReadingTimerChip slug={book.slug} pageRef={pageRef} /></span>
-        <button type="button" className={`btn bk-reader-extra${status === "finished" ? " btn-primary" : ""}`} onClick={() => void toggleFinished()}>
-          {status === "finished" ? "Finished ✓" : "Mark finished"}
-        </button>
-        <button type="button" className="btn" onClick={toggleBar} aria-expanded={!barSlim} title={barSlim ? "Show timer and status" : "Hide timer and status"}>{barSlim ? "▾" : "▴"}</button>
-      </div>
       <div className="bk-reader-body">
         {!book.has_file ? (
-          <div className="bk-empty muted">This book has no file yet. Go back and choose “Attach file…” from its ⋯ menu.</div>
+          <div className="bk-empty-wrap">
+            <div className="pdfv-topbar">{lead}<span className="pdfv-tb-title" title={book.title + authors}>{book.title}</span></div>
+            <div className="bk-empty muted">This book has no file yet. Go back and choose “Attach file…” from its ⋯ menu.</div>
+          </div>
         ) : book.format === "epub" ? (
-          <EpubReader book={book} pageRef={pageRef} onToNotes={isPaper ? undefined : (text, loc) => addNote(text, null, loc)} />
+          <EpubReader book={book} pageRef={pageRef} lead={lead} trail={trail} onToNotes={isPaper ? undefined : (text, loc) => addNote(text, null, loc)} />
         ) : (
-          <PdfViewer doc={doc} onClose={onBack} />
+          <PdfViewer doc={doc} onClose={onBack} lead={lead} trail={trail} />
         )}
         {!isPaper && notesOpen && (
           <BookNotesPanel slug={book.slug} notes={notes} onChange={setNotes} onClose={() => setNotesOpen(false)} />

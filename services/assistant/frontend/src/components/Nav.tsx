@@ -5,6 +5,7 @@ import YggdrasilLogo from "./YggdrasilLogo";
 
 export type NotesTab = "editor" | "collection" | "quick-notes" | "documentation" | "meeting-minutes";
 export type TasksTab = "planner" | "list" | "board";
+export type PapersSection = "daily" | "search";
 export type CollectionSection = "all" | "books" | "papers";
 
 const NOTES_TABS: { id: NotesTab; label: string }[] = [
@@ -15,8 +16,9 @@ const NOTES_TABS: { id: NotesTab; label: string }[] = [
   { id: "meeting-minutes", label: "Meeting Minutes" },
 ];
 
-const SUBS: Partial<Record<View, { key: "notes" | "tasks" | "collection"; items: { id: string; label: string }[] }>> = {
+const SUBS: Partial<Record<View, { key: "notes" | "tasks" | "collection" | "papers"; items: { id: string; label: string }[] }>> = {
   editor: { key: "notes", items: NOTES_TABS },
+  papers: { key: "papers", items: [{ id: "daily", label: "Daily Archive" }, { id: "search", label: "Search" }] },
   tasks: { key: "tasks", items: [{ id: "planner", label: "Planner" }, { id: "list", label: "List" }, { id: "board", label: "Board" }] },
   books: { key: "collection", items: [{ id: "all", label: "All" }, { id: "books", label: "Books" }, { id: "papers", label: "Papers" }] },
 };
@@ -39,8 +41,8 @@ const ITEMS: { id: View; label: string; icon: ReactNode }[] = [
 interface Props {
   current: View;
   onNavigate: (v: View) => void;
-  subs: { notes: string; tasks: string; collection: string };
-  onSub: (key: "notes" | "tasks" | "collection", id: string) => void;
+  subs: { notes: string; tasks: string; collection: string; papers: string };
+  onSub: (key: "notes" | "tasks" | "collection" | "papers", id: string) => void;
   onSettingsOpen?: () => void;
   onPageEdit?: () => void;
   pageEditOpen?: boolean;

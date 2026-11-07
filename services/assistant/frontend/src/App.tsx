@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import Nav, { type NotesTab, type TasksTab, type CollectionSection } from "./components/Nav";
+import Nav, { type NotesTab, type TasksTab, type CollectionSection, type PapersSection } from "./components/Nav";
 import SettingsDrawer from "./components/SettingsDrawer";
 import PageThemeDrawer from "./components/PageThemeDrawer";
 import CERICEditor from "./views/CERICEditor";
@@ -26,6 +26,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [notesTab, setNotesTab] = useState<NotesTab>("collection");
   const [tasksTab, setTasksTab] = useState<TasksTab>("planner");
+  const [papersSection, setPapersSection] = useState<PapersSection>("daily");
   const [colSection, setColSection] = useState<CollectionSection>("all");
   const [pageEditOpen, setPageEditOpen] = useState(false);
   const [firstRunData, setFirstRunData] = useState(false);
@@ -76,10 +77,11 @@ export default function App() {
       <ManualTimerRunner />
       <Nav
         current={view}
-        subs={{ notes: notesTab, tasks: tasksTab, collection: colSection }}
+        subs={{ notes: notesTab, tasks: tasksTab, collection: colSection, papers: papersSection }}
         onSub={(k, id) => {
           if (k === "notes") setNotesTab(id as NotesTab);
           else if (k === "tasks") setTasksTab(id as TasksTab);
+          else if (k === "papers") setPapersSection(id as PapersSection);
           else setColSection(id as CollectionSection);
         }}
         onNavigate={setView}
@@ -125,7 +127,7 @@ export default function App() {
             <LaTeXEditor />
           </>
         )}
-        {view === "papers" && <PapersView />}
+        {view === "papers" && <PapersView requestSection={papersSection} />}
         {view === "books" && <BooksView requestSection={colSection} />}
       </main>
       </div>

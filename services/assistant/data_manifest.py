@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-APP_VERSION = "0.4.11"  # keep in sync with packaging/build-*.sh and frontend/package.json
+APP_VERSION = "0.4.12"  # keep in sync with packaging/build-*.sh and frontend/package.json
 SCHEMA_VERSION = 1
 INDEX_VERSION = 1
 MANIFEST_NAME = ".yggdrasil-manifest.json"

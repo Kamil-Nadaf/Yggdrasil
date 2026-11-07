@@ -1,6 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
-import SubTabs from "../components/SubTabs";
 import PdfViewer, { PdfContext, type PdfDoc } from "../components/PdfViewer";
 import ArxivSearch from "./ArxivSearch";
 import ArxivBrowser from "./ArxivBrowser";
@@ -8,22 +7,14 @@ import ArxivBrowser from "./ArxivBrowser";
 type Section = "daily" | "search";
 
 /** One "Papers" section: Daily Archive + arXiv Search as subsections, with a drag-resizable PDF reader on the right. */
-export default function PapersView() {
-  const [section, setSection] = useState<Section>("daily");
+export default function PapersView({ requestSection }: { requestSection?: Section } = {}) {
+  const [section, setSection] = useState<Section>(requestSection ?? "daily");
+  useEffect(() => { if (requestSection) setSection(requestSection); }, [requestSection]);
   const [pdf, setPdf] = useState<PdfDoc | null>(null);
   const content = section === "daily" ? <ArxivSearch /> : <ArxivBrowser />;
   return (
     <PdfContext.Provider value={setPdf}>
       <div className="papers-view">
-        <SubTabs
-          label="Papers"
-          value={section}
-          onChange={setSection}
-          tabs={[
-            { id: "daily", label: "Daily Archive" },
-            { id: "search", label: "Search" },
-          ]}
-        />
         <div className="papers-body">
           {pdf ? (
             <Group id="papers-pdf-split" orientation="horizontal" className="papers-split">

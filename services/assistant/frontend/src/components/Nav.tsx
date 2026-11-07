@@ -1,64 +1,112 @@
+import { useState } from "react";
+import type { ReactNode } from "react";
 import type { View } from "../App";
 import YggdrasilLogo from "./YggdrasilLogo";
 
-const ITEMS: { id: View; label: string }[] = [
-  { id: "scores", label: "Dashboard" },
-  { id: "papers", label: "Papers" },
-  { id: "books", label: "Collection" },
-  { id: "editor", label: "Notes" },
-  { id: "tasks", label: "Tasks" },
-  { id: "graph", label: "Graph" },
-  { id: "ask", label: "Loki" },
-  { id: "latex", label: "LaTeX" },
+export type NotesTab = "editor" | "collection" | "quick-notes" | "documentation" | "meeting-minutes";
+
+const NOTES_TABS: { id: NotesTab; label: string }[] = [
+  { id: "editor", label: "Editor" },
+  { id: "collection", label: "Collection" },
+  { id: "quick-notes", label: "Quick Notes" },
+  { id: "documentation", label: "Documentation" },
+  { id: "meeting-minutes", label: "Meeting Minutes" },
+];
+
+const svg = (d: ReactNode) => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{d}</svg>
+);
+
+const ITEMS: { id: View; label: string; icon: ReactNode }[] = [
+  { id: "scores", label: "Dashboard", icon: svg(<><rect x="3" y="3" width="7" height="9" rx="1" /><rect x="14" y="3" width="7" height="5" rx="1" /><rect x="14" y="12" width="7" height="9" rx="1" /><rect x="3" y="16" width="7" height="5" rx="1" /></>) },
+  { id: "papers", label: "Papers", icon: svg(<><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5M9 13h6M9 17h6" /></>) },
+  { id: "books", label: "Collection", icon: svg(<><path d="M4 19.5V5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2.5z" /><path d="M4 19.5A2 2 0 0 0 6 21h13" /></>) },
+  { id: "editor", label: "Notes", icon: svg(<><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></>) },
+  { id: "tasks", label: "Tasks", icon: svg(<><rect x="3" y="4" width="18" height="17" rx="2" /><path d="M8 2v4M16 2v4M3 10h18" /></>) },
+  { id: "graph", label: "Graph", icon: svg(<><circle cx="6" cy="6" r="2.5" /><circle cx="18" cy="8" r="2.5" /><circle cx="12" cy="18" r="2.5" /><path d="M8 7l8 1M7 8l4 8M17 10l-4 6" /></>) },
+  { id: "ask", label: "Loki", icon: svg(<path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />) },
+  { id: "latex", label: "LaTeX", icon: svg(<path d="M8 9l-4 3 4 3M16 9l4 3-4 3M14 5l-4 14" />) },
 ];
 
 interface Props {
   current: View;
   onNavigate: (v: View) => void;
+  notesTab: NotesTab;
+  onNotesTab: (t: NotesTab) => void;
   onSettingsOpen?: () => void;
   onPageEdit?: () => void;
   pageEditOpen?: boolean;
 }
 
-export default function Nav({ current, onNavigate, onSettingsOpen, onPageEdit, pageEditOpen }: Props) {
+const KEY = "yg-sidebar-collapsed";
+
+export default function Nav({ current, onNavigate, notesTab, onNotesTab, onSettingsOpen, onPageEdit, pageEditOpen }: Props) {
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem(KEY) === "1"; } catch { return false; }
+  });
+  function toggle() {
+    setCollapsed((c) => {
+      try { localStorage.setItem(KEY, c ? "0" : "1"); } catch { /* ignore */ }
+      return !c;
+    });
+  }
+  const gear = svg(<><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></>);
+
   return (
-    <nav className="app-nav">
-      <div className="nav-brand">
-        <YggdrasilLogo size={32} className="nav-logo-img" />
-        <span className="nav-logo-text">YGGDRASIL</span>
+    <nav className={`app-nav side${collapsed ? " collapsed" : ""}`} aria-label="Main">
+      <div className="side-top">
+        <YggdrasilLogo size={28} className="nav-logo-img" />
+        {!collapsed && <span className="side-name">YGGDRASIL</span>}
+        <button type="button" className="side-toggle" onClick={toggle} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} aria-expanded={!collapsed} title={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
+          {svg(<><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /><path d={collapsed ? "M14 10l2 2-2 2" : "M16 10l-2 2 2 2"} /></>)}
+        </button>
       </div>
-      <div className="nav-tabs">
-        {ITEMS.map((item) => (
-          <button
-            key={item.id}
-            className={`nav-item${current === item.id ? " active" : ""}`}
-            onClick={() => onNavigate(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
+      <div className="side-items">
+        {ITEMS.map((item) => {
+          const active = current === item.id;
+          const isNotes = item.id === "editor";
+          return (
+            <div key={item.id} className="side-group">
+              <button
+                type="button"
+                className={`nav-item side-item${active ? " active" : ""}`}
+                onClick={() => onNavigate(item.id)}
+                title={collapsed ? item.label : undefined}
+                aria-label={item.label}
+              >
+                {item.icon}
+                {!collapsed && <span>{item.label}</span>}
+                {!collapsed && isNotes && <span className="side-caret" aria-hidden="true">{active ? "▾" : "▸"}</span>}
+              </button>
+              {isNotes && (active || collapsed) && (
+                <div className={collapsed ? "side-fly" : "side-sub"}>
+                  {collapsed && <div className="side-fly-h">Notes</div>}
+                  {NOTES_TABS.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      className={`side-subitem${active && notesTab === t.id ? " active" : ""}`}
+                      onClick={() => { onNotesTab(t.id); onNavigate("editor"); }}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
-      <button
-        type="button"
-        className={`nav-page-edit${pageEditOpen ? " active" : ""}`}
-        onClick={onPageEdit}
-      >
-        Edit page
-      </button>
-      <button
-        type="button"
-        className="nav-settings-btn"
-        onClick={onSettingsOpen}
-        title="Settings"
-        aria-label="Settings"
-      >
-        <svg className="nav-settings-gear" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-          <path
-            fill="currentColor"
-            d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.07 7.07 0 0 0-1.63-.94l-.36-2.54A.5.5 0 0 0 13.9 2h-3.8a.5.5 0 0 0-.49.42l-.36 2.54c-.59.24-1.13.55-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.48a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94L2.83 14.52a.5.5 0 0 0-.12.64l1.92 3.32c.14.24.43.34.68.22l2.39-.96c.5.39 1.04.7 1.63.94l.36 2.54c.05.24.25.42.49.42h3.8c.24 0 .44-.18.49-.42l.36-2.54c.59-.24 1.13-.55 1.63-.94l2.39.96c.25.12.54.02.68-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"
-          />
-        </svg>
-      </button>
+      <div className="side-bottom">
+        <button type="button" className={`nav-item side-item${pageEditOpen ? " active" : ""}`} onClick={onPageEdit} title={collapsed ? "Edit page" : undefined} aria-label="Edit page">
+          {svg(<><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></>)}
+          {!collapsed && <span>Edit page</span>}
+        </button>
+        <button type="button" className="nav-item side-item" onClick={onSettingsOpen} title={collapsed ? "Settings" : undefined} aria-label="Settings">
+          {gear}
+          {!collapsed && <span>Settings</span>}
+        </button>
+      </div>
     </nav>
   );
 }

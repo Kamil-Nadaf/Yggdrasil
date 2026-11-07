@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import Nav from "./components/Nav";
+import Nav, { type NotesTab } from "./components/Nav";
 import SettingsDrawer from "./components/SettingsDrawer";
 import PageThemeDrawer from "./components/PageThemeDrawer";
 import CERICEditor from "./views/CERICEditor";
@@ -24,6 +24,7 @@ export default function App() {
   const [view, setView] = useState<View>("scores");
   const [editorCitekey, setEditorCitekey] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [notesTab, setNotesTab] = useState<NotesTab>("collection");
   const [pageEditOpen, setPageEditOpen] = useState(false);
   const [firstRunData, setFirstRunData] = useState(false);
   const [reinstallBanner, setReinstallBanner] = useState<string | null>(null);
@@ -71,6 +72,16 @@ export default function App() {
   return (
     <div className="app-shell">
       <ManualTimerRunner />
+      <Nav
+        current={view}
+        notesTab={notesTab}
+        onNotesTab={setNotesTab}
+        onNavigate={setView}
+        onSettingsOpen={() => { setPageEditOpen(false); setSettingsOpen(true); }}
+        onPageEdit={() => { setSettingsOpen(false); setPageEditOpen(true); }}
+        pageEditOpen={pageEditOpen}
+      />
+      <div className="app-body">
       {reinstallBanner && (
         <div className="data-restore-banner" role="status">
           <span>{reinstallBanner}</span>
@@ -79,17 +90,12 @@ export default function App() {
           </button>
         </div>
       )}
-      <Nav
-        current={view}
-        onNavigate={setView}
-        onSettingsOpen={() => { setPageEditOpen(false); setSettingsOpen(true); }}
-        onPageEdit={() => { setSettingsOpen(false); setPageEditOpen(true); }}
-        pageEditOpen={pageEditOpen}
-      />
       <main className={`app-content${view === "latex" || view === "ask" ? " app-content--flush" : ""}`}>
         {view === "editor" && (
           <CERICEditor
             citekey={editorCitekey}
+            requestTab={notesTab}
+            onTabChange={setNotesTab}
             onBack={() => setView("papers")}
             onSelectPaper={openEditor}
             onPaperDeleted={() => setEditorCitekey(null)}
@@ -114,6 +120,7 @@ export default function App() {
         {view === "papers" && <PapersView />}
         {view === "books" && <BooksView />}
       </main>
+      </div>
       <SettingsDrawer
         open={settingsOpen}
         firstRun={firstRunData}

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { api, type Paper, type PaperFrontmatter } from "../api/client";
 import GateIndicator from "../components/GateIndicator";
 import { buildLatexSnippet } from "../components/LatexExportUtils";
@@ -9,7 +9,6 @@ import {
   getCachedAnalysisSlots,
   type AnalysisSlot,
 } from "../lib/analysisTags";
-import BooksTab from "./BooksTab";
 import MarkdownNotesTab from "./MarkdownNotesTab";
 
 interface Props {
@@ -17,6 +16,8 @@ interface Props {
   onBack: () => void;
   onSelectPaper?: (citekey: string) => void;
   onPaperDeleted?: () => void;
+  requestTab?: "editor" | "collection" | "quick-notes" | "documentation" | "meeting-minutes";
+  onTabChange?: (t: "editor" | "collection" | "quick-notes" | "documentation" | "meeting-minutes") => void;
 }
 
 function slotsFilledCount(fm: PaperFrontmatter, slots: AnalysisSlot[]): number {
@@ -252,8 +253,11 @@ function CollectionTab({
   );
 }
 
-export default function CERICEditor({ citekey, onBack, onSelectPaper, onPaperDeleted }: Props) {
-  const [tab, setTab] = useState<"editor" | "collection" | "books" | "quick-notes" | "documentation" | "meeting-minutes">(citekey ? "editor" : "collection");
+export default function CERICEditor({ citekey, onBack, onSelectPaper, onPaperDeleted, requestTab, onTabChange }: Props) {
+  const [tab, setTab] = useState<"editor" | "collection" | "quick-notes" | "documentation" | "meeting-minutes">(citekey ? "editor" : requestTab ?? "collection");
+  const firstTab = useRef(true);
+  useEffect(() => { if (firstTab.current) { firstTab.current = false; return; } if (requestTab) setTab(requestTab); }, [requestTab]);
+  useEffect(() => { onTabChange?.(tab); }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
   const [slots, setSlots] = useState<AnalysisSlot[]>(() => getCachedAnalysisSlots());
   const [paper, setPaper] = useState<Paper | null>(null);
   const [form, setForm] = useState<Partial<PaperFrontmatter>>({});
@@ -355,16 +359,8 @@ export default function CERICEditor({ citekey, onBack, onSelectPaper, onPaperDel
     }
   }
 
-  const tabBar = (
-    <div className="notes-tabs" style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-      <button className={`btn${tab === "editor" ? " btn-primary" : ""}`} onClick={() => setTab("editor")}>Editor</button>
-      <button className={`btn${tab === "collection" ? " btn-primary" : ""}`} onClick={() => setTab("collection")}>Collection</button>
-      <button className={`btn${tab === "books" ? " btn-primary" : ""}`} onClick={() => setTab("books")}>Books</button>
-      <button className={`btn${tab === "quick-notes" ? " btn-primary" : ""}`} onClick={() => setTab("quick-notes")}>Quick Notes</button>
-      <button className={`btn${tab === "documentation" ? " btn-primary" : ""}`} onClick={() => setTab("documentation")}>Documentation</button>
-      <button className={`btn${tab === "meeting-minutes" ? " btn-primary" : ""}`} onClick={() => setTab("meeting-minutes")}>Meeting Minutes</button>
-    </div>
-  );
+  // Section switching lives in the left sidebar now.
+  const tabBar = null;
 
   if (tab === "collection") {
     return (
@@ -375,15 +371,6 @@ export default function CERICEditor({ citekey, onBack, onSelectPaper, onPaperDel
           onSelect={(ck) => { onSelectPaper?.(ck); }}
           onDeleted={(ck) => { if (ck === citekey) onPaperDeleted?.(); }}
         />
-      </div>
-    );
-  }
-
-  if (tab === "books") {
-    return (
-      <div className="books-tab-wrap">
-        {tabBar}
-        <BooksTab />
       </div>
     );
   }

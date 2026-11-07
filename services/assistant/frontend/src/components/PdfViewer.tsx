@@ -11,6 +11,7 @@ import { useCollapsed } from "../lib/useCollapsed";
 import PdfSelectionPopup, { type Markup } from "./PdfSelectionPopup";
 import { colorCss, slotColor, useHighlightPrefs } from "../lib/highlightPrefs";
 import "./pdfAnnotate.css";
+import ReaderNotes from "./ReaderNotes";
 
 export interface PdfDoc {
   url: string;
@@ -271,6 +272,9 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
   const [tool, setTool] = useState<Tool>("select");
   const [toolColor, setToolColor] = useState("#e5484d");
   const [notesOpen, setNotesOpen] = useState(false);
+  const [rnOpen, setRnOpen] = useState(false);
+  const [rnQueue, setRnQueue] = useState<string[]>([]);
+  const [rnSrc, setRnSrc] = useState("");
   const embedded = !!doc.embedded;
   const [sbHidden, toggleSb, setSbHidden] = useCollapsed("reader-sidebar", typeof window !== "undefined" && window.innerWidth < 900);
   const [sbTab, setSbTab] = useState<SidebarTab>("thumbs");
@@ -289,6 +293,18 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
     if (embedded) { setSbHidden(false); setSbTab("notes"); } else setNotesOpen(true);
   }
   const [focusId, setFocusId] = useState<string | null>(null);
+  /** Send an annotation (quote + your comment + page) into the "My notes" markdown note. */
+  function quoteToNotes(a: Ann) {
+    const q = (a.text || "").replace(/\s+/g, " ").trim();
+    const lines = [q ? `> ${q}` : `> (page note)`, `> — p. ${a.page}`];
+    if (a.note) lines.push("", a.note);
+    setRnOpen(true);
+    setRnQueue((x) => [...x, lines.join("\n")]);
+  }
+  const inNotes = (a: Ann) => !!a.text && rnSrc.includes(a.text.replace(/\s+/g, " ").trim().slice(0, 40));
+  const rnPane = rnOpen ? (
+    <ReaderNotes title={doc.title} page={curPage} queue={rnQueue} onQueueDone={() => setRnQueue([])} onSource={setRnSrc} onClose={() => setRnOpen(false)} />
+  ) : null;
   const [textFail, setTextFail] = useState(false);
   const [toast, setToast] = useState<{ text: string; ok: boolean } | null>(null);
   const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
@@ -715,6 +731,8 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
                 onClick={() => commit(anns.map((x) => (x.id === a.id ? { ...x, color: c } : x)))} />
             ))}
             <span style={{ flex: 1 }} />
+            {inNotes(a) && <span className="rn-in" title="Already quoted in My notes">in notes ✓</span>}
+            <button type="button" className="btn" title="Quote this into My notes" onClick={() => quoteToNotes(a)}>❝ Notes</button>
             <button type="button" className="btn" title="Delete highlight" onClick={() => commit(anns.filter((x) => x.id !== a.id))}>Delete</button>
           </div>
           <div className="pdfv-note-quote" style={{ borderLeftColor: a.color }}>{a.kind === "ink" ? <span className="muted">Drawing</span> : a.kind === "area" ? <span className="muted">Area</span> : a.text || <span className="muted">{a.kind === "note" ? "Pinned note" : "Page note"}</span>}</div>
@@ -802,6 +820,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
           <span className="pdfv-tb-tools">{toolButtons}</span>
           {tool !== "select" && <span className="pdfv-hint">Esc</span>}
           <span className="pdfv-tb-sep" />
+          <button type="button" className={ib(rnOpen)} onClick={() => setRnOpen((v) => !v)} title="My notes" aria-pressed={rnOpen}>My notes</button>
           {trail}
         </div>
         <div className="pdfv-body">
@@ -816,6 +835,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
             {floating}
             {pagesEl}
           </div>
+          {rnPane}
         </div>
       </div>
     );
@@ -834,6 +854,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
         <button type="button" className={`btn${notesOpen ? " btn-primary" : ""}`} onClick={() => setNotesOpen((v) => !v)} title="Highlights and notes">
           Notes{anns.length ? ` (${anns.length})` : ""}
         </button>
+        <button type="button" className={`btn${rnOpen ? " btn-primary" : ""}`} onClick={() => setRnOpen((v) => !v)} title="Write your own notes next to the PDF">My notes</button>
         <a className="btn" href={doc.url} target="_blank" rel="noopener noreferrer" title="Open in your browser">↗</a>
         <button type="button" className="btn" onClick={onClose} title="Close reader">×</button>
       </div>
@@ -849,6 +870,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
         onExitFullscreen={() => setFullscreen(false)}
         onDownload={download}
       />}
+      <div className="rn-row">
       <div className="pdfv-stage">
         {!slim && (
           <div className="pdfv-tools" role="toolbar" aria-label="Annotation tools">
@@ -859,6 +881,8 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
         {floating}
         {pagesEl}
         {notesOpen && <div className="pdfv-notes">{notesList}</div>}
+      </div>
+      {rnPane}
       </div>
     </div>
   );

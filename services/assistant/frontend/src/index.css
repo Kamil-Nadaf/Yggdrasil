@@ -5439,3 +5439,50 @@ h2 { font-size: 15px; color: var(--accent); }
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
 }
+
+/* ── Reader "My notes" pane ───────────────────────────────────────────────── */
+.rn-row { display: flex; flex: 1 1 auto; min-height: 0; min-width: 0; }
+.rn-row > .pdfv-stage { flex: 1 1 auto; min-width: 0; }
+.rn-pane { flex: 0 0 min(430px, 38%); min-width: 300px; display: flex; flex-direction: column; background: var(--surface); border-left: 1px solid var(--border); min-height: 0; }
+.rn-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 12px 14px 8px; }
+.rn-kicker { font-size: 10px; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
+.rn-title { font-size: 15px; font-weight: 600; margin-top: 2px; overflow-wrap: anywhere; }
+.rn-x { border: 0; background: none; font-size: 20px; line-height: 1; color: var(--muted); cursor: pointer; padding: 4px 8px; }
+.rn-tb { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 12px 8px; border-bottom: 1px solid var(--border); }
+.rn-tb button { border: 1px solid var(--border); background: var(--bg, transparent); color: var(--text); border-radius: 6px; padding: 4px 9px; font-size: 12px; cursor: pointer; }
+.rn-tb button.on, .rn-tb button:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.rn-text { flex: 1 1 auto; min-height: 0; width: 100%; box-sizing: border-box; resize: none; border: 0; outline: none; padding: 14px; background: transparent; color: var(--text); font: 14px/1.6 var(--font-mono, ui-monospace, monospace); }
+.rn-preview { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px; }
+.rn-foot { padding: 6px 14px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--border); }
+.rn-in { font-size: 11px; color: var(--accent); white-space: nowrap; }
+@media (max-width: 900px) { .rn-pane { position: absolute; right: 0; top: 0; bottom: 0; z-index: 20; box-shadow: -8px 0 24px rgba(0,0,0,.25); flex-basis: 360px; } }
+
+/* ── Left sidebar navigation (replaces the top bar) ───────────────────────── */
+.app-shell { flex-direction: row; }
+.app-body { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.app-nav.side {
+  width: 232px; height: 100%; flex: 0 0 auto; flex-direction: column; align-items: stretch;
+  padding: 12px 8px; gap: 4px; overflow: hidden auto; border-bottom: 0; border-right: 1px solid var(--border);
+  transition: width .15s;
+}
+.app-nav.side.collapsed { width: 60px; align-items: center; overflow: visible; }
+.side-top { display: flex; align-items: center; gap: 10px; padding: 2px 6px 12px; }
+.app-nav.side.collapsed .side-top { flex-direction: column; padding: 2px 0 10px; gap: 8px; }
+.side-name { flex: 1; font-weight: 700; letter-spacing: .04em; color: var(--accent); font-size: 14px; }
+.side-toggle { width: 36px; height: 36px; border: 0; background: none; color: var(--muted); border-radius: var(--radius); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.side-toggle:hover { color: var(--text); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.side-items, .side-bottom { display: flex; flex-direction: column; gap: 2px; width: 100%; }
+.side-items { flex: 1 1 auto; }
+.side-bottom { border-top: 1px solid var(--border); padding-top: 8px; margin-top: 4px; }
+.side-group { position: relative; width: 100%; }
+.app-nav.side .side-item { width: 100%; height: 40px; gap: 12px; padding: 0 10px; font-size: 14px; font-weight: 500; }
+.app-nav.side.collapsed .side-item { width: 44px; justify-content: center; padding: 0; margin: 0 auto; }
+.side-caret { margin-left: auto; font-size: 11px; opacity: .7; }
+.side-sub { margin: 2px 0 4px 20px; padding-left: 8px; border-left: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
+.side-subitem { height: 32px; text-align: left; border: 0; background: none; color: var(--muted); font-size: 13px; padding: 0 10px; border-radius: 6px; cursor: pointer; }
+.side-subitem:hover { color: var(--text); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.side-subitem.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); font-weight: 600; }
+.side-fly { display: none; position: absolute; left: 52px; top: 0; min-width: 180px; padding: 8px; z-index: 60; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.25); flex-direction: column; gap: 2px; }
+.side-group:hover > .side-fly, .side-group:focus-within > .side-fly { display: flex; }
+.side-fly-h { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 4px 10px 6px; }
+:root[data-theme] .app-nav.side .nav-item { font-size: 14px; padding: 0 10px; }

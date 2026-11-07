@@ -606,16 +606,6 @@ export default function CalendarView({ onOpenTask }: Props) {
 
         <aside className="cal2-side">
           <div className="card cal2-card">
-            <h3 className="cal2-card-t">Quick Add</h3>
-            <input type="text" placeholder="Event title… (add 13:00-14:00 for a time)" value={quick} onChange={(e) => setQuick(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void quickAdd(); }} />
-            <div className="cal2-row" style={{ marginTop: 6 }}>
-              <select value={quickCal} onChange={(e) => setQuickCal(e.target.value)}>{CALS.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select>
-              <button type="button" className="btn btn-primary" disabled={!quick.trim()} onClick={quickAdd}>Add</button>
-            </div>
-            <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>Adds to {fromIso(selected).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</div>
-          </div>
-
-          <div className="card cal2-card">
             <h3 className="cal2-card-t">Calendars</h3>
             {[...CALS, TASKS_CAL].map((c) => (
               <label key={c.id} className="cal2-cal">

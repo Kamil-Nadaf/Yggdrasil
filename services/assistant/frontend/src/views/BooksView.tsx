@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { reading, type BookCollection, type CiteStyle, type ReadingBook, type ReadingGoal, type SavedSearch } from "../api/reading";
 import BookIcon, { type BookIconName } from "../components/BookIcons";
 import Goals from "./books/Goals";
@@ -60,8 +60,10 @@ function matches(b: ReadingBook, needle: string): boolean {
 }
 
 /** Books, laid out like Apple Books: a sidebar (Home, Library, Collections) and a shelf of covers. */
-export default function BooksView() {
-  const [section, setSection] = useState<Section>("home");
+export default function BooksView({ requestSection }: { requestSection?: "all" | "books" | "papers" } = {}) {
+  const [section, setSection] = useState<Section>(requestSection ?? "home");
+  const firstSec = useRef(true);
+  useEffect(() => { if (firstSec.current) { firstSec.current = false; return; } if (requestSection) { setSection(requestSection); } }, [requestSection]);
   const [books, setBooks] = useState<ReadingBook[]>([]);
   const [collections, setCollections] = useState<BookCollection[]>([]);
   const [goal, setGoal] = useState<ReadingGoal | null>(null);

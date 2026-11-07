@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import Nav, { type NotesTab } from "./components/Nav";
+import Nav, { type NotesTab, type TasksTab, type CollectionSection } from "./components/Nav";
 import SettingsDrawer from "./components/SettingsDrawer";
 import PageThemeDrawer from "./components/PageThemeDrawer";
 import CERICEditor from "./views/CERICEditor";
@@ -25,6 +25,8 @@ export default function App() {
   const [editorCitekey, setEditorCitekey] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [notesTab, setNotesTab] = useState<NotesTab>("collection");
+  const [tasksTab, setTasksTab] = useState<TasksTab>("planner");
+  const [colSection, setColSection] = useState<CollectionSection>("all");
   const [pageEditOpen, setPageEditOpen] = useState(false);
   const [firstRunData, setFirstRunData] = useState(false);
   const [reinstallBanner, setReinstallBanner] = useState<string | null>(null);
@@ -74,8 +76,12 @@ export default function App() {
       <ManualTimerRunner />
       <Nav
         current={view}
-        notesTab={notesTab}
-        onNotesTab={setNotesTab}
+        subs={{ notes: notesTab, tasks: tasksTab, collection: colSection }}
+        onSub={(k, id) => {
+          if (k === "notes") setNotesTab(id as NotesTab);
+          else if (k === "tasks") setTasksTab(id as TasksTab);
+          else setColSection(id as CollectionSection);
+        }}
         onNavigate={setView}
         onSettingsOpen={() => { setPageEditOpen(false); setSettingsOpen(true); }}
         onPageEdit={() => { setSettingsOpen(false); setPageEditOpen(true); }}
@@ -104,6 +110,8 @@ export default function App() {
         {view === "tasks" && (
           <TasksView
             focus={taskFocus}
+            requestTab={tasksTab}
+            onTabChange={setTasksTab}
             onFocusConsumed={() => setTaskFocus(null)}
           />
         )}
@@ -118,7 +126,7 @@ export default function App() {
           </>
         )}
         {view === "papers" && <PapersView />}
-        {view === "books" && <BooksView />}
+        {view === "books" && <BooksView requestSection={colSection} />}
       </main>
       </div>
       <SettingsDrawer

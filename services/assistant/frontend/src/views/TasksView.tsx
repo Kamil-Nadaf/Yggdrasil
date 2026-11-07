@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { TaskItem, TaskProject } from "../api/client";
 import { LatexPromptModal } from "../components/LatexMenuBar";
-import SubTabs from "../components/SubTabs";
 import { allowedFor } from "../lib/taskOptions";
 import CalendarView from "./CalendarView";
 import BoardView from "./tasks/BoardView";
@@ -14,14 +13,15 @@ import { doneStatusId } from "./tasks/TaskBits";
 import { useNow, useTaskData } from "./tasks/useTaskData";
 import "./tasks/tasks.css";
 
-type Tab = "calendar" | "list" | "board" | "timeline" | "gantt";
-const TABS: { id: Tab; label: string }[] = [
+export type TasksTab = "planner" | "list" | "board";
+type Tab = TasksTab;
+type PlannerView = "calendar" | "timeline" | "gantt";
+const PLANNER_VIEWS: { id: PlannerView; label: string }[] = [
   { id: "calendar", label: "Calendar" },
-  { id: "list", label: "List" },
-  { id: "board", label: "Board" },
   { id: "timeline", label: "Timeline" },
   { id: "gantt", label: "Gantt" },
 ];
+const PLANNER_KEY = "yggdrasil:planner-view";
 const TAB_KEY = "yggdrasil:tasks-tab";
 const PROJECT_KEY = "yggdrasil:tasks-project";
 const DONE_KEY = "yggdrasil:tasks-show-done";
@@ -128,12 +128,32 @@ function ProjectOptionsPopover({
 export default function TasksView({
   focus,
   onFocusConsumed,
+  requestTab,
+  onTabChange,
 }: {
   focus?: { projectSlug: string; mainTaskId: string } | null;
   onFocusConsumed?: () => void;
+  requestTab?: TasksTab;
+  onTabChange?: (t: TasksTab) => void;
 }) {
   const data = useTaskData();
-  const [tab, setTab] = useState<Tab>(() => (TABS.some((t) => t.id === readLS(TAB_KEY, "")) ? (readLS(TAB_KEY, "list") as Tab) : "list"));
+  const [tab, setTab] = useState<Tab>(() => {
+    if (requestTab) return requestTab;
+    const v = readLS(TAB_KEY, "list");
+    if (v === "list" || v === "board" || v === "planner") return v;
+    return v === "calendar" || v === "timeline" || v === "gantt" ? "planner" : "list";
+  });
+  const [plannerView, setPlannerView] = useState<PlannerView>(() => {
+    const v = readLS(PLANNER_KEY, "");
+    if (v === "calendar" || v === "timeline" || v === "gantt") return v;
+    const old = readLS(TAB_KEY, "");
+    return old === "timeline" || old === "gantt" ? old : "calendar";
+  });
+  const firstTab = useRef(true);
+  useEffect(() => { if (firstTab.current) { firstTab.current = false; return; } if (requestTab) setTab(requestTab); }, [requestTab]);
+  useEffect(() => { onTabChange?.(tab); }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+  /** What is actually on screen: the planner shows one of three views. */
+  const eff: "calendar" | "timeline" | "gantt" | "list" | "board" = tab === "planner" ? plannerView : tab;
   const [projectFilter, setProjectFilter] = useState<string>(() => readLS(PROJECT_KEY, "all"));
   const [showDone, setShowDone] = useState(() => readLS(DONE_KEY, "1") === "1");
   const [openRef, setOpenRef] = useState<string | null>(null);
@@ -157,15 +177,16 @@ export default function TasksView({
   useEffect(() => {
     if (!focus) return;
     setOpenRef(`${focus.projectSlug}/${focus.mainTaskId}`);
-    if (tab === "calendar") setTab("list");
+    if (tab === "planner" && plannerView === "calendar") setTab("list");
     onFocusConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focus]);
 
-  const changeTab = (t: Tab) => {
-    setTab(t);
-    writeLS(TAB_KEY, t);
+  const changePlannerView = (v: PlannerView) => {
+    setPlannerView(v);
+    writeLS(PLANNER_KEY, v);
   };
+  useEffect(() => { writeLS(TAB_KEY, tab); }, [tab]);
   const changeProject = (v: string) => {
     setProjectFilter(v);
     writeLS(PROJECT_KEY, v);
@@ -213,7 +234,6 @@ export default function TasksView({
 
   return (
     <div className="tk-page">
-      <SubTabs tabs={TABS} value={tab} onChange={changeTab} label="Task views" />
 
       <div className="tk-toolbar">
         <div className="tk-pop-anchor">
@@ -244,7 +264,17 @@ export default function TasksView({
           )}
         </div>
 
-        {tab !== "calendar" && (
+        {tab === "planner" && (
+          <div className="tk-seg" role="tablist" aria-label="Planner view">
+            {PLANNER_VIEWS.map((v) => (
+              <button key={v.id} type="button" role="tab" aria-selected={plannerView === v.id} className={`tk-seg-b${plannerView === v.id ? " on" : ""}`} onClick={() => changePlannerView(v.id)}>
+                {v.id === "calendar" ? "Month" : v.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {eff !== "calendar" && (
           <>
             <select value={projectFilter} onChange={(e) => changeProject(e.target.value)} aria-label="Project filter">
               <option value="all">All projects</option>
@@ -266,7 +296,7 @@ export default function TasksView({
           </>
         )}
         <button type="button" className="btn" onClick={() => setProjectModal(true)}>+ Project</button>
-        {selectedProject && tab !== "calendar" && (
+        {selectedProject && eff !== "calendar" && (
           <div className="tk-pop-anchor">
             <button type="button" className="btn" onClick={() => setOptsOpen((v) => !v)} aria-expanded={optsOpen}>Project options</button>
             {optsOpen && (
@@ -291,12 +321,12 @@ export default function TasksView({
         </div>
       )}
 
-      {tab === "calendar" && <CalendarView onOpenTask={(slug, id) => setOpenRef(`${slug}/${id}`)} />}
-      {tab !== "calendar" && data.loading && <div className="muted tk-empty">Loading…</div>}
-      {tab === "list" && !data.loading && <ListView {...viewProps} />}
-      {tab === "board" && !data.loading && <BoardView {...viewProps} />}
-      {tab === "timeline" && !data.loading && <TimelineView {...viewProps} />}
-      {tab === "gantt" && !data.loading && <GanttView {...viewProps} />}
+      {eff === "calendar" && <CalendarView onOpenTask={(slug, id) => setOpenRef(`${slug}/${id}`)} />}
+      {eff !== "calendar" && data.loading && <div className="muted tk-empty">Loading…</div>}
+      {eff === "list" && !data.loading && <ListView {...viewProps} />}
+      {eff === "board" && !data.loading && <BoardView {...viewProps} />}
+      {eff === "timeline" && !data.loading && <TimelineView {...viewProps} />}
+      {eff === "gantt" && !data.loading && <GanttView {...viewProps} />}
 
       {openRef && (
         <TaskPanel

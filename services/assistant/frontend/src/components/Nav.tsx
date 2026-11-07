@@ -4,6 +4,8 @@ import type { View } from "../App";
 import YggdrasilLogo from "./YggdrasilLogo";
 
 export type NotesTab = "editor" | "collection" | "quick-notes" | "documentation" | "meeting-minutes";
+export type TasksTab = "planner" | "list" | "board";
+export type CollectionSection = "all" | "books" | "papers";
 
 const NOTES_TABS: { id: NotesTab; label: string }[] = [
   { id: "editor", label: "Editor" },
@@ -12,6 +14,12 @@ const NOTES_TABS: { id: NotesTab; label: string }[] = [
   { id: "documentation", label: "Documentation" },
   { id: "meeting-minutes", label: "Meeting Minutes" },
 ];
+
+const SUBS: Partial<Record<View, { key: "notes" | "tasks" | "collection"; items: { id: string; label: string }[] }>> = {
+  editor: { key: "notes", items: NOTES_TABS },
+  tasks: { key: "tasks", items: [{ id: "planner", label: "Planner" }, { id: "list", label: "List" }, { id: "board", label: "Board" }] },
+  books: { key: "collection", items: [{ id: "all", label: "All" }, { id: "books", label: "Books" }, { id: "papers", label: "Papers" }] },
+};
 
 const svg = (d: ReactNode) => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{d}</svg>
@@ -31,8 +39,8 @@ const ITEMS: { id: View; label: string; icon: ReactNode }[] = [
 interface Props {
   current: View;
   onNavigate: (v: View) => void;
-  notesTab: NotesTab;
-  onNotesTab: (t: NotesTab) => void;
+  subs: { notes: string; tasks: string; collection: string };
+  onSub: (key: "notes" | "tasks" | "collection", id: string) => void;
   onSettingsOpen?: () => void;
   onPageEdit?: () => void;
   pageEditOpen?: boolean;
@@ -40,7 +48,7 @@ interface Props {
 
 const KEY = "yg-sidebar-collapsed";
 
-export default function Nav({ current, onNavigate, notesTab, onNotesTab, onSettingsOpen, onPageEdit, pageEditOpen }: Props) {
+export default function Nav({ current, onNavigate, subs, onSub, onSettingsOpen, onPageEdit, pageEditOpen }: Props) {
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem(KEY) === "1"; } catch { return false; }
   });
@@ -64,7 +72,7 @@ export default function Nav({ current, onNavigate, notesTab, onNotesTab, onSetti
       <div className="side-items">
         {ITEMS.map((item) => {
           const active = current === item.id;
-          const isNotes = item.id === "editor";
+          const sub = SUBS[item.id];
           return (
             <div key={item.id} className="side-group">
               <button
@@ -76,17 +84,17 @@ export default function Nav({ current, onNavigate, notesTab, onNotesTab, onSetti
               >
                 {item.icon}
                 {!collapsed && <span>{item.label}</span>}
-                {!collapsed && isNotes && <span className="side-caret" aria-hidden="true">{active ? "▾" : "▸"}</span>}
+                {!collapsed && sub && <span className="side-caret" aria-hidden="true">{active ? "▾" : "▸"}</span>}
               </button>
-              {isNotes && (active || collapsed) && (
+              {sub && (active || collapsed) && (
                 <div className={collapsed ? "side-fly" : "side-sub"}>
-                  {collapsed && <div className="side-fly-h">Notes</div>}
-                  {NOTES_TABS.map((t) => (
+                  {collapsed && <div className="side-fly-h">{item.label}</div>}
+                  {sub.items.map((t) => (
                     <button
                       key={t.id}
                       type="button"
-                      className={`side-subitem${active && notesTab === t.id ? " active" : ""}`}
-                      onClick={() => { onNotesTab(t.id); onNavigate("editor"); }}
+                      className={`side-subitem${active && subs[sub.key] === t.id ? " active" : ""}`}
+                      onClick={() => { onSub(sub.key, t.id); onNavigate(item.id); }}
                     >
                       {t.label}
                     </button>

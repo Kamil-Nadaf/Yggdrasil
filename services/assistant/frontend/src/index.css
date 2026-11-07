@@ -5486,3 +5486,8 @@ h2 { font-size: 15px; color: var(--accent); }
 .side-group:hover > .side-fly, .side-group:focus-within > .side-fly { display: flex; }
 .side-fly-h { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 4px 10px 6px; }
 :root[data-theme] .app-nav.side .nav-item { font-size: 14px; padding: 0 10px; }
+
+/* Planner: one switch for Month / Timeline / Gantt */
+.tk-seg { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.tk-seg-b { border: 0; background: transparent; color: var(--text); padding: 0 14px; height: 34px; font-size: 13px; cursor: pointer; }
+.tk-seg-b.on { background: var(--accent); color: #fff; font-weight: 600; }

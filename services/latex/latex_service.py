@@ -231,6 +231,8 @@ def project_root_for(stem: str) -> Path | None:
 class CompileRequest(BaseModel):
     source: str
     filename: str = "draft"
+    # Extra files (flat name → base64) copied beside the source for this compile only.
+    assets: dict[str, str] = {}
 
 
 class SaveRequest(BaseModel):
@@ -292,6 +294,14 @@ async def compile_latex(payload: CompileRequest):
 
         source_path.write_text(payload.source)
         build_dir = source_path.parent
+
+        for asset_name, asset_b64 in (payload.assets or {}).items():
+            if not re.fullmatch(r"[A-Za-z0-9_-]+\.(png|jpe?g|pdf)", asset_name):
+                continue
+            try:
+                (build_dir / asset_name).write_bytes(base64.b64decode(asset_b64))
+            except Exception:
+                continue
 
         engine_flag = latexmk_engine_flag(payload.source)
         returncode, log = await run_latexmk(build_dir, source_path.name, engine_flag)

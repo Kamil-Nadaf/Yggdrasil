@@ -6,6 +6,47 @@ import { resolveRelativePath } from "../lib/pastedImages";
 
 marked.setOptions({ breaks: true, gfm: true });
 
+const ALERT_TITLES: Record<string, string> = {
+  note: "Note", tip: "Tip", important: "Important", warning: "Warning", caution: "Caution", info: "Info",
+};
+
+/** GitHub/Azure-style `> [!NOTE]` alerts become callouts; `[TOC]` becomes a heading list. */
+function decorateNoteBlocks(el: HTMLElement) {
+  el.querySelectorAll("blockquote").forEach((bq) => {
+    const first = bq.querySelector("p");
+    const m = first?.textContent?.match(/^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION|INFO)\]\s*/i);
+    if (!first || !m) return;
+    const kind = m[1].toLowerCase();
+    // Drop the marker text (and the line break that follows it) from the first paragraph.
+    const node = first.firstChild;
+    if (node && node.nodeType === Node.TEXT_NODE) {
+      node.textContent = (node.textContent || "").replace(/^\s*\[![A-Za-z]+\]\s*/, "");
+      if (!node.textContent && first.firstChild?.nextSibling?.nodeName === "BR") first.firstChild.nextSibling.remove();
+      if (!node.textContent) node.remove();
+    }
+    bq.classList.add("md-alert", `md-alert-${kind}`);
+    const title = document.createElement("div");
+    title.className = "md-alert-title";
+    title.textContent = ALERT_TITLES[kind];
+    bq.insertBefore(title, bq.firstChild);
+    if (!first.textContent?.trim()) first.remove();
+  });
+
+  el.querySelectorAll("p").forEach((p) => {
+    if (!/^\s*(\[TOC\]|\[\[_TOC_\]\])\s*$/i.test(p.textContent || "")) return;
+    const heads = Array.from(el.querySelectorAll("h1,h2,h3,h4,h5,h6"));
+    const ul = document.createElement("ul");
+    ul.className = "md-toc";
+    heads.forEach((h) => {
+      const li = document.createElement("li");
+      li.style.marginLeft = `${(Number(h.tagName[1]) - 1) * 14}px`;
+      li.textContent = h.textContent || "";
+      ul.appendChild(li);
+    });
+    p.replaceWith(ul);
+  });
+}
+
 /**
  * Renders arXiv abstracts / CERIC note text as markdown + LaTeX math instead of
  * a raw string full of literal $...$ and \emph{...}. Abstracts are third-party
@@ -30,6 +71,7 @@ export default function AbstractText({
     if (!el) return;
     const html = DOMPurify.sanitize(marked.parse(text || "", { async: false }) as string);
     el.innerHTML = html;
+    decorateNoteBlocks(el);
     if (imageBase !== undefined) {
       el.querySelectorAll("img").forEach((img) => {
         const src = img.getAttribute("src") || "";

@@ -80,3 +80,29 @@ export function ensureTitle(source: string): string {
   else lines.unshift(titleLine);
   return `---\n${lines.join("\n")}\n---${m[2] || "\n"}${body}`;
 }
+
+/** Body of a note without its YAML frontmatter block (a leading `---` page break is kept). */
+export function stripFrontmatter(source: string): string {
+  const m = source.match(FM_RE);
+  return m ? source.slice(m[0].length).replace(/^\s*\n/, "") : source;
+}
+
+/** The frontmatter `title:` value ("" when missing). */
+export function getTitle(source: string): string {
+  const m = source.match(FM_RE);
+  if (!m) return "";
+  const line = m[1].split(/\r?\n/).find((l) => /^title:/.test(l));
+  return line ? line.replace(/^title:/, "").trim().replace(/^["']|["']$/g, "").replace(/\\"/g, '"') : "";
+}
+
+/** Set (or add) the frontmatter `title:`; creates the frontmatter block if the note has none. */
+export function setTitle(source: string, title: string): string {
+  const line = `title: "${title.replace(/"/g, '\\"')}"`;
+  const m = source.match(FM_RE);
+  if (!m) return `---\n${line}\n---\n\n${source}`;
+  const lines = m[1].split(/\r?\n/);
+  const idx = lines.findIndex((l) => /^title:/.test(l));
+  if (idx >= 0) lines[idx] = line;
+  else lines.unshift(line);
+  return `---\n${lines.join("\n")}\n---${m[2] || "\n"}${source.slice(m[0].length)}`;
+}

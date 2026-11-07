@@ -2625,6 +2625,9 @@ async def pdf_annotations_put(payload: PdfAnnotationsPayload):
 class LatexCompileRequest(BaseModel):
     source: str
     filename: str = "draft"
+    # Optional extra files (name → base64) written next to the .tex for this compile only,
+    # e.g. the images of a note being exported to PDF.
+    assets: dict[str, str] = {}
 
 
 class LatexSaveRequest(BaseModel):

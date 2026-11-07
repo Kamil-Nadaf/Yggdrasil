@@ -762,8 +762,8 @@ export const api = {
   },
 
   latex: {
-    compile: (source: string, filename: string) =>
-      req<LatexCompileResult>("POST", "/api/latex/compile", { source, filename }),
+    compile: (source: string, filename: string, assets?: Record<string, string>) =>
+      req<LatexCompileResult>("POST", "/api/latex/compile", assets ? { source, filename, assets } : { source, filename }),
     save: (filename: string, source: string) =>
       req<{ path: string }>("POST", "/api/latex/save", { filename, source }),
     createFolder: (path: string) =>

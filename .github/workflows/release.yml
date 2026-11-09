@@ -59,7 +59,21 @@ jobs:
           cache: npm
           cache-dependency-path: services/assistant/frontend/package-lock.json
 
-      - uses: astral-sh/setup-uv@v5
+      - name: Install uv (pip, avoids GitHub release download)
+        shell: bash
+        run: |
+          for i in 1 2 3 4 5 6; do
+            python3 -m pip install --break-system-packages uv 2>/dev/null || python3 -m pip install uv && break
+            echo "pip install uv failed (attempt $i), retrying..."; sleep 10
+          done
+          uv --version
+
+      - name: Cache standalone Python (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        with:
+          path: /tmp/ygg-py-cache-*
+          key: pbs-${{ matrix.artifact }}-3.12.5-20240814
 
       - name: Linux build dependencies (PyGObject / GTK)
         if: runner.os == 'Linux'

@@ -1,0 +1,40 @@
+name: grb-env
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  # MultiNest (native lib for PyMultiNest) — this is the big win over pip,
+  # no cmake/make/gfortran needed on the server
+  - multinest
+  - openblas
+  - lapack
+  # Cartopy's native bits
+  - cartopy
+  - scipy
+  - pandas
+  - matplotlib
+  - astropy
+  - pytables
+  - arviz
+  - bilby
+  - dynesty
+  - corner
+  - weasyprint
+  - pypdf
+  - jupyterlab
+  - ipykernel
+  - ipython_genutils
+  - pytest
+  - swig
+  - gfortran
+  - cmake
+  - git
+  - pip
+  - pip:
+      - heapyx==0.2.1
+      - pymultinest
+      - git+https://github.com/jyangch/responsum.git
+      - git+https://github.com/jyangch/gbmgeometry.git
+      - git+https://github.com/jyangch/gbm_drm_gen.git
+      - bayspec==0.4.4

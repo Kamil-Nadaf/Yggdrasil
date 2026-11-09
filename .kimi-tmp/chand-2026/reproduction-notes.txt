@@ -1,0 +1,79 @@
+# Reproducing the Fermi-LAT results of Chand et al. (arXiv:2608.06527) with our pipeline
+
+Status as of 2026-11-04. Short summary of what was done, what reproduces, and what is still open.
+
+## 1. Goal
+
+Check that our generic LAT upper-limit pipeline (`instruments/lat_ul_worker.py`, Fermitools unbinned likelihood) reproduces the paper's LAT results:
+a positive control (GRB 200415A, detected) and six negative candidates (GRB 081213A, 180128A, 231024A, 120616A, 200423A, 231115A).
+
+## 2. Setup used (identical for every event, nothing tuned per event)
+
+- Fermitools 2.5.3 (paper: 2.2.0), fermipy 1.4.3, native ARM container.
+- Event class P8R3_TRANSIENT020E_V3 for the 10^2 s window, P8R3_TRANSIENT010E_V3 for 10^3 and 10^4 s; FRONT+BACK; zmax 100 deg.
+- 12 deg ROI around the host galaxy, 0.1-100 GeV fit range, gll_iem_v07, matching isotropic template, gll_psc_v35 catalogue (paper does not state the 4FGL-DR4 version).
+- Power law with index fixed to -2 for limits; fluxes quoted in 0.1-10 GeV. Sources within 5 deg free; NGC 253 (a 4FGL source at the target) frozen at its catalogue flux (decision D1).
+- Windows: T0 to T0+100, 1000, 10000 s after the GBM trigger. Trigger times from HEASARC, converted to MET with leap seconds.
+
+## 3. Results
+
+### 3.1 Exposure (fixed a real preprocessing error)
+
+`gtmktime` had been run with `roicut=no`. Requiring the whole 12 deg ROI to lie inside the 100 deg zenith cut (target zenith < 88 deg, i.e. `roicut=yes`) reproduces the paper's exposure notes:
+
+| Quantity | Ours | Paper |
+|---|---|---|
+| first exposure, 180128A / 120616A / 200423A | 147 / 1445 / 618 s | 148 / 1447 / 619 s |
+| GTI 081213A (10^3 / 10^4 s) | 281 / 2840 s | 281 / 2840 s |
+| GTI 180128A, 200415A, 120616A, 231024A | 5520, 4170, 4200, 1000 s | 5520, 4170, 4200, 1000 s |
+| "exposure = 0" cases (180128A 1e2; 120616A 1e2, 1e3; 200423A 1e2) | NO_EXPOSURE | exposure = 0 |
+
+Only GRB 231115A at 10^4 s differs (ours 3984 s GTI, paper "exposure ~6.1 ks"; possibly a different quantity).
+
+### 3.2 Upper limits (energy flux, 0.1-10 GeV, 1e-9 erg/cm2/s)
+
+All six negative candidates: TS = 0 in every window (no detection), matching the paper's negative result.
+
+| Event | Window | Profile (2dlnL = 2.71) | Bayesian 95% | Paper |
+|---|---|---|---|---|
+| 081213A | 1e2 / 1e3 / 1e4 s | 2.86 / 1.24 / 0.150 | 6.33 / 2.73 / 0.327 | 8.27 / 2.75 / 0.408 |
+| 180128A | 1e3 / 1e4 s | 0.29 / 0.094 | 0.639 / 0.204 | 0.85 / 0.234 |
+| 231115A (M82) | 1e2 / 1e3 / 1e4 s | 3.00 / 0.560 / 0.461 | 5.91 / 0.918 / 0.632 | 6.92 / 1.05 / 0.707 |
+| 120616A (IC 342) | 1e4 s | 0.254 | 0.494 | 0.50 |
+| 200423A (NGC 6946) | 1e3 / 1e4 s | 1.16 / 0.108 | 2.16 / 0.218 | 1.99 / 0.25 |
+| 231024A | 1e2 / 1e3 s | 24.1 / 0.501 | 53.3 / 1.11 | 54.5 / 1.29 |
+| 200415A | 1e2 s (limit) | 7.19 | 9.30 | 9.42 |
+
+- Bayesian limits are 0.75-1.09 of the paper's over 14 entries (median 0.87); four entries agree within 2%.
+- Profile-likelihood limits with 2dlnL = 2.71 are consistently about 0.4 of the paper's.
+- Full table: `docs/lat_ul_reproduction_tables.md`.
+
+### 3.3 Derived quantity (Table 4, LAT column)
+
+E_LAT,iso = 4 pi d^2 F_UL T_window (1e46 erg): 081213A 0.45 (paper 0.45), 231115A 0.13 (0.16), 231024A 0.18 (0.21); 200415A measured 0.65 (0.68).
+
+### 3.4 GRB 200415A (positive control)
+
+| Window | Quantity | Ours | Paper |
+|---|---|---|---|
+| 1e3 s | photon flux (1e-6) / index | 3.26 +- 1.71 / -1.67 +- 0.34 | 3.60 +- 2.00 / -1.71 +- 0.34 |
+| 1e4 s | photon flux (1e-6) / index | 1.52 +- 0.85 / -1.64 +- 0.36 | 1.62 +- 0.96 / -1.67 +- 0.36 |
+| 1e3 s | TS | 10.4 | 25 |
+| 1e4 s | TS | 10.5 | 22 |
+
+Flux, errors and index agree to about 10-15%. TS does not: the gap is not an exposure problem (GTI now identical to the paper) and not a fit-code problem (binned fermipy cross-check gives TS 9-10 too).
+
+## 4. What we learned
+
+1. **The pipeline works.** With correct exposure it reproduces the paper's exposure notes, the negative result, the energy-flux limits to about 15%, and the positive control's flux and spectral index.
+2. **Upper-limit definition matters.** The paper says its limits are profile likelihood with delta TS = 2.71. Our profile limits at 2dlnL = 2.71 are about 2.5x tighter, while a Bayesian 95% limit (flat prior in flux) matches. A profile limit at 2dlnL = 5.42 (reading "delta TS = 2.71" as delta lnL = 2.71) is being tested next. Until that is settled, both definitions are kept and any quoted limit must state which was used.
+3. **Generic worker fixes** (all recorded in `docs/OPEN_ISSUES.md`): keep the FT1 file's own acceptance cone; retry chain for Minuit non-convergence; "unconstrained" status for zero-exposure windows; leap-second-aware MET conversion.
+4. **Paper inconsistencies noticed:** the stacked limit uses 4 or 5 events depending on the section; the paper's own flux error for 200415A implies about 1.8 sigma while its TS is 25.
+
+## 5. Not finished
+
+- **Running in the container when contact was lost (results not yet inspected):** stacked limits for Figure 1 (common-flux joint profile, curves saved with `profile_grid`), the 500 s windows, the energy-resolved limits for Figure 2 (2 log bins per decade, 0.1-100 GeV), and a profile limit at 2dlnL = 5.42. Output lives under `/workspace/data/lat_ul/<GRB>/runs/{w*_STACK, w500_RC, w500_bin*}`; driver `/tmp/probe/queue_all.py`, log `/tmp/probe/queue_all.log`.
+- **Figure A1 (TS maps)**: not started. The paper gives only the circle radius (3 deg), contour levels (4, 9, 16, 25) and the time windows; grid size, pixel size and event class are unstated.
+- **Figure 3 and Table 3 (photon triplets)**: 17-year SOURCE photons within 1 deg of NGC 253 and M82 were queried (IC 342 and NGC 6946 in progress). The paper's p values imply a source rate about twice N/T_wall, i.e. an observing-time correction needing spacecraft pointing history; not yet implemented.
+- **TS gap on GRB 200415A** (TS 10 vs 25): open, to be investigated after the figures.
+- Longer-term items from the earlier plan: Dockerfile layer not yet built/tested; generic `lat_upper_limit.py` wrapper and tests; UI section move; Imaging-tab Figure A1; GBM upper-limit cross-check against GCN circulars.

@@ -1,0 +1,43 @@
+# Native C library (MultiNest) is built separately before `pip install pymultinest`
+# - Ubuntu/Debian: apt-get install swig gfortran cmake libopenblas-dev liblapack-dev
+#   then: git clone https://github.com/JohannesBuchner/MultiNest && cmake/make,
+#   copy libmultinest.so to /usr/local/lib and run ldconfig
+# - macOS: brew install multinest
+# - Easier on servers: use environment.yml (conda) instead, it does all this for you
+
+# Core GRB analysis packages
+heapyx==0.2.1
+# Local clones (GitHub blocked by firewall) — editable installs
+-e /labshare/users_class/kamil/responsum
+-e /labshare/users_class/kamil/gbmgeometry
+-e /labshare/users_class/kamil/gbm_drm_gen
+bayspec==0.4.4
+
+# Jupyter / notebooks
+jupyter
+jupyterlab
+ipython
+ipykernel
+ipython_genutils
+
+# Scientific stack
+arviz
+pandas
+scipy
+matplotlib
+tables
+astropy
+cartopy
+bilby
+
+# Bayesian inference
+pymultinest
+dynesty
+corner
+
+# Report generation
+weasyprint
+pypdf
+
+# Misc
+pytest

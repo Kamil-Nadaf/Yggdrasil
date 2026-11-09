@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(npx tsc *)",
+      "Bash(node -e \"console.log\\(Object.keys\\(require\\('react-resizable-panels'\\)\\)\\)\")",
+      "Bash(node -e \"const m = require\\('react-resizable-panels'\\); console.log\\(m.Group.toString\\(\\).slice\\(0, 500\\)\\)\")",
+      "Bash(npm run *)",
+      "Bash(docker compose *)",
+      "Bash(curl -s http://localhost:8000/)",
+      "Bash(curl -s http://localhost:8000/api/latex/files)",
+      "Bash(python3 -c \"import sys, json; data = json.load\\(sys.stdin\\); print\\(f'Files: {len\\(data[\\\\\"files\\\\\"]\\)} items'\\); [print\\(f'  - {f[\\\\\"name\\\\\"]}: {f[\\\\\"size\\\\\"]} bytes'\\) for f in data['files']]\")",
+      "Bash(curl -s http://localhost:8000/api/info)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('System Info:'\\); print\\(f'  TeX: {d.get\\(\\\\\"texVersion\\\\\",\\\\\"N/A\\\\\"\\)[:60]}'\\); print\\(f'  Vault: {d.get\\(\\\\\"vaultPath\\\\\"\\)}'\\); print\\(f'  Disk Free: {d.get\\(\\\\\"diskFree\\\\\",0\\)/1e9:.1f} GB'\\)\")",
+      "Bash(curl -s -X POST http://localhost:8000/api/settings -H 'Content-Type: application/json' -d '{\"latexDir\":\"70-LaTeX\"}')",
+      "Bash(python3 -c \"import sys,json; print\\(json.load\\(sys.stdin\\)\\)\")",
+      "Bash(python3 -c \"print\\('ok'\\)\")"
+    ]
+  }
+}

@@ -140,7 +140,9 @@ jobs:
   release:
     name: Publish GitHub Release
     needs: [build, payload]
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Publish even when one platform build fails (e.g. a runner that GitHub can't provision),
+    # as long as the in-app update package built - that is what "Check for updates" installs.
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') && needs.payload.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

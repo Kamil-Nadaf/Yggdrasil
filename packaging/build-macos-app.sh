@@ -64,8 +64,8 @@ cat > "${APP}/Contents/Info.plist" << 'EOF'
   <key>CFBundleName</key><string>Yggdrasil</string>
   <key>CFBundleDisplayName</key><string>Yggdrasil</string>
   <key>CFBundleIdentifier</key><string>io.yggdrasil.app</string>
-  <key>CFBundleVersion</key><string>0.4.12</string>
-  <key>CFBundleShortVersionString</key><string>0.4.12</string>
+  <key>CFBundleVersion</key><string>0.4.13</string>
+  <key>CFBundleShortVersionString</key><string>0.4.13</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>Yggdrasil</string>
   <key>CFBundleIconFile</key><string>Yggdrasil</string>
@@ -201,7 +201,7 @@ pkgbuild \
   --root "$PKG_ROOT" \
   --scripts "$PKG_SCRIPTS" \
   --identifier io.yggdrasil.app \
-  --version 0.4.12 \
+  --version 0.4.13 \
   "$PKG_UNSIGNED"
 
 DIST_XML="${OUT}/distribution.xml"
@@ -218,7 +218,7 @@ cat > "$DIST_XML" << EOF
     <choice id="yggdrasil" title="Yggdrasil" description="Install Yggdrasil to /Applications">
         <pkg-ref id="io.yggdrasil.app">Yggdrasil.pkg</pkg-ref>
     </choice>
-    <pkg-ref id="io.yggdrasil.app" version="0.4.12" onConclusion="none">Yggdrasil.pkg</pkg-ref>
+    <pkg-ref id="io.yggdrasil.app" version="0.4.13" onConclusion="none">Yggdrasil.pkg</pkg-ref>
 </installer-gui-script>
 EOF
 

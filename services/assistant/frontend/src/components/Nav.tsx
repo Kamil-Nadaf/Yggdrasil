@@ -112,7 +112,7 @@ export default function Nav({ current, onNavigate, subs, onSub, onSettingsOpen, 
           {svg(<><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></>)}
           {!collapsed && <span>Edit page</span>}
         </button>
-        <button type="button" className="nav-item side-item" onClick={onSettingsOpen} title={collapsed ? "Settings" : undefined} aria-label="Settings">
+        <button type="button" className={`nav-item side-item${current === "settings" ? " active" : ""}`} onClick={onSettingsOpen} title={collapsed ? "Settings" : undefined} aria-label="Settings">
           {gear}
           {!collapsed && <span>Settings</span>}
         </button>

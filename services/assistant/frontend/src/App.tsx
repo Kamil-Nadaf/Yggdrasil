@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import Nav, { type NotesTab, type TasksTab, type CollectionSection, type PapersSection } from "./components/Nav";
-import SettingsDrawer from "./components/SettingsDrawer";
+import SettingsPage from "./components/SettingsPage";
 import PageThemeDrawer from "./components/PageThemeDrawer";
 import CERICEditor from "./views/CERICEditor";
 import GraphView from "./views/GraphView";
@@ -18,12 +18,12 @@ import { applyTheme } from "./lib/theme";
 import { APP_WATERMARK } from "./lib/copyright";
 import { startSettingsSync } from "./lib/settingsSync";
 
-export type View = "editor" | "graph" | "ask" | "scores" | "latex" | "papers" | "books" | "tasks" | "calendar";
+export type View = "editor" | "graph" | "ask" | "scores" | "latex" | "papers" | "books" | "tasks" | "calendar" | "settings";
 
 export default function App() {
   const [view, setView] = useState<View>("scores");
   const [editorCitekey, setEditorCitekey] = useState<string | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [prevView, setPrevView] = useState<Exclude<View, "settings">>("scores");
   const [notesTab, setNotesTab] = useState<NotesTab>("collection");
   const [tasksTab, setTasksTab] = useState<TasksTab>("planner");
   const [papersSection, setPapersSection] = useState<PapersSection>("daily");
@@ -34,7 +34,7 @@ export default function App() {
   const [taskFocus, setTaskFocus] = useState<{ projectSlug: string; mainTaskId: string } | null>(null);
 
   useEffect(() => {
-    applyTheme(view);
+    if (view !== "settings") applyTheme(view); // Settings keeps the page theme you came from
   }, [view]);
 
   useEffect(() => startSettingsSync(), []);
@@ -50,7 +50,7 @@ export default function App() {
       }) => {
         if (info.desktop && info.dataPathChosen === false) {
           setFirstRunData(true);
-          setSettingsOpen(true);
+          setView("settings");
         }
         if (info.desktop && info.existingData && info.reinstall) {
           const { from, to } = info.reinstall;
@@ -61,6 +61,11 @@ export default function App() {
       })
       .catch(() => {});
   }, []);
+
+  function goView(v: View) {
+    if (v === "settings" && view !== "settings") setPrevView(view as Exclude<View, "settings">);
+    setView(v);
+  }
 
   function openEditor(citekey: string) {
     setEditorCitekey(citekey);
@@ -84,9 +89,9 @@ export default function App() {
           else if (k === "papers") setPapersSection(id as PapersSection);
           else setColSection(id as CollectionSection);
         }}
-        onNavigate={setView}
-        onSettingsOpen={() => { setPageEditOpen(false); setSettingsOpen(true); }}
-        onPageEdit={() => { setSettingsOpen(false); setPageEditOpen(true); }}
+        onNavigate={goView}
+        onSettingsOpen={() => { setPageEditOpen(false); goView("settings"); }}
+        onPageEdit={() => { if (view === "settings") setView(prevView); setPageEditOpen(true); }}
         pageEditOpen={pageEditOpen}
       />
       <div className="app-body">
@@ -98,7 +103,7 @@ export default function App() {
           </button>
         </div>
       )}
-      <main className={`app-content${view === "latex" || view === "ask" ? " app-content--flush" : ""}`}>
+      <main className={`app-content${view === "latex" || view === "ask" || view === "settings" ? " app-content--flush" : ""}`}>
         {view === "editor" && (
           <CERICEditor
             citekey={editorCitekey}
@@ -129,18 +134,19 @@ export default function App() {
         )}
         {view === "papers" && <PapersView requestSection={papersSection} />}
         {view === "books" && <BooksView requestSection={colSection} />}
+        {view === "settings" && (
+          <SettingsPage
+            firstRun={firstRunData}
+            onClose={() => setView(prevView)}
+            onDataPathSaved={() => {
+              setFirstRunData(false);
+              window.location.reload();
+            }}
+          />
+        )}
       </main>
       </div>
-      <SettingsDrawer
-        open={settingsOpen}
-        firstRun={firstRunData}
-        onClose={() => setSettingsOpen(false)}
-        onDataPathSaved={() => {
-          setFirstRunData(false);
-          window.location.reload();
-        }}
-      />
-      <PageThemeDrawer open={pageEditOpen} page={view} onClose={() => setPageEditOpen(false)} />
+      <PageThemeDrawer open={pageEditOpen} page={view === "settings" ? prevView : view} onClose={() => setPageEditOpen(false)} />
       <div className="app-watermark" aria-hidden="true">{APP_WATERMARK}</div>
     </div>
   );

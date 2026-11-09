@@ -1,4 +1,5 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import AbstractText from "./AbstractText";
 import { api } from "../api/client";
 
 const colorPickerIcon = "/color-picker-icon.png";
@@ -123,7 +124,7 @@ interface SettingsSaveResult {
 }
 
 interface Props {
-  open: boolean;
+  open?: boolean;
   onClose: () => void;
   firstRun?: boolean;
   onDataPathSaved?: () => void;
@@ -151,31 +152,51 @@ declare global {
   }
 }
 
+/** Settings is a full page: the section list on the left picks which one is shown on the right. */
+const SettingsActiveCtx = createContext<string | null>(null);
+
+const SETTINGS_SECTIONS: { id: string; title: string }[] = [
+  { id: "appearance", title: "Appearance" },
+  { id: "zotero", title: "Zotero" },
+  { id: "ai", title: "AI Providers" },
+  { id: "account", title: "Account" },
+  { id: "editor", title: "Editor" },
+  { id: "analysisTags", title: "Analysis Tags" },
+  { id: "taskStatuses", title: "Task Statuses" },
+  { id: "taskOptions", title: "Task Priorities & Tags" },
+  { id: "updates", title: "Updates" },
+  { id: "data", title: "Data" },
+  { id: "git", title: "Data Sync (Git)" },
+  { id: "webdav", title: "Data Sync (Cloud / WebDAV)" },
+  { id: "autosync", title: "Auto-Sync" },
+  { id: "webhook", title: "Weekly Score Digest (Webhook)" },
+  { id: "connections", title: "Connections" },
+  { id: "about", title: "About" },
+];
+
 function CollapsibleSection({
   id,
   title,
-  open,
-  onToggle,
   children,
 }: {
   id: string;
   title: string;
-  open: boolean;
-  onToggle: () => void;
+  open?: boolean;
+  onToggle?: () => void;
   children: ReactNode;
 }) {
+  const active = useContext(SettingsActiveCtx);
+  if (active !== id) return null;
   return (
-    <div className="settings-section">
-      <button type="button" className="settings-section-toggle" onClick={onToggle} aria-expanded={open}>
-        <span>{title}</span>
-        <span className="mono muted">{open ? "▾" : "▸"}</span>
-      </button>
-      {open && <div className="settings-section-body" id={id}>{children}</div>}
-    </div>
+    <section className="settings-section settings-section--page" id={id}>
+      <h3>{title}</h3>
+      <div className="settings-section-body">{children}</div>
+    </section>
   );
 }
 
-export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSaved }: Props) {
+export default function SettingsPage({ open = true, onClose, firstRun, onDataPathSaved }: Props) {
+  const [active, setActive] = useState(firstRun ? "data" : "appearance");
   const [settings, setSettings] = useState<SettingsState>(() => ({
     theme: (() => {
       const raw = localStorage.getItem("theme") || DEFAULT_THEME;
@@ -823,13 +844,26 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
   const meta = PROVIDER_META[activeProvider];
 
   return (
-    <div className="settings-overlay" onClick={onClose}>
-      <div className="settings-drawer" onClick={(e) => e.stopPropagation()}>
-        <div className="settings-header">
-          <h2>Settings</h2>
-          <button className="settings-close" onClick={onClose}>×</button>
-        </div>
-
+    <SettingsActiveCtx.Provider value={active}>
+    <div className="settings-page">
+      <div className="settings-page-head">
+        <h1>Settings</h1>
+        <button type="button" className="btn" onClick={onClose}>← Back</button>
+      </div>
+      <div className="settings-page-main">
+        <nav className="settings-page-nav" aria-label="Settings sections">
+          {SETTINGS_SECTIONS.map((sec) => (
+            <button
+              key={sec.id}
+              type="button"
+              className={`settings-page-navitem${active === sec.id ? " active" : ""}`}
+              onClick={() => setActive(sec.id)}
+            >
+              {sec.title}
+            </button>
+          ))}
+        </nav>
+        <div className="settings-page-pane">
         <div className="settings-body">
         <CollapsibleSection id="appearance" title="Appearance" open={!!openSections.appearance} onToggle={() => toggle("appearance")}>
           <div className="settings-item">
@@ -1571,7 +1605,7 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
             {upd?.available && (
               <div className="settings-info" style={{ marginTop: 10 }}>
                 <strong>v{upd.latest} is available</strong>
-                {upd.notes && <pre style={{ whiteSpace: "pre-wrap", font: "inherit", fontSize: 12, maxHeight: 160, overflow: "auto", margin: "6px 0 0" }}>{upd.notes}</pre>}
+                {upd.notes && <div style={{ fontSize: 13, maxHeight: 320, overflow: "auto", margin: "8px 0 0" }}><AbstractText text={upd.notes} /></div>}
                 {!upd.can_hot_update && (
                   <div style={{ marginTop: 6 }}>
                     {info.desktop
@@ -1867,7 +1901,9 @@ export default function SettingsDrawer({ open, onClose, firstRun, onDataPathSave
           </button>
           {saveMsg && <span className="ok mono" style={{ fontSize: 12 }}>{saveMsg}</span>}
         </div>
+        </div>
       </div>
     </div>
+    </SettingsActiveCtx.Provider>
   );
 }

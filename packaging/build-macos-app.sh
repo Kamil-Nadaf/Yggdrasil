@@ -29,7 +29,7 @@ FRONTEND="${ROOT}/services/assistant/frontend"
 # ── Standalone Python (python-build-standalone) ─────────────────────────────
 PY_VER="3.12.5"
 PY_DATE="20240814"
-PY_URL="https://github.com/indygreg/python-build-standalone/releases/download/${PY_DATE}/cpython-${PY_VER}+${PY_DATE}-${PBS_ARCH}-apple-darwin-install_only.tar.gz"
+PY_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PY_DATE}/cpython-${PY_VER}+${PY_DATE}-${PBS_ARCH}-apple-darwin-install_only.tar.gz"
 PY_CACHE="/tmp/ygg-py-cache-${ARCH_TAG}"
 PY_TGZ="${PY_CACHE}/python.tar.gz"
 PY_SRC="${PY_CACHE}/python"
@@ -37,7 +37,8 @@ PY_SRC="${PY_CACHE}/python"
 mkdir -p "$PY_CACHE"
 if [ ! -x "${PY_SRC}/bin/python3.12" ]; then
   echo "→ Downloading standalone Python ${PY_VER} (${PBS_ARCH})..."
-  curl -fL "$PY_URL" -o "$PY_TGZ"
+  # GitHub release downloads sometimes return 504; retry for a few minutes before giving up.
+  curl -fL --retry 12 --retry-all-errors --retry-delay 15 --connect-timeout 30 "$PY_URL" -o "$PY_TGZ"
   rm -rf "$PY_SRC"
   tar -xzf "$PY_TGZ" -C "$PY_CACHE"
 fi
@@ -64,8 +65,8 @@ cat > "${APP}/Contents/Info.plist" << 'EOF'
   <key>CFBundleName</key><string>Yggdrasil</string>
   <key>CFBundleDisplayName</key><string>Yggdrasil</string>
   <key>CFBundleIdentifier</key><string>io.yggdrasil.app</string>
-  <key>CFBundleVersion</key><string>0.4.15</string>
-  <key>CFBundleShortVersionString</key><string>0.4.15</string>
+  <key>CFBundleVersion</key><string>0.4.16</string>
+  <key>CFBundleShortVersionString</key><string>0.4.16</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>Yggdrasil</string>
   <key>CFBundleIconFile</key><string>Yggdrasil</string>
@@ -201,7 +202,7 @@ pkgbuild \
   --root "$PKG_ROOT" \
   --scripts "$PKG_SCRIPTS" \
   --identifier io.yggdrasil.app \
-  --version 0.4.15 \
+  --version 0.4.16 \
   "$PKG_UNSIGNED"
 
 DIST_XML="${OUT}/distribution.xml"
@@ -218,7 +219,7 @@ cat > "$DIST_XML" << EOF
     <choice id="yggdrasil" title="Yggdrasil" description="Install Yggdrasil to /Applications">
         <pkg-ref id="io.yggdrasil.app">Yggdrasil.pkg</pkg-ref>
     </choice>
-    <pkg-ref id="io.yggdrasil.app" version="0.4.15" onConclusion="none">Yggdrasil.pkg</pkg-ref>
+    <pkg-ref id="io.yggdrasil.app" version="0.4.16" onConclusion="none">Yggdrasil.pkg</pkg-ref>
 </installer-gui-script>
 EOF
 

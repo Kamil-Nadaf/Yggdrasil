@@ -41,9 +41,9 @@ PY_VER="3.12.5"
 PY_DATE="20240814"
 ARCH="$(uname -m)"
 if [ "$ARCH" = "x86_64" ]; then
-  PY_URL="https://github.com/indygreg/python-build-standalone/releases/download/${PY_DATE}/cpython-${PY_VER}+${PY_DATE}-x86_64-unknown-linux-gnu-install_only.tar.gz"
+  PY_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PY_DATE}/cpython-${PY_VER}+${PY_DATE}-x86_64-unknown-linux-gnu-install_only.tar.gz"
 elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
-  PY_URL="https://github.com/indygreg/python-build-standalone/releases/download/${PY_DATE}/cpython-${PY_VER}+${PY_DATE}-aarch64-unknown-linux-gnu-install_only.tar.gz"
+  PY_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PY_DATE}/cpython-${PY_VER}+${PY_DATE}-aarch64-unknown-linux-gnu-install_only.tar.gz"
 else
   echo "ERROR: Unsupported arch: $ARCH"; exit 1
 fi
@@ -61,7 +61,8 @@ if [ -f "$STANDALONE_PYTHON" ] && ! "$STANDALONE_PYTHON" --version >/dev/null 2>
 fi
 if [ ! -f "$STANDALONE_PYTHON" ]; then
   echo "→ Downloading standalone Python ${PY_VER} for ${ARCH}..."
-  curl -fL "$PY_URL" -o "$PY_TGZ"
+  # GitHub release downloads sometimes return 504; retry for a few minutes before giving up.
+  curl -fL --retry 12 --retry-all-errors --retry-delay 15 --connect-timeout 30 "$PY_URL" -o "$PY_TGZ"
   tar -xzf "$PY_TGZ" -C "$PY_CACHE"
 fi
 

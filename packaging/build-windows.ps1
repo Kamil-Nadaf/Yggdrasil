@@ -66,10 +66,22 @@ Write-Host "→ Bundling a relocatable standalone Python 3.12 (python-build-stan
 # and can be unzipped anywhere, so we install packages straight into it.
 $PyVer = "3.12.5"
 $PyDate = "20240814"
-$PyUrl = "https://github.com/indygreg/python-build-standalone/releases/download/$PyDate/cpython-$PyVer+$PyDate-x86_64-pc-windows-msvc-install_only.tar.gz"
+$PyUrl = "https://github.com/astral-sh/python-build-standalone/releases/download/$PyDate/cpython-$PyVer+$PyDate-x86_64-pc-windows-msvc-install_only.tar.gz"
 $PyTgz = Join-Path ([System.IO.Path]::GetTempPath()) "ygg-python-windows.tar.gz"
 if (-not (Test-Path $PyTgz)) {
-  Invoke-WebRequest -Uri $PyUrl -OutFile $PyTgz
+  # GitHub release downloads sometimes return 504; retry for a few minutes before giving up.
+  $ok = $false
+  for ($i = 1; $i -le 12 -and -not $ok; $i++) {
+    try {
+      Invoke-WebRequest -Uri $PyUrl -OutFile $PyTgz -UseBasicParsing
+      $ok = $true
+    } catch {
+      Write-Host "Download attempt $i failed: $($_.Exception.Message)"
+      Remove-Item $PyTgz -ErrorAction SilentlyContinue
+      Start-Sleep -Seconds 15
+    }
+  }
+  if (-not $ok) { throw "Could not download standalone Python" }
 }
 tar -xzf $PyTgz -C $Dist          # creates $Dist\python\
 if ($LASTEXITCODE -ne 0) { throw "Failed to extract standalone Python" }

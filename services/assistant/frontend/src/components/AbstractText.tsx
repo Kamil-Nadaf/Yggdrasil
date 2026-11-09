@@ -3,6 +3,7 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import renderMathInElement from "katex/contrib/auto-render";
 import { resolveRelativePath } from "../lib/pastedImages";
+import { renderMermaidBlocks } from "../lib/mermaidRender";
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -69,6 +70,7 @@ export default function AbstractText({
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    let cancelled = false;
     const html = DOMPurify.sanitize(marked.parse(text || "", { async: false }) as string);
     el.innerHTML = html;
     decorateNoteBlocks(el);
@@ -96,6 +98,8 @@ export default function AbstractText({
       // Malformed TeX in a paper abstract shouldn't break the page — leave the
       // markdown-rendered text as-is if KaTeX can't parse it.
     }
+    void renderMermaidBlocks(el, () => cancelled);
+    return () => { cancelled = true; };
   }, [text, imageBase]);
 
   return (

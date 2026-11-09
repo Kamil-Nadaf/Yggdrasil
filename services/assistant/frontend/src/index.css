@@ -5491,3 +5491,8 @@ h2 { font-size: 15px; color: var(--accent); }
 .tk-seg { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .tk-seg-b { border: 0; background: transparent; color: var(--text); padding: 0 14px; height: 34px; font-size: 13px; cursor: pointer; }
 .tk-seg-b.on { background: var(--accent); color: #fff; font-weight: 600; }
+
+/* ── Mermaid diagrams in notes ── */
+.md-mermaid { margin: 12px 0; overflow-x: auto; text-align: center; }
+.md-mermaid svg { max-width: 100%; height: auto; }
+.md-mermaid-error-msg { color: var(--crit, #c0392b); font-size: 12px; text-align: left; margin-bottom: 6px; }

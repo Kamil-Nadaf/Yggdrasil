@@ -28,7 +28,7 @@ jobs:
       matrix:
         include:
           - label: macOS (Apple Silicon)
-            os: macos-14
+            os: macos-15
             artifact: mac-arm64
             paths: |
               release/Yggdrasil-*-mac-arm64.dmg

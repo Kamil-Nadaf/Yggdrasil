@@ -70,6 +70,7 @@ const IcoLink = () => <Ico><path d="M6.6 9.4l2.8-2.8M5.3 7.7L4.2 8.8a2.4 2.4 0 0
 const IcoBullets = () => <Ico><circle cx="3" cy="4" r=".6" fill="currentColor" /><circle cx="3" cy="8" r=".6" fill="currentColor" /><circle cx="3" cy="12" r=".6" fill="currentColor" /><path d="M6 4h8M6 8h8M6 12h8" /></Ico>;
 const IcoNumbers = () => <Ico><path d="M7 4h7M7 8h7M7 12h7M2.5 3l1-.6V6M2.2 9.5c.3-.9 1.8-.9 1.8 0 0 .7-1.8 1.3-1.8 2h1.9" /></Ico>;
 const IcoChecklist = () => <Ico><path d="M2 4l1.2 1.2L5.4 3M2 9l1.2 1.2L5.4 8M7.5 4.5H14M7.5 9.5H14M2.5 13h2.5M7.5 13H14" /></Ico>;
+const IcoDiagram = () => <Ico><rect x="1.5" y="2" width="5" height="3.5" rx="0.8" /><rect x="9.5" y="2" width="5" height="3.5" rx="0.8" /><rect x="5.5" y="10.5" width="5" height="3.5" rx="0.8" /><path d="M4 5.5v2.5h8V5.5M8 8v2.5" /></Ico>;
 const IcoTable = () => <Ico><rect x="2" y="3" width="12" height="10" rx="1" /><path d="M2 7h12M2 10h12M7 3v10" /></Ico>;
 const IcoPlus = () => <Ico><path d="M8 3v10M3 8h10" /></Ico>;
 const IcoChevron = () => <Ico><path d="M4.5 6.5L8 10l3.5-3.5" /></Ico>;
@@ -652,6 +653,11 @@ export default function MarkdownNotesTab({ section = "Quick Notes" }: { section?
     else replaceRange(start, end, full);
   }
 
+  /** A ```mermaid block with a starter diagram selected, so pasting your own Mermaid code replaces it. */
+  function insertDiagram() {
+    insertBlock("```mermaid\nflowchart TB\n  A[Start] --> B[Next step]\n```", "flowchart TB\n  A[Start] --> B[Next step]");
+  }
+
   function insertTable() {
     insertBlock("| Column 1 | Column 2 | Column 3 |\n| --- | --- | --- |\n|  |  |  |", "Column 1");
   }
@@ -856,6 +862,7 @@ export default function MarkdownNotesTab({ section = "Quick Notes" }: { section?
         { type: "item", label: "Image…", disabled: !editing, onClick: pickImages },
         { type: "item", label: "Table", disabled: !editing, onClick: insertTable },
         { type: "item", label: "Code block", disabled: !editing, onClick: () => insertBlock("```\ncode\n```", "code") },
+        { type: "item", label: "Diagram / mind map", hint: "Paste Mermaid code inside", disabled: !editing, onClick: insertDiagram },
         { type: "item", label: "Page break (---)", disabled: !editing, onClick: () => insertBlock("---") },
       ],
     },
@@ -1072,6 +1079,7 @@ export default function MarkdownNotesTab({ section = "Quick Notes" }: { section?
         {fmt("Task list", () => toggleList("task"), <IcoChecklist />)}
         <span className="notes-tb-sep" />
         {fmt("Table", insertTable, <IcoTable />)}
+        {fmt("Diagram / mind map (Mermaid)", insertDiagram, <IcoDiagram />)}
         {fmt("Insert image (or paste / drop one into the editor)", pickImages, <IconFigure />)}
         <span className="notes-tb-sep" />
         <div className="notes-pop-anchor">
@@ -1089,6 +1097,7 @@ export default function MarkdownNotesTab({ section = "Quick Notes" }: { section?
           <Popover open={plusOpen} onClose={() => setPlusOpen(false)}>
             <PopItem label="Alert" hint="Note / warning callout" onClick={() => { setPlusOpen(false); insertBlock("> [!NOTE]\n> Write your note here", "Write your note here"); }} />
             <PopItem label="Code block" onClick={() => { setPlusOpen(false); insertBlock("```\ncode\n```", "code"); }} />
+            <PopItem label="Diagram / mind map" hint="Paste Mermaid code inside; renders in preview" onClick={() => { setPlusOpen(false); insertDiagram(); }} />
             <PopItem label="Collapsible section" onClick={() => { setPlusOpen(false); insertBlock("<details>\n<summary>Title</summary>\n\nContent\n\n</details>", "Title"); }} />
             <PopItem label="Math block" onClick={() => { setPlusOpen(false); insertBlock("$$\nE = mc^2\n$$", "E = mc^2"); }} />
             <PopItem label="Horizontal rule / page break" hint="--- starts a new page in the PDF" onClick={() => { setPlusOpen(false); insertBlock("---"); }} />

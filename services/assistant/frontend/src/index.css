@@ -4009,16 +4009,107 @@ h2 { font-size: 15px; color: var(--accent); }
 .abstract-text p:last-child {
   margin-bottom: 0;
 }
+/* Inline code — soft pill, like Obsidian / GitLab */
 .abstract-text code {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  padding: 0 4px;
-  font-size: 0.9em;
+  font-family: var(--font-mono);
+  background: color-mix(in srgb, var(--text) 9%, transparent);
+  border-radius: 5px;
+  padding: 0.12em 0.4em;
+  font-size: 0.88em;
+  overflow-wrap: anywhere;
 }
-.abstract-text .katex {
-  font-size: 1em;
+
+/* Fenced code blocks: rounded card, language label + Copy button on top */
+.abstract-text .md-code {
+  position: relative;
+  margin: 14px 0;
+  border: 1px solid color-mix(in srgb, var(--text) 13%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--text) 6%, var(--bg));
+  overflow: hidden;
 }
+.abstract-text .md-code-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 26px;
+  padding: 3px 8px 0 14px;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+.abstract-text .md-code-copy {
+  font: inherit;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 1px 8px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.abstract-text .md-code:hover .md-code-copy,
+.abstract-text .md-code-copy:focus-visible { opacity: 1; }
+.abstract-text .md-code-copy:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--text) 25%, transparent);
+}
+.abstract-text .md-code pre {
+  margin: 0;
+  padding: 4px 16px 14px;
+  background: transparent;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  line-height: 1.65;
+  tab-size: 4;
+}
+.abstract-text .md-code pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: inherit;
+  border-radius: 0;
+  overflow-wrap: anywhere;
+}
+/* A bare <pre> without a fence wrapper (rare) still looks right */
+.abstract-text > pre {
+  margin: 14px 0;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--text) 6%, var(--bg));
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  line-height: 1.65;
+}
+
+/* Syntax colours (highlight.js tokens) — one palette per tone */
+.abstract-text[data-tone="dark"] { --hl-kw: #ff7b72; --hl-str: #a5d6a7; --hl-num: #d2a8ff; --hl-com: #8b949e; --hl-fn: #79c0ff; --hl-attr: #f2cc60; --hl-meta: #e3b341; }
+.abstract-text[data-tone="light"] { --hl-kw: #cf222e; --hl-str: #0a7a3d; --hl-num: #6f42c1; --hl-com: #6e7781; --hl-fn: #0550ae; --hl-attr: #953800; --hl-meta: #8a6100; }
+.abstract-text .hljs-keyword, .abstract-text .hljs-selector-tag, .abstract-text .hljs-literal, .abstract-text .hljs-built_in, .abstract-text .hljs-doctag, .abstract-text .hljs-type { color: var(--hl-kw); }
+.abstract-text .hljs-string, .abstract-text .hljs-regexp, .abstract-text .hljs-addition, .abstract-text .hljs-template-variable { color: var(--hl-str); }
+.abstract-text .hljs-number, .abstract-text .hljs-symbol, .abstract-text .hljs-bullet { color: var(--hl-num); }
+.abstract-text .hljs-comment, .abstract-text .hljs-quote { color: var(--hl-com); font-style: italic; }
+.abstract-text .hljs-title, .abstract-text .hljs-section, .abstract-text .hljs-function, .abstract-text .hljs-name { color: var(--hl-fn); }
+.abstract-text .hljs-attr, .abstract-text .hljs-attribute, .abstract-text .hljs-variable, .abstract-text .hljs-params, .abstract-text .hljs-property { color: var(--hl-attr); }
+.abstract-text .hljs-meta, .abstract-text .hljs-tag, .abstract-text .hljs-deletion { color: var(--hl-meta); }
+.abstract-text .hl-flag, .abstract-text .hl-sub { color: var(--hl-attr); }
+.abstract-text .hl-eq { color: var(--hl-kw); }
+.abstract-text .hljs-emphasis { font-style: italic; }
+.abstract-text .hljs-strong { font-weight: 700; }
+
+/* Math — KaTeX, centred display equations with room to breathe, scrolls instead of overflowing */
+.abstract-text .katex { font-size: 1.1em; }
+.abstract-text .katex-display {
+  margin: 1.1em 0;
+  padding: 0.3em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.abstract-text .katex-display > .katex { font-size: 1.22em; }
 
 /* Notes workspaces (Quick Notes / Documentation / Meeting Minutes) reuse the
    LaTeX Editor's `.latex-*` shell/menubar/sidebar chrome via WorkspaceLayout —

@@ -10,13 +10,7 @@ function loadMermaid(): Promise<MermaidApi> {
   return mermaidPromise;
 }
 
-/** Light text colour => the surrounding theme is dark. */
-function isDark(el: HTMLElement): boolean {
-  const m = getComputedStyle(el).color.match(/\d+(\.\d+)?/g);
-  if (!m || m.length < 3) return false;
-  const [r, g, b] = m.map(Number);
-  return 0.299 * r + 0.587 * g + 0.114 * b > 140;
-}
+import { isDarkTone as isDark } from "./codeBlocks";
 
 export async function renderMermaidBlocks(root: HTMLElement, isCancelled: () => boolean = () => false) {
   const codes = Array.from(root.querySelectorAll<HTMLElement>("pre > code.language-mermaid"));

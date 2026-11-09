@@ -4,6 +4,7 @@ import DOMPurify from "dompurify";
 import renderMathInElement from "katex/contrib/auto-render";
 import { resolveRelativePath } from "../lib/pastedImages";
 import { renderMermaidBlocks } from "../lib/mermaidRender";
+import { decorateCodeBlocks, isDarkTone } from "../lib/codeBlocks";
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -74,6 +75,11 @@ export default function AbstractText({
     const html = DOMPurify.sanitize(marked.parse(text || "", { async: false }) as string);
     el.innerHTML = html;
     decorateNoteBlocks(el);
+    decorateCodeBlocks(el);
+    const tone = () => { el.dataset.tone = isDarkTone(el) ? "dark" : "light"; };
+    tone();
+    const mo = new MutationObserver(tone);
+    mo.observe(document.documentElement, { attributes: true });
     if (imageBase !== undefined) {
       el.querySelectorAll("img").forEach((img) => {
         const src = img.getAttribute("src") || "";
@@ -99,7 +105,7 @@ export default function AbstractText({
       // markdown-rendered text as-is if KaTeX can't parse it.
     }
     void renderMermaidBlocks(el, () => cancelled);
-    return () => { cancelled = true; };
+    return () => { cancelled = true; mo.disconnect(); };
   }, [text, imageBase]);
 
   return (

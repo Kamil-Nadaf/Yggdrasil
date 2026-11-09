@@ -5144,6 +5144,17 @@ async def zotero_audit():
 
 # ── Serve React frontend ──────────────────────────────────────────────────────
 
+@app.middleware("http")
+async def _revalidate_frontend(request, call_next):
+    """The desktop webview keeps a persistent HTTP cache on a fixed port: without this it can keep showing
+    an old index.html (old UI) after an in-app update. no-cache = always revalidate (cheap 304 via ETag)."""
+    response = await call_next(request)
+    path = request.url.path
+    if not path.startswith("/api") and not path.startswith("/assets/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 FRONTEND_DIST = Path(os.environ.get("FRONTEND_DIST", "/app/frontend/dist"))
 if FRONTEND_DIST.exists():
     app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")

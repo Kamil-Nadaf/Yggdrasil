@@ -457,7 +457,7 @@ def boot(window) -> None:
     mark_boot_ok()
     progress("Opening Yggdrasil…")
     progress_done()
-    window.load_url(url)
+    window.load_url(f"{url}/?v={APP_VERSION}")  # new URL per version: never reuse a cached old index.html
 
 
 class DesktopApi:

@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { authHeaders } from './api';
+import { getState } from './store';
+import { localRequest } from './local';
+
+export const isLocal = () => getState().settings.mode === 'local';
 
 /** Client for the desktop Yggdrasil backend, reached through this server's /ygg proxy. */
 export async function yg<T = any>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
+  if (isLocal()) return localRequest(init.method || 'GET', path, init.body) as Promise<T>;
   const r = await fetch(`/ygg${path}`, {
     method: init.method || 'GET',
     headers: authHeaders(init.body !== undefined),

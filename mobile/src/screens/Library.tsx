@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { authHeaders } from '../api';
 import PdfView from '../PdfView';
 import { Icon, Screen, Top } from '../ui';
-import { flatten, isoDay, saveCollections, useY, yg, type DCol, type Item } from '../ygg';
+import { getDB } from '../local';
+import { flatten, isLocal, isoDay, saveCollections, useY, yg, type DCol, type Item } from '../ygg';
 
 const STATUS: Record<string, string> = { want: 'To read', reading: 'Reading', finished: 'Done' };
 const COLOR: Record<string, string> = { want: '#E6B673', reading: '#8DB8FF', finished: '#7FD6A4' };
@@ -87,11 +88,22 @@ export function Collection({ id }: { id: string }) {
 }
 
 async function fetchFile(slug: string): Promise<ArrayBuffer> {
-  const url = `/ygg/api/reading/${encodeURIComponent(slug)}/file`;
+  const local = isLocal() ? getDB().items[slug] : null;
+  if (isLocal() && !local?.pdf_url) throw new Error('No PDF link for this item.');
+  const url = local ? local.pdf_url! : `/ygg/api/reading/${encodeURIComponent(slug)}/file`;
   const c = typeof caches !== 'undefined' ? await caches.open('ygg-pdf') : null;
   const hit = await c?.match(url);
   if (hit) return hit.arrayBuffer();
-  const r = await fetch(url, { headers: authHeaders() });
+  const cap = (window as unknown as { Capacitor?: { Plugins?: { CapacitorHttp?: { get: (o: object) => Promise<{ status: number; data: string }> } } } }).Capacitor?.Plugins?.CapacitorHttp;
+  if (local && cap) {
+    const n = await cap.get({ url, responseType: 'blob' });
+    if (n.status >= 400) throw new Error('PDF not available');
+    const buf = Uint8Array.from(atob(n.data), (ch) => ch.charCodeAt(0)).buffer;
+    await c?.put(url, new Response(buf.slice(0)));
+    return buf;
+  }
+  let r: Response;
+  try { r = await fetch(url, local ? undefined : { headers: authHeaders() }); } catch { throw new Error(local ? 'Cannot download the PDF here. The Android app can; a browser cannot.' : 'PDF unavailable (offline or backend unreachable)'); }
   if (!r.ok) throw new Error(r.status === 404 ? 'No PDF attached. Open the item on desktop and fetch the PDF.' : 'PDF unavailable (offline or backend unreachable)');
   await c?.put(url, r.clone());
   return r.arrayBuffer();

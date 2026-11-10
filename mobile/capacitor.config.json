@@ -9,5 +9,10 @@
     "allowNavigation": [
       "*"
     ]
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
   }
 }

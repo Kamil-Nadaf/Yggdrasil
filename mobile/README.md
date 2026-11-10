@@ -33,7 +33,12 @@ Set `SYNC_TOKEN` before exposing it anywhere, then paste the same token in the a
 
 ## Android app
 
-`Yggdrasil-*-android.apk` is built by the Release workflow (`.github/workflows/release.yml`, job `android`) with Capacitor. It is a thin shell: on first launch enter the address of your phone server (for example `http://<tailscale-ip>:8080`), and it opens that server full-screen. Because the UI is loaded from the server, `docker compose up -d --build` updates the Android app too (Settings → Check for updates), no new APK needed. Gear → Connection → **Change server** returns to the address screen. The APK is debug-signed (install with "allow from this source"); cleartext http is allowed so Tailscale/LAN addresses work.
+`Yggdrasil-*-android.apk` is built by the Release workflow (`.github/workflows/release.yml`, job `android`) with Capacitor. On first launch pick:
+
+- **Use on this phone only**: no server. Notes, LaTeX source, tasks, habits, goals, collections and saved papers are stored in the app; arXiv and PDFs are fetched directly. Not available offline-only: LaTeX compile and Zotero sync (they need the server). **Settings → Connection → Export backup** opens the share sheet (send it to Google Drive or any app); **Import** merges a backup (newer note wins, nothing is deleted). This is manual backup, not automatic Drive sync.
+- **Connect to a server**: enter the address of your phone server (for example `http://<tailscale-ip>:8080`). The app opens it full-screen, so `docker compose up -d --build` updates the Android app too (Settings → Check for updates). Gear → Connection → **Change server** returns to the first screen.
+
+The launcher icon is the logo in dark ink on cream for a light phone theme, white on near-black for a dark theme, plus a monochrome layer for Android 13 themed icons. The APK is debug-signed (install with "allow from this source"); cleartext http is allowed so Tailscale/LAN addresses work.
 
 ## Config
 

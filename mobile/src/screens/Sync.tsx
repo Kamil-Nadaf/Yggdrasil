@@ -1,9 +1,44 @@
 import { useState } from 'react';
 import { useStore, update } from '../store';
 import { Screen, Top } from '../ui';
-import { useY, yg } from '../ygg';
+import { exportBackup, mergeBackup } from '../backup';
+import { isLocal, useY, yg } from '../ygg';
+
+function LocalConnection() {
+  const [msg, setMsg] = useState('');
+  const file = (f: File | undefined) => { if (f) f.text().then((t) => setMsg(mergeBackup(t))).catch((e) => setMsg(e instanceof Error ? e.message : 'Import failed')); };
+  const native = !!(window as unknown as { Capacitor?: unknown }).Capacitor;
+  return (
+    <Screen>
+      <Top back="settings" title={<h1 className="h2">Phone only</h1>} />
+      <div className="stack pad">
+        <section className="card">
+          <b>Everything is stored on this phone</b>
+          <p className="muted sm">Notes, LaTeX, tasks, habits, goals, collections and saved papers live in the app. arXiv is fetched directly. Compiling LaTeX and Zotero sync need your Yggdrasil server.</p>
+        </section>
+        <section className="card">
+          <b>Backup and sync</b>
+          <p className="muted sm">Export a backup and send it to Google Drive (or any app) from the share sheet. On another device, Import merges it: the newer copy of each note wins and nothing is deleted.</p>
+          <div className="row gap" style={{ marginTop: 12 }}>
+            <button className="btn primary" onClick={() => exportBackup().then(setMsg).catch((e) => setMsg(e.message))}>Export backup</button>
+            <label className="btn" style={{ cursor: 'pointer' }}>Import<input type="file" accept="application/json,.json" hidden onChange={(e) => { file(e.target.files?.[0]); e.target.value = ''; }} /></label>
+          </div>
+          {msg && <p className="sm" role="status">{msg}</p>}
+        </section>
+        <section className="card group">
+          {native ? <a className="grow" href="/?change=1"><span className="f1">Connect to a server instead</span><span className="muted sm">full vault, Zotero, LaTeX</span></a>
+            : <button className="grow plainbtn" onClick={() => { update((st) => ({ ...st, settings: { ...st.settings, mode: 'server' } })); location.reload(); }}><span className="f1">Use my Yggdrasil server instead</span></button>}
+        </section>
+      </div>
+    </Screen>
+  );
+}
 
 export default function Sync() {
+  return isLocal() ? <LocalConnection /> : <ServerConnection />;
+}
+
+function ServerConnection() {
   const s = useStore();
   const set = (p: Partial<typeof s.settings>) => update((st) => ({ ...st, settings: { ...st.settings, ...p } }));
   const info = useY<Record<string, unknown>>('/api/info', {});
@@ -27,6 +62,7 @@ export default function Sync() {
           <input id="tok" className="input" type="password" autoComplete="off" placeholder="Same as SYNC_TOKEN on the server" value={s.settings.token} onChange={(e) => set({ token: e.target.value })} />
         </section>
         {/\bwv\b/.test(navigator.userAgent) && <section className="card group"><a className="grow" href="http://localhost/?change=1"><span className="f1">Change server</span><span className="muted sm">{location.host}</span></a></section>}
+        {!(window as unknown as { Capacitor?: unknown }).Capacitor && <section className="card group"><button className="grow plainbtn" onClick={() => { update((st) => ({ ...st, settings: { ...st.settings, mode: 'local' } })); location.reload(); }}><span className="f1">Use this phone only (no server)</span></button></section>}
         <section className="card group">
           <div className="grow"><span className="f1">arXiv topic</span><span className="muted sm">{s.settings.category}</span></div>
         </section>

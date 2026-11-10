@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { isLocal, yg } from '../ygg';
 import { useStore, update, type ThemeName } from '../store';
 import { ACCENTS, THEMES } from '../theme';
 import { Icon, Screen, Top } from '../ui';
@@ -13,6 +14,16 @@ async function checkUpdate(): Promise<string> {
   for (const k of await caches.keys()) if (k !== 'ygg-pdf') await caches.delete(k);
   location.reload();
   return 'Updating…';
+}
+
+async function addGoal() {
+  const name = prompt('Goal name (e.g. Thesis)')?.trim(); if (!name) return;
+  const iso = (x: string | null | undefined) => (x && /^\d{4}-\d{2}-\d{2}$/.test(x.trim()) ? x.trim() : '');
+  const end = iso(prompt('Deadline (YYYY-MM-DD)')); if (!end) { alert('Use the format YYYY-MM-DD'); return; }
+  const start = iso(prompt('Start date (YYYY-MM-DD), empty for today')) || new Date().toISOString().slice(0, 10);
+  const g = await yg<{ goals: unknown[] }>('/api/settings/goals');
+  await yg('/api/settings/goals', { method: 'PUT', body: { goals: [...g.goals, { id: `g-${Date.now()}`, name, start_date: start, end_date: end }] } });
+  dispatchEvent(new Event('ygg-sync'));
 }
 
 export default function Settings() {
@@ -51,6 +62,7 @@ export default function Settings() {
         <section className="card group">
           <a className="grow" href="#/sync"><span className="f1">Connection and token</span><Icon name="next" size={18} /></a>
           <a className="grow" href="#/tasks"><span className="f1">Tasks</span><Icon name="next" size={18} /></a>
+          {isLocal() && <button className="grow plainbtn" onClick={addGoal}><span className="f1">Add a goal (days-left card)</span><Icon name="plus" size={18} /></button>}
           <div className="grow"><span className="f1">arXiv topic</span><span className="muted sm">{s.settings.category}</span></div>
         </section>
       </div>

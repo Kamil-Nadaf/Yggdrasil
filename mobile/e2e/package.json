@@ -1,0 +1,7 @@
+{
+  "name": "yggdrasil-mobile-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node e2e.mjs" },
+  "devDependencies": { "puppeteer-core": "^24.0.0" }
+}

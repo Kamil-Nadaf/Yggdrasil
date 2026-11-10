@@ -1,0 +1,40 @@
+import puppeteer from 'puppeteer-core';
+const B = process.env.BASE || 'http://127.0.0.1:18081';
+const OUT = new URL('./shots/', import.meta.url).pathname;
+const res = []; const check = (n, ok, x = '') => { res.push(ok); console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${x ? ' — ' + x : ''}`); };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const br = await puppeteer.launch({ executablePath: process.env.CHROME || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--disable-gpu'] });
+const p = await br.newPage(); await p.setViewport({ width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+const errs = []; p.on('pageerror', (e) => errs.push(String(e)));
+await p.goto(`${B}/#/today`);
+await p.evaluate(() => localStorage.setItem('ygg.v1', JSON.stringify({ settings: { token: 't0k' } })));
+await p.reload(); await sleep(900);
+check('Gear icon on top of Today', !!(await p.$('a.gear[href="#/settings"]')));
+await p.click('a.gear'); await sleep(400);
+check('Gear opens Settings', (await p.evaluate(() => location.hash)) === '#/settings' && (await p.evaluate(() => document.body.innerText)).includes('Theme'));
+const bg = () => p.evaluate(() => getComputedStyle(document.body).backgroundColor);
+const seen = {};
+for (const t of ['Dark', 'Light', 'Paper', 'Notebook']) {
+  await p.evaluate((t) => [...document.querySelectorAll('.theme-tile')].find((e) => e.textContent.includes(t)).click(), t);
+  await sleep(250);
+  seen[t] = await bg();
+  check(`${t} theme applies`, (await p.evaluate(() => document.documentElement.dataset.theme)) === t.toLowerCase(), seen[t]);
+  await p.screenshot({ path: `${OUT}t-${t.toLowerCase()}-settings.png` });
+  await p.evaluate(() => { location.hash = '#/today'; }); await sleep(700);
+  await p.screenshot({ path: `${OUT}t-${t.toLowerCase()}-today.png` });
+  await p.evaluate(() => { location.hash = '#/arxiv'; }); await sleep(700);
+  await p.screenshot({ path: `${OUT}t-${t.toLowerCase()}-arxiv.png` });
+  await p.evaluate(() => { location.hash = '#/settings'; }); await sleep(300);
+}
+check('Four themes have four different backgrounds', new Set(Object.values(seen)).size === 4, JSON.stringify(seen));
+await p.evaluate(() => document.querySelector('.theme-tile.on') && [...document.querySelectorAll('.theme-tile')].find((e) => e.textContent.includes('Notebook')).click());
+await p.click('.swatch[aria-label="Blue"]'); await sleep(250);
+const acc = await p.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim());
+check('Accent colour override applies', acc.toLowerCase() === '#4a7bd0', acc);
+await p.screenshot({ path: `${OUT}t-notebook-blue.png` });
+await p.reload(); await sleep(700);
+check('Paper hides accent picker', await (async()=>{await p.evaluate(() => [...document.querySelectorAll('.theme-tile')].find((e) => e.textContent.includes('Paper')).click()); await sleep(250); const r=!(await p.$('.swatch')); await p.evaluate(() => [...document.querySelectorAll('.theme-tile')].find((e) => e.textContent.includes('Notebook')).click()); await sleep(250); return r;})());
+check('Theme + accent persist after reload', (await p.evaluate(() => document.documentElement.dataset.theme)) === 'notebook' && (await p.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim())).toLowerCase() === '#4a7bd0');
+for (const h of ['notes', 'library', 'write']) { await p.evaluate((h) => { location.hash = '#/' + h; }, h); await sleep(400); check(`Gear present on ${h}`, !!(await p.$('a.gear'))); }
+check('No page errors', errs.length === 0, errs.join('|'));
+await br.close(); const f = res.filter((x) => !x).length; console.log(`${res.length - f}/${res.length}`); process.exit(f ? 1 : 0);

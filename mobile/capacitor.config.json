@@ -1,0 +1,13 @@
+{
+  "appId": "io.yggdrasil.mobile",
+  "appName": "Yggdrasil",
+  "webDir": "dist",
+  "backgroundColor": "#F3E5C3",
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true,
+    "allowNavigation": [
+      "*"
+    ]
+  }
+}

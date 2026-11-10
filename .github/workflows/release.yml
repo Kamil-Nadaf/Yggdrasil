@@ -151,9 +151,52 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  android:
+    name: Build Android app (APK)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Build web app
+        working-directory: mobile
+        run: |
+          npm ci
+          npm run build
+      - name: Generate Android project (Capacitor)
+        working-directory: mobile
+        run: |
+          npm i --no-save @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
+          npx cap add android
+          bash scripts/android-icons.sh
+          npx cap sync android
+      - name: Build APK
+        working-directory: mobile/android
+        run: ./gradlew assembleDebug --no-daemon
+      - name: Name the APK
+        run: |
+          V="${GITHUB_REF_NAME}"
+          case "$V" in v*) ;; *) V="dev-${GITHUB_SHA::7}" ;; esac
+          mkdir -p release
+          cp mobile/android/app/build/outputs/apk/debug/app-debug.apk "release/Yggdrasil-${V#v}-android.apk"
+          ls -lh release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yggdrasil-android
+          path: release/Yggdrasil-*-android.apk
+          if-no-files-found: error
+          retention-days: 14
+
   release:
     name: Publish GitHub Release
-    needs: [build, payload]
+    needs: [build, payload, android]
     # Publish even when one platform build fails (e.g. a runner that GitHub can't provision),
     # as long as the in-app update package built - that is what "Check for updates" installs.
     if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') && needs.payload.result == 'success' }}
@@ -182,6 +225,7 @@ jobs:
             | macOS, Intel | `Yggdrasil-*-mac-intel.pkg` or `.dmg` |
             | Windows | `Yggdrasil-*-windows.zip` → unzip → double-click `Yggdrasil.bat` |
             | Linux | `Yggdrasil-*-linux.tar.gz` → extract → `./install.sh` |
+            | Android | `Yggdrasil-*-android.apk` → open on the phone (allow installs from this source). Needs the phone server from `mobile/` running on your Mac/server — see [mobile/README.md](https://github.com/${{ github.repository }}/blob/main/mobile/README.md) |
 
             Already installed? Open **Settings → Updates → Check for updates** — most releases
             install in-app (`Yggdrasil-app-*.zip`), no download needed.

@@ -1,0 +1,23 @@
+services:
+  yggdrasil:
+    build:
+      context: .
+      args:
+        WITH_LATEX: "0"   # set to "1" to enable the Compile button (installs tectonic)
+    image: yggdrasil-mobile:latest
+    ports:
+      - "8080:8080"
+    environment:
+      # Set this before exposing the server beyond localhost / your tailnet.
+      SYNC_TOKEN: ${SYNC_TOKEN:-}
+      # Your running Yggdrasil backend (desktop app / self-hosted assistant, port 8000).
+      # Docker Desktop on Mac: host.docker.internal. On the Mac mini over Tailscale use http://<tailscale-name>:8000
+      YGG_BACKEND: ${YGG_BACKEND:-http://host.docker.internal:8000}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ygg-data:/data
+    restart: unless-stopped
+
+volumes:
+  ygg-data:

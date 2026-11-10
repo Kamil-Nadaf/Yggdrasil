@@ -4900,6 +4900,48 @@ def _collect_calendar_items() -> list[dict]:
     return out
 
 
+# ── Task sync: deadlines -> Google Calendar / Google Tasks / Microsoft To Do ──
+# One-way, so reminders reach your phone. Logic + OAuth live in task_sync.py;
+# tokens are stored in .ygg-config/task-sync.json (git-ignored, mode 600).
+from task_sync import auto_sync_due as _tasksync_due, make_router as _tasksync_router, run_sync as _tasksync_run
+
+_TASKSYNC_EVERY_SECONDS = 15 * 60
+
+
+def _tasksync_path() -> Path:
+    d = VAULT / ".ygg-config"
+    d.mkdir(parents=True, exist_ok=True)
+    _webdav_ensure_gitignore()  # same guard: keep .ygg-config/ out of git sync
+    return d / "task-sync.json"
+
+
+def _tasksync_open_browser(url: str) -> bool:
+    """Google blocks sign-in inside embedded webviews, so the desktop app opens the system browser."""
+    if not _is_desktop():
+        return False
+    try:
+        import webbrowser
+
+        return bool(webbrowser.open(url))
+    except Exception:
+        return False
+
+
+app.include_router(_tasksync_router(_tasksync_path, _collect_calendar_items, _tasksync_open_browser))
+
+
+async def _tasksync_loop():
+    await asyncio.sleep(45)
+    while True:
+        try:
+            path = _tasksync_path()
+            if await asyncio.to_thread(_tasksync_due, path):
+                await asyncio.to_thread(_tasksync_run, path, _collect_calendar_items())
+        except Exception:
+            pass
+        await asyncio.sleep(_TASKSYNC_EVERY_SECONDS)
+
+
 @app.get("/api/tasks/calendar")
 async def tasks_calendar():
     """Main tasks and subtasks with a deadline — feeds the Calendar view."""
@@ -4972,6 +5014,7 @@ async def _start_background_loops():
     asyncio.create_task(_autosync_loop())
     asyncio.create_task(_weekly_digest_loop())
     asyncio.create_task(_deadline_reminder_loop())
+    asyncio.create_task(_tasksync_loop())
 
 
 # ── Full-text search over your own notes (not vector search — exact substring,

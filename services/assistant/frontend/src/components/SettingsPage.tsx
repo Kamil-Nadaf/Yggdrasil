@@ -59,6 +59,7 @@ import { DEFAULT_ANALYSIS_TAGS, setCachedAnalysisTags, tagToKey } from "../lib/a
 import { DEFAULT_TASK_STATUSES, setCachedTaskStatuses, STATUS_ICON_GLYPH, STATUS_ICON_CYCLE } from "../lib/taskStatuses";
 import type { TaskStatusDef, StatusIcon } from "../api/client";
 import TaskOptionsSettings from "./TaskOptionsSettings";
+import TaskSyncSettings from "./TaskSyncSettings";
 import { flushSettingsNow } from "../lib/settingsSync";
 
 interface McpConnection {
@@ -164,6 +165,7 @@ const SETTINGS_SECTIONS: { id: string; title: string }[] = [
   { id: "analysisTags", title: "Analysis Tags" },
   { id: "taskStatuses", title: "Task Statuses" },
   { id: "taskOptions", title: "Task Priorities & Tags" },
+  { id: "tasksync", title: "Task Sync (Phone)" },
   { id: "updates", title: "Updates" },
   { id: "data", title: "Data" },
   { id: "git", title: "Data Sync (Git)" },
@@ -1584,6 +1586,10 @@ export default function SettingsPage({ open = true, onClose, firstRun, onDataPat
 
         <CollapsibleSection id="taskOptions" title="Task Priorities & Tags" open={!!openSections.taskOptions} onToggle={() => toggle("taskOptions")}>
           <TaskOptionsSettings />
+        </CollapsibleSection>
+
+        <CollapsibleSection id="tasksync" title="Task Sync (Google / Microsoft)">
+          <TaskSyncSettings />
         </CollapsibleSection>
 
         <CollapsibleSection id="updates" title="Updates" open={!!openSections.updates} onToggle={() => toggle("updates")}>

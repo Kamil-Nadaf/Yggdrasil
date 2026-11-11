@@ -383,3 +383,25 @@
 .pdfv-books .textLayer span.pdfv-find { background: rgba(255, 200, 0, 0.45); border-radius: 2px; }
 .pdfv-books .textLayer span.pdfv-find.cur { background: rgba(255, 140, 0, 0.7); outline: 2px solid rgba(255, 140, 0, 0.9); }
 @media (max-width: 760px) { .rsb { position: absolute; left: 0; top: 38px; bottom: 0; z-index: 15; box-shadow: 4px 0 14px rgba(0,0,0,0.3); } }
+
+/* Reader: resizable left panel, right notes panel, timer control */
+.rsb { position: relative; }
+.rsb-resize { position: absolute; top: 0; right: -4px; bottom: 0; width: 8px; cursor: col-resize; z-index: 5; }
+.rsb-resize:hover, .rsb-resize:focus-visible, body.rsb-dragging .rsb-resize { background: color-mix(in srgb, var(--accent, #7c6cd6) 55%, transparent); outline: none; }
+body.rsb-dragging { cursor: col-resize; user-select: none; }
+.rsb-presets { display: flex; gap: 4px; padding: 6px 8px; border-top: 1px solid var(--border); font-size: 11px; }
+.rsb-presets button { flex: 1; border: 1px solid var(--border); background: transparent; color: inherit; border-radius: 6px; padding: 3px 0; cursor: pointer; }
+.rsb-presets button.on { background: var(--accent, #7c6cd6); color: #fff; border-color: transparent; }
+.pdfv-rside { flex: 0 0 min(380px, 34%); min-width: 300px; display: flex; flex-direction: column; min-height: 0; background: var(--surface); border-left: 1px solid var(--border); }
+.pdfv-rside-tabs { display: flex; gap: 4px; padding: 8px; border-bottom: 1px solid var(--border); }
+.pdfv-rside-tabs button { flex: 1; border: 0; background: transparent; color: inherit; padding: 7px 0; border-radius: 7px; font: inherit; font-size: 13px; cursor: pointer; }
+.pdfv-rside-tabs button.on { background: var(--accent-soft, rgba(124,108,214,.2)); font-weight: 600; }
+.pdfv-rside-tabs em { font-style: normal; font-size: 11px; margin-left: 6px; opacity: .75; }
+.pdfv-rside-body { flex: 1; min-height: 0; flex-direction: column; overflow: auto; }
+.pdfv-rside .rn-pane { flex: 1; min-width: 0; border-left: 0; }
+.pdfv-rside .pdfv-notes-head { flex-wrap: wrap; gap: 6px; }
+.pdfv-topbar { min-width: 0; }
+.pdfv-topbar .pdfv-tb-title { flex: 1 1 80px; min-width: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rd-timer-btn { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border: 0; border-radius: 50%; background: var(--accent, #7c6cd6); color: #fff; cursor: pointer; padding: 0; }
+.rd-timer.paused { opacity: .85; }
+.rd-timer.paused .rd-timer-btn { background: #d9a13a; }

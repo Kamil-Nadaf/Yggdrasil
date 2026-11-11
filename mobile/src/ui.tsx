@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
+import { syncAll } from './syncAll';
 
 const P: Record<string, ReactNode> = {
   today: <><path d="M4 11l8-7 8 7v9H4z" /><path d="M10 20v-6h4v6" /></>,
@@ -63,13 +64,21 @@ export function Top({ back, title, right }: { back?: string; title?: ReactNode; 
 
 function SyncBtn() {
   const [busy, setBusy] = useState(false);
-  const go = () => {
+  const [msg, setMsg] = useState('');
+  const go = async () => {
     if (busy) return;
-    setBusy(true);
+    setBusy(true); setMsg('');
+    const problem = (await syncAll()).join(' · ');
     dispatchEvent(new Event('ygg-sync'));
-    setTimeout(() => setBusy(false), 1200);
+    setBusy(false);
+    if (problem) { setMsg(problem); setTimeout(() => setMsg(''), 8000); }
   };
-  return <button className={`iconbtn ${busy ? 'spin' : ''}`} aria-label="Sync now" title="Sync now" onClick={go}><Icon name="sync" /></button>;
+  return (
+    <>
+      <button className={`iconbtn ${busy ? 'spin' : ''}`} aria-label="Sync now" title="Sync now (Google Drive + Zotero)" onClick={go}><Icon name="sync" /></button>
+      {msg && <div className="syncmsg" role="status" onClick={() => setMsg('')}>{msg}</div>}
+    </>
+  );
 }
 
 export function Screen({ tab, children }: { tab?: string; children: ReactNode }) {

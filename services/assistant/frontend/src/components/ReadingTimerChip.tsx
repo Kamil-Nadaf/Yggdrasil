@@ -13,6 +13,9 @@ export default function ReadingTimerChip({ slug, pageRef }: { slug: string; page
   const [baseToday, setBaseToday] = useState(0);
   const [goalMinutes, setGoalMinutes] = useState(30);
   const [session, setSession] = useState(0);
+  const [paused, setPausedState] = useState(() => { try { return localStorage.getItem("yggdrasil:reader-paused") === "1"; } catch { return false; } });
+  const pausedRef = useRef(paused);
+  const setPaused = (v: boolean) => { pausedRef.current = v; setPausedState(v); try { localStorage.setItem("yggdrasil:reader-paused", v ? "1" : "0"); } catch { /* ignore */ } };
   const pending = useRef(0);
   const sessionRef = useRef(0);
   const lastInput = useRef(Date.now());
@@ -47,7 +50,7 @@ export default function ReadingTimerChip({ slug, pageRef }: { slug: string; page
 
     const tick = window.setInterval(() => {
       const active = document.visibilityState === "visible" && document.hasFocus() && Date.now() - lastInput.current < IDLE_LIMIT_MS;
-      if (!active || isManualRunning("books")) return; // the manual timer is already counting books
+      if (!active || pausedRef.current || isManualRunning("books")) return; // the manual timer is already counting books
       pending.current += 1;
       sessionRef.current += 1;
       setSession(sessionRef.current);
@@ -77,9 +80,12 @@ export default function ReadingTimerChip({ slug, pageRef }: { slug: string; page
   const total = baseToday + session;
   const goalS = goalMinutes * 60;
   const met = total >= goalS;
+  const label = paused ? "Resume reading timer" : total === 0 && session === 0 ? "Start reading timer" : "Pause reading timer";
   return (
-    <span className={`rd-timer${met ? " met" : ""}`} title="Active reading time today. Counts while this tab is focused and you are interacting.">
-      <span className="rd-timer-dot" aria-hidden="true" />
+    <span className={`rd-timer${met ? " met" : ""}${paused ? " paused" : ""}`} title="Active reading time today (same total as the Dashboard timer). Counts while this tab is focused and you are interacting.">
+      <button type="button" className="rd-timer-btn" onClick={() => setPaused(!paused)} aria-label={label} title={label}>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">{paused ? <path d="M8 5l11 7-11 7z" /> : <path d="M7 5h4v14H7zM13 5h4v14h-4z" />}</svg>
+      </button>
       <span className="mono">{formatClock(total)}</span>
       <span className="muted">/ {goalMinutes} min</span>
       {met && <span className="rd-timer-ok">goal reached ✓</span>}

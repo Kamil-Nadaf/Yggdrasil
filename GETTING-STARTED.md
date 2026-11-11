@@ -49,9 +49,7 @@ Open the gear icon → these sections, roughly most → least useful:
 |---|---|
 | **Appearance** | Theme, colours, and fonts — including uploading your own custom font files |
 | **Data** | Where your notes folder lives — change it here if you move it |
-| **Data Sync (Git)** | Back up your notes folder to a private GitHub repo. Paste a remote URL like `https://<token>@github.com/you/your-vault.git`, click **Init + Set Remote**, then **Sync Now**. (You'll need a [GitHub personal access token](https://github.com/settings/tokens) with repo access — treat it like a password.) |
-| **Data Sync (Cloud / WebDAV)** | Same idea, but to a WebDAV server (Nextcloud, etc.) instead of GitHub |
-| **Auto-Sync** | Run the Git/WebDAV sync above automatically on a timer instead of clicking Sync Now yourself |
+| **Sync** | Zotero keys (so “+ Add to Zotero” works) and **Google Drive** two-way sync of your whole vault. Create a Google OAuth web client (redirect URI shown on the page), connect, then use the **Sync** button above Settings. The Android app's sync button runs the same Drive sync via your server. (Git and WebDAV sync still exist in the code but are hidden from Settings.) |
 | **Weekly Score Digest** | Posts a weekly reading-progress summary to a Slack or Discord webhook URL |
 | **Connections** | Endpoint slots for MCP tools (Zotero, GitHub, etc.) you run yourself. Saving one here just stores the address — it doesn't set up or verify the connection, so treat this as a bookmark, not a live integration yet |
 | **Analysis Tags / Task Statuses** | Rename the CERIC reading slots or task-status labels if you want different words than Claim/Evidence/Reasoning/… |

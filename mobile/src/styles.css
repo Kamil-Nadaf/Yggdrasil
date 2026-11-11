@@ -196,6 +196,7 @@ a.btn { text-align: center; }
 .screen { position: relative; }
 .topbtns { position: absolute; top: calc(22px + env(safe-area-inset-top)); right: 10px; z-index: 5; display: flex; gap: 0; }
 .spin svg { animation: sp 1s linear infinite; }
+.syncmsg { position: fixed; top: calc(70px + env(safe-area-inset-top)); right: 10px; z-index: 20; max-width: 260px; padding: 10px 12px; border-radius: 10px; font-size: 13px; line-height: 1.4; background: var(--surface); color: var(--text, #fff); border: 1px solid var(--line, #444); box-shadow: 0 6px 20px rgba(0,0,0,.3); }
 @keyframes sp { to { transform: rotate(360deg); } }
 /* ---- Paper ---- */
 :root[data-theme="paper"] .card { border: 1px solid var(--line); border-radius: 0; box-shadow: none; }
@@ -292,3 +293,40 @@ a.btn { text-align: center; }
 :root[data-theme="notebook"] .tile .ttl { font-family: var(--head); font-size: 20px; }
 :root[data-theme="notebook"] .viewtoggle { border: 1.5px solid var(--line); border-radius: var(--wob-s); }
 .heatcol i { border: 1px solid color-mix(in srgb, var(--line) 60%, transparent); box-sizing: border-box; }
+
+/* Activity heatmap — same shape as the desktop one: habit rows × day columns */
+.hm { display: flex; gap: 8px; margin-top: 10px; }
+.hm-labels { flex: none; display: flex; flex-direction: column; gap: 4px; }
+.hm-corner, .hm-head { height: 22px; }
+.hm-label { height: 20px; line-height: 20px; font-size: 11px; color: var(--muted); white-space: nowrap; max-width: 84px; overflow: hidden; text-overflow: ellipsis; }
+.hm-tasks { margin-top: 4px; }
+.hm-scroll { flex: 1; min-width: 0; overflow-x: auto; display: flex; flex-direction: column; gap: 4px; }
+.hm-head, .hm-row { display: flex; gap: 4px; width: max-content; }
+.hm-day { width: 20px; height: 22px; padding: 0; border: 0; background: none; font-size: 10px; color: var(--muted); border-radius: 5px; }
+.hm-day.today { color: var(--text); font-weight: 700; }
+.hm-day.sel { background: var(--accent); color: var(--on-accent); }
+.hm-cell { display: block; width: 20px; height: 20px; border-radius: 4px; background: var(--raise2); box-sizing: border-box; flex: none; }
+.hm-cell.l1 { background: color-mix(in srgb, var(--accent) 45%, var(--raise2)); }
+.hm-cell.l2 { background: color-mix(in srgb, var(--accent) 75%, var(--raise2)); }
+.hm-cell.l3 { background: var(--accent); }
+.hm-cell.sel { outline: 2px solid var(--text); outline-offset: 1px; }
+.hm-legend { display: flex; justify-content: flex-end; align-items: center; gap: 4px; margin-top: 10px; }
+.hm-legend .hm-cell { width: 12px; height: 12px; border-radius: 3px; }
+.hm-detail { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.hm-task { margin-top: 4px; }
+
+.seg { display: flex; border: 1px solid var(--line2); border-radius: 12px; overflow: hidden; margin-top: 6px; }
+.segbtn { flex: 1; min-height: 44px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 14px; }
+.segbtn + .segbtn { border-left: 1px solid var(--line2); }
+.segbtn.on { background: var(--accent); color: var(--on-accent); }
+.brand { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.brand .logo { width: 34px; height: 34px; margin: 0; }
+.brand .wordmark { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+
+.row-more, .tile-more { position: absolute; top: 6px; right: 6px; width: 36px; height: 36px; font-size: 20px; line-height: 1; z-index: 2; }
+.paperrow, .tile { position: relative; }
+.paperrow .lead { padding-right: 40px; }
+.sheet-scrim { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.45); display: flex; align-items: flex-end; }
+.sheet { width: 100%; max-width: 560px; margin: 0 auto; background: var(--surface); border-radius: 18px 18px 0 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 4px; }
+.sheet .grow { min-height: 48px; padding: 0 4px; border-top: 1px solid var(--line); }
+.sheet .danger { color: #e5484d; }

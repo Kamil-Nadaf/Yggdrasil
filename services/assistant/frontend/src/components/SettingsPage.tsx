@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, Fragment, useContext, useEffect, useState, type ReactNode } from "react";
 import AbstractText from "./AbstractText";
 import { api } from "../api/client";
 
@@ -60,6 +60,9 @@ import { DEFAULT_TASK_STATUSES, setCachedTaskStatuses, STATUS_ICON_GLYPH, STATUS
 import type { TaskStatusDef, StatusIcon } from "../api/client";
 import TaskOptionsSettings from "./TaskOptionsSettings";
 import TaskSyncSettings from "./TaskSyncSettings";
+import StorageBars from "./StorageBars";
+import DriveSyncSettings from "./DriveSyncSettings";
+import { consumePendingSettingsSection } from "../lib/driveSync";
 import { flushSettingsNow } from "../lib/settingsSync";
 
 interface McpConnection {
@@ -156,24 +159,15 @@ declare global {
 /** Settings is a full page: the section list on the left picks which one is shown on the right. */
 const SettingsActiveCtx = createContext<string | null>(null);
 
-const SETTINGS_SECTIONS: { id: string; title: string }[] = [
-  { id: "appearance", title: "Appearance" },
-  { id: "zotero", title: "Zotero" },
-  { id: "ai", title: "AI Providers" },
-  { id: "account", title: "Account" },
-  { id: "editor", title: "Editor" },
-  { id: "analysisTags", title: "Analysis Tags" },
-  { id: "taskStatuses", title: "Task Statuses" },
-  { id: "taskOptions", title: "Task Priorities & Tags" },
-  { id: "tasksync", title: "Task Sync (Phone)" },
-  { id: "updates", title: "Updates" },
-  { id: "data", title: "Data" },
-  { id: "git", title: "Data Sync (Git)" },
-  { id: "webdav", title: "Data Sync (Cloud / WebDAV)" },
-  { id: "autosync", title: "Auto-Sync" },
-  { id: "webhook", title: "Weekly Score Digest (Webhook)" },
-  { id: "connections", title: "Connections" },
-  { id: "about", title: "About" },
+const SETTINGS_SECTIONS: { id: string; title: string; group: string; includes: string[] }[] = [
+  { id: "appearance", title: "Appearance", group: "You", includes: ["appearance"] },
+  { id: "reading", title: "Reading & editor", group: "You", includes: ["editor", "analysisTags"] },
+  { id: "account", title: "Account", group: "You", includes: ["account"] },
+  { id: "tasks", title: "Tasks", group: "Workspace", includes: ["taskStatuses", "taskOptions", "tasksync"] },
+  { id: "sync", title: "Sync", group: "Workspace", includes: ["sync"] },
+  { id: "ai", title: "AI & integrations", group: "Connect", includes: ["ai", "connections", "webhook"] },
+  { id: "data", title: "Backup & data", group: "Data", includes: ["data"] },
+  { id: "about", title: "About", group: "Data", includes: ["about", "updates"] },
 ];
 
 function CollapsibleSection({
@@ -188,7 +182,8 @@ function CollapsibleSection({
   children: ReactNode;
 }) {
   const active = useContext(SettingsActiveCtx);
-  if (active !== id) return null;
+  const shown = SETTINGS_SECTIONS.find((x) => x.id === active)?.includes ?? [active ?? ""];
+  if (!shown.includes(id)) return null;
   return (
     <section className="settings-section settings-section--page" id={id}>
       <h3>{title}</h3>
@@ -197,8 +192,14 @@ function CollapsibleSection({
   );
 }
 
+// Git / WebDAV / Auto-Sync sections below are still implemented but not listed in the nav (Google Drive sync replaces them for now).
 export default function SettingsPage({ open = true, onClose, firstRun, onDataPathSaved }: Props) {
-  const [active, setActive] = useState(firstRun ? "data" : "appearance");
+  const [active, setActive] = useState(() => (firstRun ? "data" : consumePendingSettingsSection() || "appearance"));
+  useEffect(() => {
+    const h = (e: Event) => { const id = (e as CustomEvent<string>).detail; if (id) { consumePendingSettingsSection(); setActive(id); } };
+    window.addEventListener("ygg:settings-section", h);
+    return () => window.removeEventListener("ygg:settings-section", h);
+  }, []);
   const [settings, setSettings] = useState<SettingsState>(() => ({
     theme: (() => {
       const raw = localStorage.getItem("theme") || DEFAULT_THEME;
@@ -854,15 +855,17 @@ export default function SettingsPage({ open = true, onClose, firstRun, onDataPat
       </div>
       <div className="settings-page-main">
         <nav className="settings-page-nav" aria-label="Settings sections">
-          {SETTINGS_SECTIONS.map((sec) => (
-            <button
-              key={sec.id}
-              type="button"
-              className={`settings-page-navitem${active === sec.id ? " active" : ""}`}
-              onClick={() => setActive(sec.id)}
-            >
-              {sec.title}
-            </button>
+          {SETTINGS_SECTIONS.map((sec, i) => (
+            <Fragment key={sec.id}>
+              {(i === 0 || SETTINGS_SECTIONS[i - 1].group !== sec.group) && <div className="settings-page-navgroup">{sec.group}</div>}
+              <button
+                type="button"
+                className={`settings-page-navitem${active === sec.id ? " active" : ""}`}
+                onClick={() => setActive(sec.id)}
+              >
+                {sec.title}
+              </button>
+            </Fragment>
           ))}
         </nav>
         <div className="settings-page-pane">
@@ -1185,7 +1188,9 @@ export default function SettingsPage({ open = true, onClose, firstRun, onDataPat
           )}
         </CollapsibleSection>
 
-        <CollapsibleSection id="zotero" title="Zotero" open={!!openSections.zotero} onToggle={() => toggle("zotero")}>
+        <CollapsibleSection id="sync" title="Sync" open={!!openSections.zotero} onToggle={() => toggle("zotero")}>
+          <StorageBars />
+          <h4 className="settings-subhead">Zotero</h4>
           <div className="settings-info" style={{ marginBottom: 8 }}>
             Lets “+ Add to Zotero” save papers to your library.
             <ol style={{ margin: "6px 0 0 18px", padding: 0 }}>
@@ -1206,6 +1211,8 @@ export default function SettingsPage({ open = true, onClose, firstRun, onDataPat
           <button type="button" className="btn btn-primary" onClick={saveZotero} disabled={!zUser.trim() && !zKey.trim()}>Save</button>
           {zInfo?.source === "env" && <div className="settings-info" style={{ marginTop: 6 }}>Currently using ZOTERO_USER_ID / ZOTERO_API_KEY from the environment (.env).</div>}
           {zMsg && <div className="settings-info" style={{ marginTop: 6 }}>{zMsg}</div>}
+          <h4 className="settings-subhead" style={{ marginTop: 28 }}>Google Drive (two-way, desktop + Android)</h4>
+          <DriveSyncSettings />
         </CollapsibleSection>
 
         <CollapsibleSection id="ai" title="AI Providers" open={!!openSections.ai} onToggle={() => toggle("ai")}>

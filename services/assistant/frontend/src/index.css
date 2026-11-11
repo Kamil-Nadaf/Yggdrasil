@@ -5630,3 +5630,26 @@ h2 { font-size: 15px; color: var(--accent); }
 .tasksync-help ol { margin: 8px 0 0; padding-left: 20px; line-height: 1.55; }
 .tasksync-copy { display: flex; align-items: center; gap: 8px; margin: 8px 0; flex-wrap: wrap; font-size: 12px; }
 .tasksync-copy code { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+/* Google Drive sync: nav button + toast */
+@keyframes ygSpin { to { transform: rotate(360deg); } }
+.side-sync { position: relative; }
+.side-sync.running svg { animation: ygSpin 1s linear infinite; }
+.side-sync:disabled { opacity: .8; cursor: progress; }
+.side-sync.bad { color: var(--crit, #d9534f); }
+.side-sync-dot { position: absolute; top: 8px; left: 24px; width: 8px; height: 8px; border-radius: 50%; background: var(--crit, #d9534f); }
+.sync-toast { position: fixed; left: 72px; bottom: 16px; z-index: 1200; width: 320px; max-width: calc(100vw - 96px); padding: 12px 14px; border-radius: 10px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-left: 4px solid var(--accent); box-shadow: 0 8px 28px rgba(0,0,0,.3); font-size: 13px; line-height: 1.45; }
+.sync-toast.error { border-left-color: var(--crit, #d9534f); }
+.sync-toast.warn, .sync-toast.confirm { border-left-color: #e0a030; }
+.sync-toast-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.settings-subhead { margin: 4px 0 10px; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); }
+
+.settings-page-navgroup{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted,#6b6860);margin:16px 10px 4px}
+.settings-page-navgroup:first-child{margin-top:4px}
+
+.storage-bars{display:grid;gap:14px;margin-bottom:22px}
+.storage-bar{border:1px solid var(--border,#ddd9d0);border-radius:10px;padding:12px 14px}
+.storage-bar-head{display:flex;justify-content:space-between;font-size:14px;margin-bottom:8px}
+.storage-bar-track{height:8px;border-radius:4px;background:rgba(128,128,128,.2);overflow:hidden}
+.storage-bar-fill{height:100%;background:var(--accent,#1c1b19)}
+.storage-bar-foot{font-size:12px;margin-top:6px}

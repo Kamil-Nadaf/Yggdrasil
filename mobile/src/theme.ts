@@ -22,6 +22,7 @@ export function applyTheme() {
   const { theme, accent } = getState().settings;
   const root = document.documentElement;
   root.dataset.theme = theme;
+  root.style.fontSize = `${getState().settings.textScale || 100}%`;
   if (accent && theme !== 'paper') { root.style.setProperty('--accent', accent); root.style.setProperty('--on-accent', theme === 'notebook' && onAccent(accent) === '#FFFFFF' ? '#fbf3e4' : onAccent(accent)); }
   else { root.style.removeProperty('--accent'); root.style.removeProperty('--on-accent'); }
   document.querySelector('meta[name=theme-color]')?.setAttribute('content', THEMES.find((t) => t.id === theme)?.meta || '#0F0F10');

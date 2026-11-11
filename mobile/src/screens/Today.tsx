@@ -22,7 +22,7 @@ export default function Today() {
     <Screen tab="today">
       <header className="top big">
         <div>
-          <span className="logo" role="img" aria-label="Yggdrasil" />
+          <div className="brand"><span className="logo" role="img" aria-label="Yggdrasil logo" /><span className="wordmark">Yggdrasil</span></div>
           <h1>Today</h1>
           <div className="sub">{new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' })}</div>
         </div>

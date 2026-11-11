@@ -65,6 +65,11 @@ export default function Shelf({ books, collections, mode, onOpen, onAttach, onIn
   const menuFor = (b: ReadingBook) => menu === b.slug && (
     <div className="ab-menu card" role="menu">
       <button type="button" role="menuitem" onClick={() => { setMenu(null); onInfo(b); }}>Show info &amp; cite…</button>
+      <button type="button" role="menuitem" onClick={() => {
+        const name = window.prompt("Rename", b.title)?.trim();
+        if (name && name !== b.title) void run(() => reading.patch(b.slug, { title: name }));
+        else setMenu(null);
+      }}>Rename…</button>
       <button type="button" role="menuitem" onClick={() => void run(() => reading.patch(b.slug, { favorite: !b.favorite }))}>{b.favorite ? "Remove from Favorites" : "Add to Favorites"}</button>
       <div className="ab-menu-sep" role="separator" />
       {b.status !== "reading" && <button type="button" role="menuitem" onClick={() => void run(() => reading.patch(b.slug, { status: "reading" }))}>Mark as reading</button>}

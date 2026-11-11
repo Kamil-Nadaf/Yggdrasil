@@ -73,4 +73,4 @@ cd e2e && npm i && BASE=http://localhost:8080 SYNC_TOKEN=... npm test   # needs 
 
 - Highlights/annotations in the phone PDF reader, books (EPUB), the Loki assistant, graph view, calendar editing.
 - Offline editing: notes and LaTeX need the backend reachable (reading cached PDFs works offline over HTTPS).
-- Google Drive sync: the vault is shared through the backend instead, so there is nothing to sync.
+- Google Drive sync inside phone-only mode (use the Export/Import backup above, or connect to a server). In server mode the top-right **sync** button first runs the backend's Google Drive sync (when set up in desktop Settings → Sync), then refreshes.

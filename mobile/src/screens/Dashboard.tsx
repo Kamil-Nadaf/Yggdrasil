@@ -106,41 +106,59 @@ export function ReadingTimer() {
   );
 }
 
-function Heat({ label, values, start, end, max }: { label: string; values: Record<string, number>; start: string; end: string; max: number }) {
-  const cells: { date: string; v: number }[] = [];
-  for (let d = start; d <= end; d = addDays(d, 1)) cells.push({ date: d, v: values[d] || 0 });
-  const first = new Date(cells[0].date + 'T12:00:00').getDay();
-  const pad = (first + 6) % 7; // Monday first
-  const all = [...Array(pad).fill(null), ...cells];
-  const weeks: (typeof cells[number] | null)[][] = [];
-  for (let i = 0; i < all.length; i += 7) weeks.push(all.slice(i, i + 7));
-  return (
-    <div className="mt">
-      <div className="muted sm">{label}</div>
-      <div className="heat">
-        {weeks.map((w, i) => (
-          <div key={i} className="heatcol">
-            {w.map((c, j) => <i key={j} title={c ? `${c.date}: ${c.v}` : ''} style={c ? { opacity: c.v ? 0.25 + 0.75 * Math.min(1, c.v / max) : 1, background: c.v ? 'var(--accent)' : 'var(--raise2)' } : { visibility: 'hidden' }} />)}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 const countHabits = (h: Record<string, unknown>) => HABITS.filter(([k]) => h[k] === true).length;
+type HabitDay = { date: string; habits: Record<string, unknown> };
+type TaskDay = { date: string; count: number; names?: string[] };
 
+/** Same layout as the desktop Dashboard heatmap: one row per habit, one column per day, plus a "Subtasks done" row. Tap a day for details. */
 export function ActivityHeatmap() {
   const today = isoDay();
-  const start = addDays(today, -7 * 15 - ((new Date().getDay() + 6) % 7));
-  const habits = useY<{ days: { date: string; habits: Record<string, unknown> }[] }>(`/api/habits/range?start=${start}&end=${today}`, { days: [] });
-  const tasks = useY<{ days: { date: string; count: number }[] }>(`/api/tasks/completed-by-day?start=${start}&end=${today}`, { days: [] });
+  const DAYS = 28;
+  const start = addDays(today, -(DAYS - 1));
+  const habits = useY<{ days: HabitDay[] }>(`/api/habits/range?start=${start}&end=${today}`, { days: [] });
+  const tasks = useY<{ days: TaskDay[] }>(`/api/tasks/completed-by-day?start=${start}&end=${today}`, { days: [] });
+  const [sel, setSel] = useState(today);
+  const days: string[] = [];
+  for (let i = 0; i < DAYS; i++) days.push(addDays(start, i));
+  const hmap = Object.fromEntries(habits.data.days.map((d) => [d.date, d.habits || {}]));
+  const tmap = Object.fromEntries(tasks.data.days.map((d) => [d.date, d]));
+  const maxT = Math.max(3, ...tasks.data.days.map((d) => d.count));
+  const level = (v: number, max: number) => (v <= 0 ? 0 : Math.min(3, Math.max(1, Math.ceil((v / max) * 3))));
+  const label = (d: string) => new Date(d + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+  const hs = (hmap[sel] || {}) as Record<string, unknown>;
+  const doneHabits = HABITS.filter(([k]) => hs[k] === true);
+  const st = tmap[sel];
+  const scroller = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (scroller.current) scroller.current.scrollLeft = scroller.current.scrollWidth; }, [habits.data.days.length]);
   return (
     <section className="card">
-      <b>Activity</b>
+      <div className="row between"><b>Activity</b><span className="muted sm">Last {DAYS} days</span></div>
       <Err text={habits.err || tasks.err} />
-      <Heat label="Habits" start={start} end={today} max={HABITS.length} values={Object.fromEntries(habits.data.days.map((d) => [d.date, countHabits(d.habits || {})]))} />
-      <Heat label="Tasks completed" start={start} end={today} max={Math.max(3, ...tasks.data.days.map((d) => d.count))} values={Object.fromEntries(tasks.data.days.map((d) => [d.date, d.count]))} />
+      <div className="hm">
+        <div className="hm-labels">
+          <div className="hm-corner" />
+          {HABITS.map(([k, l]) => <div key={k} className="hm-label">{l}</div>)}
+          <div className="hm-label hm-tasks">Subtasks done</div>
+        </div>
+        <div className="hm-scroll" ref={scroller}>
+          <div className="hm-head">{days.map((d) => <button key={d} className={`hm-day${d === sel ? ' sel' : ''}${d === today ? ' today' : ''}`} onClick={() => setSel(d)} aria-label={label(d)}>{Number(d.slice(8))}</button>)}</div>
+          {HABITS.map(([k]) => (
+            <div key={k} className="hm-row">
+              {days.map((d) => <i key={d} onClick={() => setSel(d)} className={`hm-cell${(hmap[d] as Record<string, unknown> | undefined)?.[k] === true ? ' l3' : ''}${d === sel ? ' sel' : ''}`} />)}
+            </div>
+          ))}
+          <div className="hm-row hm-tasks">
+            {days.map((d) => { const n = tmap[d]?.count || 0; return <i key={d} onClick={() => setSel(d)} className={`hm-cell${n ? ` l${level(n, maxT)}` : ''}${d === sel ? ' sel' : ''}`} />; })}
+          </div>
+        </div>
+      </div>
+      <div className="hm-legend muted sm"><span>Less</span><i className="hm-cell" /><i className="hm-cell l1" /><i className="hm-cell l2" /><i className="hm-cell l3" /><span>More</span></div>
+      <div className="hm-detail">
+        <div className="row between"><b className="sm">{label(sel)}</b><span className="muted sm">{doneHabits.length} of {HABITS.length} habits · {st?.count || 0} tasks</span></div>
+        {doneHabits.length > 0 && <div className="sm" style={{ marginTop: 6 }}>{doneHabits.map(([, l]) => l).join(' · ')}</div>}
+        {(st?.names || []).map((n, i) => <div key={i} className="sm hm-task">✓ {n}</div>)}
+        {!doneHabits.length && !(st?.count) && <div className="muted sm" style={{ marginTop: 6 }}>Nothing logged. Tap any day to see what you did.</div>}
+      </div>
     </section>
   );
 }

@@ -20,26 +20,26 @@ interface Props {
   hitIndex: number;
   searching: { done: number; total: number } | null;
   onHit: (i: number) => void;
-  notesCount: number;
-  notes: ReactNode;
+  notesCount?: number;
+  notes?: ReactNode;
+  width?: number;
+  onWidth?: (w: number) => void;
 }
 
 const TABS: { id: SidebarTab; icon: "contents" | "grid" | "search" | "annot"; label: string }[] = [
   { id: "toc", icon: "contents", label: "Contents" },
   { id: "thumbs", icon: "grid", label: "Pages" },
   { id: "search", icon: "search", label: "Search results" },
-  { id: "notes", icon: "annot", label: "Highlights & notes" },
 ];
 
 /** Apple-Books-style left sidebar: table of contents, page thumbnails, search results, annotations. */
 export default function ReaderSidebar(p: Props) {
   return (
-    <aside className="rsb" aria-label="Reader sidebar">
+    <aside className="rsb" aria-label="Reader sidebar" style={p.width ? { flexBasis: p.width, width: p.width } : undefined}>
       <div className="rsb-tabs" role="tablist">
         {TABS.map((t) => (
           <button key={t.id} type="button" role="tab" aria-selected={p.tab === t.id} className={`rsb-tab${p.tab === t.id ? " on" : ""}`} title={t.label} onClick={() => p.onTab(t.id)}>
             <BookIcon name={t.icon} size={16} />
-            {t.id === "notes" && p.notesCount > 0 && <em>{p.notesCount}</em>}
             {t.id === "search" && p.hits.length > 0 && <em>{p.hits.length > 999 ? "999+" : p.hits.length}</em>}
           </button>
         ))}
@@ -48,8 +48,8 @@ export default function ReaderSidebar(p: Props) {
         {p.tab === "toc" && <Outline pdf={p.pdf} onJump={p.onJump} />}
         {p.tab === "thumbs" && <Thumbs pdf={p.pdf} ratio={p.ratio} current={p.current} onJump={p.onJump} />}
         {p.tab === "search" && <Results {...p} />}
-        {p.tab === "notes" && p.notes}
       </div>
+      {p.onWidth && <Resizer width={p.width || 240} onWidth={p.onWidth} />}
     </aside>
   );
 }
@@ -171,4 +171,30 @@ function highlight(text: string, q: string): ReactNode {
   const i = text.toLowerCase().indexOf(q.toLowerCase());
   if (i < 0) return text;
   return <>{text.slice(0, i)}<mark>{text.slice(i, i + q.length)}</mark>{text.slice(i + q.length)}</>;
+}
+
+
+/** Drag handle on the sidebar's right edge (also keyboard: ← → keys, and S / M / L presets). */
+function Resizer({ width, onWidth }: { width: number; onWidth: (w: number) => void }) {
+  const clamp = (n: number) => Math.min(560, Math.max(200, Math.round(n)));
+  function down(e: React.PointerEvent<HTMLDivElement>) {
+    e.preventDefault();
+    const startX = e.clientX, startW = width;
+    const move = (ev: PointerEvent) => onWidth(clamp(startW + ev.clientX - startX));
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); document.body.classList.remove("rsb-dragging"); };
+    document.body.classList.add("rsb-dragging");
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+  return (
+    <>
+      <div className="rsb-presets" role="group" aria-label="Sidebar width">
+        {[["S", 220], ["M", 300], ["L", 420]].map(([l, w]) => (
+          <button key={l} type="button" className={Math.abs(width - (w as number)) < 20 ? "on" : ""} onClick={() => onWidth(w as number)} title={`${w}px`}>{l}</button>
+        ))}
+      </div>
+      <div className="rsb-resize" role="separator" aria-orientation="vertical" aria-label="Drag to resize the sidebar" tabIndex={0} onPointerDown={down}
+        onKeyDown={(e) => { if (e.key === "ArrowLeft") onWidth(clamp(width - 20)); if (e.key === "ArrowRight") onWidth(clamp(width + 20)); }} />
+    </>
+  );
 }

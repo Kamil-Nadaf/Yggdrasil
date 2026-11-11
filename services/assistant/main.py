@@ -1603,6 +1603,28 @@ class ZoteroCredsPayload(BaseModel):
     user_id: str = ""
     api_key: str = ""
 
+@app.get("/api/zotero/storage")
+async def zotero_storage():
+    """Zotero usage: library item count (Web API) + size of papers/books kept on this device. Plan size is editable (default 300 MB)."""
+    import httpx as _httpx
+    from zotero import zotero_credentials
+    uid, key = zotero_credentials()
+    if not (uid and key):
+        return {}
+    count = None
+    try:
+        r = await asyncio.to_thread(lambda: _httpx.get(f"https://api.zotero.org/users/{uid}/items?limit=1&format=json", headers={"Zotero-API-Key": key}, timeout=20))
+        count = int(r.headers.get("Total-Results", "0")) if r.status_code == 200 else None
+    except Exception:
+        pass
+    used = 0
+    for sub in ("10-Papers", "15-Books"):
+        d = VAULT / sub
+        if d.is_dir():
+            used += sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
+    total = int(os.environ.get("ZOTERO_PLAN_BYTES", 300 * 1024 * 1024))
+    return {"used": used, "total": total, "free": max(total - used, 0), "items": count}
+
 
 @app.get("/api/settings/zotero")
 async def zotero_creds_get():
@@ -3764,6 +3786,7 @@ async def tasks_completed_by_day(start: str, end: str):
     if (end_d - start_d).days > 400:
         raise HTTPException(status_code=400, detail="range too large (max 400 days)")
     counts: dict[str, int] = {}
+    names: dict[str, list[str]] = {}
     for d in tasks_dir().iterdir():
         if not d.is_dir():
             continue
@@ -3774,7 +3797,10 @@ async def tasks_completed_by_day(start: str, end: str):
                 continue
             day = str(completed_at)[:10]
             counts[day] = counts.get(day, 0) + 1
-    return {"days": [{"date": d.isoformat(), "count": counts.get(d.isoformat(), 0)}
+            title = str(post.metadata.get("title") or post.metadata.get("name") or p.stem)
+            if len(names.setdefault(day, [])) < 12:
+                names[day].append(title)
+    return {"days": [{"date": d.isoformat(), "count": counts.get(d.isoformat(), 0), "names": names.get(d.isoformat(), [])}
                       for d in (start_d + timedelta(days=i) for i in range((end_d - start_d).days + 1))]}
 
 
@@ -4942,6 +4968,42 @@ async def _tasksync_loop():
         await asyncio.sleep(_TASKSYNC_EVERY_SECONDS)
 
 
+# ── Google Drive sync: whole vault <-> one Drive folder, two-way ──────────────
+# Merge logic, conflict copies and OAuth live in drive_sync.py. Tokens go in
+# .ygg-config/drive-sync.json (git-ignored, mode 600); the Google client can be
+# the one already entered for Task Sync.
+from drive_sync import auto_due as _drivesync_due, make_router as _drivesync_router, run_sync as _drivesync_run
+
+
+def _drivesync_path() -> Path:
+    return _tasksync_path().with_name("drive-sync.json")
+
+
+def _drivesync_fallback() -> tuple[str, str]:
+    try:
+        from task_sync import load_config as _ts_load
+
+        g = _ts_load(_tasksync_path())["google"]
+        return g.get("client_id", ""), g.get("client_secret", "")
+    except Exception:
+        return "", ""
+
+
+app.include_router(_drivesync_router(_drivesync_path, lambda: VAULT, _drivesync_fallback, _tasksync_open_browser))
+
+
+async def _drivesync_loop():
+    await asyncio.sleep(60)
+    while True:
+        try:
+            path = _drivesync_path()
+            if await asyncio.to_thread(_drivesync_due, path, _drivesync_fallback()):
+                await asyncio.to_thread(_drivesync_run, path, VAULT, _drivesync_fallback())
+        except Exception:
+            pass
+        await asyncio.sleep(60)
+
+
 @app.get("/api/tasks/calendar")
 async def tasks_calendar():
     """Main tasks and subtasks with a deadline — feeds the Calendar view."""
@@ -5015,6 +5077,7 @@ async def _start_background_loops():
     asyncio.create_task(_weekly_digest_loop())
     asyncio.create_task(_deadline_reminder_loop())
     asyncio.create_task(_tasksync_loop())
+    asyncio.create_task(_drivesync_loop())
 
 
 # ── Full-text search over your own notes (not vector search — exact substring,

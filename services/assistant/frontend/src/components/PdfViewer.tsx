@@ -273,6 +273,10 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
   const [toolColor, setToolColor] = useState("#e5484d");
   const [notesOpen, setNotesOpen] = useState(false);
   const [rnOpen, setRnOpen] = useState(false);
+  const [rsOpen, setRsOpen] = useState(() => { try { return localStorage.getItem("reader-rside") !== "0"; } catch { return true; } });
+  const [rsTab, setRsTab] = useState<"paper" | "mine">("paper");
+  const [sbW, setSbW] = useState(() => { try { return Number(localStorage.getItem("reader-sb-w")) || 280; } catch { return 280; } });
+  useEffect(() => { try { localStorage.setItem("reader-sb-w", String(sbW)); localStorage.setItem("reader-rside", rsOpen ? "1" : "0"); } catch { /* ignore */ } }, [sbW, rsOpen]);
   const [rnQueue, setRnQueue] = useState<string[]>([]);
   const [rnSrc, setRnSrc] = useState("");
   const embedded = !!doc.embedded;
@@ -290,7 +294,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
   const sbOpen = embedded && !sbHidden;
   /** Show the highlights/notes list: in the sidebar (Collection reader) or the drawer below the pages. */
   function openNotes() {
-    if (embedded) { setSbHidden(false); setSbTab("notes"); } else setNotesOpen(true);
+    if (embedded) { setRsOpen(true); setRsTab("paper"); } else setNotesOpen(true);
   }
   const [focusId, setFocusId] = useState<string | null>(null);
   /** Send an annotation (quote + your comment + page) into the "My notes" markdown note. */
@@ -299,10 +303,11 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
     const lines = [q ? `> ${q}` : `> (page note)`, `> — p. ${a.page}`];
     if (a.note) lines.push("", a.note);
     setRnOpen(true);
+    if (embedded) { setRsOpen(true); setRsTab("mine"); }
     setRnQueue((x) => [...x, lines.join("\n")]);
   }
   const inNotes = (a: Ann) => !!a.text && rnSrc.includes(a.text.replace(/\s+/g, " ").trim().slice(0, 40));
-  const rnPane = rnOpen ? (
+  const rnPane = rnOpen && !embedded ? (
     <ReaderNotes title={doc.title} page={curPage} queue={rnQueue} onQueueDone={() => setRnQueue([])} onSource={setRnSrc} onClose={() => setRnOpen(false)} />
   ) : null;
   const [textFail, setTextFail] = useState(false);
@@ -820,22 +825,36 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
           <span className="pdfv-tb-tools">{toolButtons}</span>
           {tool !== "select" && <span className="pdfv-hint">Esc</span>}
           <span className="pdfv-tb-sep" />
-          <button type="button" className={ib(rnOpen)} onClick={() => setRnOpen((v) => !v)} title="My notes" aria-pressed={rnOpen}>My notes</button>
+          <span className="pdfv-tb-sep" />
           {trail}
+          <button type="button" className={ib(rsOpen)} onClick={() => setRsOpen((v) => !v)} aria-pressed={rsOpen} title={rsOpen ? "Hide notes panel" : "Show notes panel (highlights and my notes)"}>
+            <BookIcon name="annot" size={17} />{anns.length > 0 && <em className="pdfv-badge">{anns.length}</em>}
+          </button>
         </div>
         <div className="pdfv-body">
           {sbOpen && (
             <ReaderSidebar
               pdf={pdf} ratio={ratio} current={curPage} onJump={jumpTo} tab={sbTab} onTab={setSbTab}
               query={findQ} hits={hits} hitIndex={hitIdx} searching={findBusy} onHit={(i) => goHit(i)}
-              notesCount={anns.length} notes={notesList}
+              width={sbW} onWidth={setSbW}
             />
           )}
           <div className="pdfv-stage">
             {floating}
             {pagesEl}
           </div>
-          {rnPane}
+          {rsOpen && (
+            <aside className="pdfv-rside" aria-label="Notes panel">
+              <div className="pdfv-rside-tabs" role="tablist">
+                <button type="button" role="tab" aria-selected={rsTab === "paper"} className={rsTab === "paper" ? "on" : ""} onClick={() => setRsTab("paper")}>This paper{anns.length > 0 && <em>{anns.length}</em>}</button>
+                <button type="button" role="tab" aria-selected={rsTab === "mine"} className={rsTab === "mine" ? "on" : ""} onClick={() => { setRnOpen(true); setRsTab("mine"); }}>My notes</button>
+              </div>
+              <div className="pdfv-rside-body" style={{ display: rsTab === "paper" ? "flex" : "none" }}>{notesList}</div>
+              <div className="pdfv-rside-body" style={{ display: rsTab === "mine" ? "flex" : "none" }}>
+                {(rnOpen || rsTab === "mine") && <ReaderNotes title={doc.title} page={curPage} queue={rnQueue} onQueueDone={() => setRnQueue([])} onSource={setRnSrc} onClose={() => setRsTab("paper")} />}
+              </div>
+            </aside>
+          )}
         </div>
       </div>
     );

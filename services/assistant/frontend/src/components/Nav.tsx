@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import type { View } from "../App";
 import YggdrasilLogo from "./YggdrasilLogo";
+import { dismissDriveToast, requestSettingsSection, runDriveSync, startDrivePolling, useDriveSync } from "../lib/driveSync";
 
 export type NotesTab = "editor" | "collection" | "quick-notes" | "documentation" | "meeting-minutes";
 export type TasksTab = "planner" | "list" | "board";
@@ -51,6 +52,18 @@ interface Props {
 const KEY = "yg-sidebar-collapsed";
 
 export default function Nav({ current, onNavigate, subs, onSub, onSettingsOpen, onPageEdit, pageEditOpen }: Props) {
+  const drive = useDriveSync();
+  useEffect(() => startDrivePolling(), []);
+  const dst = drive.status;
+  const driveBad = !!dst && dst.connected && (dst.needs_reconnect || (dst.last_result ? !dst.last_result.ok && !dst.last_result.needs_confirm : false));
+  const driveTitle = !dst?.connected
+    ? "Set up Google Drive sync"
+    : drive.running ? "Syncing with Google Drive…"
+    : `Sync with Google Drive${dst.last_run ? ` (last: ${new Date(dst.last_run).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })})` : ""}`;
+  function onSync() {
+    if (!dst?.connected) { requestSettingsSection("sync"); onSettingsOpen?.(); return; }
+    void runDriveSync();
+  }
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem(KEY) === "1"; } catch { return false; }
   });
@@ -108,15 +121,26 @@ export default function Nav({ current, onNavigate, subs, onSub, onSettingsOpen, 
         })}
       </div>
       <div className="side-bottom">
-        <button type="button" className={`nav-item side-item${pageEditOpen ? " active" : ""}`} onClick={onPageEdit} title={collapsed ? "Edit page" : undefined} aria-label="Edit page">
-          {svg(<><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></>)}
-          {!collapsed && <span>Edit page</span>}
+        <button type="button" className={`nav-item side-item side-sync${drive.running ? " running" : ""}${driveBad ? " bad" : ""}`} onClick={onSync} disabled={drive.running} title={driveTitle} aria-label="Sync with Google Drive">
+          {svg(<><path d="M21 12a9 9 0 0 0-15-6.7L3 8" /><path d="M3 3v5h5" /><path d="M3 12a9 9 0 0 0 15 6.7L21 16" /><path d="M21 21v-5h-5" /></>)}
+          {!collapsed && <span>{drive.running ? "Syncing…" : "Sync"}</span>}
+          {driveBad && <span className="side-sync-dot" aria-hidden="true" />}
         </button>
         <button type="button" className={`nav-item side-item${current === "settings" ? " active" : ""}`} onClick={onSettingsOpen} title={collapsed ? "Settings" : undefined} aria-label="Settings">
           {gear}
           {!collapsed && <span>Settings</span>}
         </button>
       </div>
+      {drive.toast && (
+        <div className={`sync-toast ${drive.toast.kind}`} role="status">
+          <div>{drive.toast.text}</div>
+          <div className="sync-toast-actions">
+            {drive.toast.kind === "confirm" && <button type="button" className="btn btn-primary" onClick={() => { dismissDriveToast(); void runDriveSync(true); }}>Sync anyway</button>}
+            {drive.toast.reload && <button type="button" className="btn btn-primary" onClick={() => window.location.reload()}>Reload</button>}
+            <button type="button" className="btn" onClick={dismissDriveToast}>{drive.toast.kind === "confirm" ? "Cancel" : "Dismiss"}</button>
+          </div>
+        </div>
+      )}
     </nav>
   );
 }

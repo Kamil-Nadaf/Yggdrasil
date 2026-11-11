@@ -66,9 +66,9 @@ export function Library() {
 
 function hue(s: string) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 360; return h; }
 
-function Tile({ p }: { p: Item }) {
+function Tile({ p, onManage }: { p: Item; onManage?: (p: Item) => void }) {
   return (
-    <a className="tile" href={`#/read/${encodeURIComponent(p.slug)}`} style={{ ['--h' as string]: hue(p.slug) }}>
+    <a className="tile" onContextMenu={(e) => { if (onManage) { e.preventDefault(); onManage(p); } }} href={`#/read/${encodeURIComponent(p.slug)}`} style={{ ['--h' as string]: hue(p.slug) }}>
       <div className="cover">
         <span className="kind">{p.kind === 'book' ? 'Book' : 'Paper'}</span>
         <b className="ttl">{p.title}</b>
@@ -76,13 +76,15 @@ function Tile({ p }: { p: Item }) {
       </div>
       <div className="row gap muted sm tmeta"><Sdot s={p.status} /><span className="clip">{STATUS[p.status] || p.status}{p.year ? ` · ${p.year}` : ''}</span></div>
       {p.progress > 0 && <div className="bar"><i style={{ width: `${Math.min(100, p.progress * 100)}%` }} /></div>}
+      {onManage && <button className="iconbtn tile-more" aria-label={`Manage ${p.title}`} onClick={(e) => { e.preventDefault(); e.stopPropagation(); onManage(p); }}>⋯</button>}
     </a>
   );
 }
 
-function Row({ p }: { p: Item }) {
+function Row({ p, onManage }: { p: Item; onManage?: (p: Item) => void }) {
   return (
-    <a className="paperrow" href={`#/read/${encodeURIComponent(p.slug)}`}>
+    <a className="paperrow" href={`#/read/${encodeURIComponent(p.slug)}`} onContextMenu={(e) => { if (onManage) { e.preventDefault(); onManage(p); } }}>
+      {onManage && <button className="iconbtn row-more" aria-label={`Manage ${p.title}`} onClick={(e) => { e.preventDefault(); e.stopPropagation(); onManage(p); }}>⋯</button>}
       <b className="lead">{p.title}</b>
       {p.authors.length > 0 && <div className="muted sm clip mt-s">{p.authors.slice(0, 3).join(', ')}{p.authors.length > 3 ? ' et al.' : ''}</div>}
       <div className="row gap muted sm mt-s"><Sdot s={p.status} />{meta(p)}{p.progress > 0 && <span className="f1 right">{Math.round(p.progress * 100)}%</span>}</div>
@@ -91,7 +93,9 @@ function Row({ p }: { p: Item }) {
 }
 
 export function Collection({ id }: { id: string }) {
-  const { items, cols, err } = useLibrary();
+  const { items, cols, err, reload } = useLibrary();
+  const [managed, setManaged] = useState<Item | null>(null);
+  const [mErr, setMErr] = useState('');
   const view = useStore().settings.libView;
   const [kind, setKind] = useState<'all' | 'paper' | 'book'>('all');
   const [f, setF] = useState<'all' | 'want' | 'reading' | 'finished'>('all');
@@ -117,8 +121,22 @@ export function Collection({ id }: { id: string }) {
       <div className="list">
         {kids.map((c) => <a key={c.id} href={`#/library/${c.id}`} className="grow"><Icon name="library" size={18} /><span className="f1">{c.name}</span><span className="muted sm">{c.slugs.length}</span></a>)}
         {list.length === 0 && <p className="muted pad">No items.</p>}
-        {view === 'tile' ? <div className="tiles">{list.map((p) => <Tile key={p.slug} p={p} />)}</div> : list.map((p) => <Row key={p.slug} p={p} />)}
+        {view === 'tile' ? <div className="tiles">{list.map((p) => <Tile key={p.slug} p={p} onManage={setManaged} />)}</div> : list.map((p) => <Row key={p.slug} p={p} onManage={setManaged} />)}
       </div>
+      {managed && (
+        <div className="sheet-scrim" onClick={() => setManaged(null)}>
+          <div className="sheet" role="dialog" aria-label="Manage item" onClick={(e) => e.stopPropagation()}>
+            <b className="clip">{managed.title}</b>
+            {mErr && <p className="err sm">{mErr}</p>}
+            <button className="grow plainbtn" onClick={async () => { const name = prompt('Rename', managed.title)?.trim(); if (!name || name === managed.title) return; try { await yg(`/api/reading/${encodeURIComponent(managed.slug)}`, { method: 'PATCH', body: { title: name } }); setManaged(null); reload(); } catch (e) { setMErr(e instanceof Error ? e.message : 'Rename failed'); } }}><span className="f1">Rename…</span></button>
+            {(['want', 'reading', 'finished'] as const).filter((st) => st !== managed.status).map((st) => (
+              <button key={st} className="grow plainbtn" onClick={async () => { try { await yg(`/api/reading/${encodeURIComponent(managed.slug)}`, { method: 'PATCH', body: { status: st } }); setManaged(null); reload(); } catch (e) { setMErr(e instanceof Error ? e.message : 'Failed'); } }}><span className="f1">Mark as {STATUS[st].toLowerCase()}</span></button>
+            ))}
+            <button className="grow plainbtn danger" onClick={async () => { if (!confirm(`Delete “${managed.title}”, its file and notes from your vault? This cannot be undone.`)) return; try { await yg(`/api/reading/${encodeURIComponent(managed.slug)}`, { method: 'DELETE' }); setManaged(null); reload(); } catch (e) { setMErr(e instanceof Error ? e.message : 'Delete failed'); } }}><span className="f1">Delete…</span></button>
+            <button className="btn" onClick={() => setManaged(null)}>Cancel</button>
+          </div>
+        </div>
+      )}
     </Screen>
   );
 }

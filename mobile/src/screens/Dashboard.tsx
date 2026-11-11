@@ -106,7 +106,9 @@ export function ReadingTimer() {
   );
 }
 
-function Heat({ label, cells, max }: { label: string; cells: { date: string; v: number }[]; max: number }) {
+function Heat({ label, values, start, end, max }: { label: string; values: Record<string, number>; start: string; end: string; max: number }) {
+  const cells: { date: string; v: number }[] = [];
+  for (let d = start; d <= end; d = addDays(d, 1)) cells.push({ date: d, v: values[d] || 0 });
   const first = new Date(cells[0].date + 'T12:00:00').getDay();
   const pad = (first + 6) % 7; // Monday first
   const all = [...Array(pad).fill(null), ...cells];
@@ -118,7 +120,7 @@ function Heat({ label, cells, max }: { label: string; cells: { date: string; v: 
       <div className="heat">
         {weeks.map((w, i) => (
           <div key={i} className="heatcol">
-            {w.map((c, j) => <i key={j} title={c ? `${c.date}: ${c.v}` : ''} style={c ? { opacity: c.v ? 0.25 + 0.75 * Math.min(1, c.v / max) : 1, background: c.v ? 'var(--accent)' : 'var(--line2)' } : { visibility: 'hidden' }} />)}
+            {w.map((c, j) => <i key={j} title={c ? `${c.date}: ${c.v}` : ''} style={c ? { opacity: c.v ? 0.25 + 0.75 * Math.min(1, c.v / max) : 1, background: c.v ? 'var(--accent)' : 'var(--raise2)' } : { visibility: 'hidden' }} />)}
           </div>
         ))}
       </div>
@@ -137,8 +139,8 @@ export function ActivityHeatmap() {
     <section className="card">
       <b>Activity</b>
       <Err text={habits.err || tasks.err} />
-      {habits.data.days.length > 0 && <Heat label="Habits" max={HABITS.length} cells={habits.data.days.map((d) => ({ date: d.date, v: countHabits(d.habits) }))} />}
-      {tasks.data.days.length > 0 && <Heat label="Tasks completed" max={Math.max(3, ...tasks.data.days.map((d) => d.count))} cells={tasks.data.days.map((d) => ({ date: d.date, v: d.count }))} />}
+      <Heat label="Habits" start={start} end={today} max={HABITS.length} values={Object.fromEntries(habits.data.days.map((d) => [d.date, countHabits(d.habits || {})]))} />
+      <Heat label="Tasks completed" start={start} end={today} max={Math.max(3, ...tasks.data.days.map((d) => d.count))} values={Object.fromEntries(tasks.data.days.map((d) => [d.date, d.count]))} />
     </section>
   );
 }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { authHeaders } from '../api';
 import PdfView from '../PdfView';
 import { Icon, Screen, Top } from '../ui';
+import { update, useStore } from '../store';
 import { getDB } from '../local';
 import { flatten, isLocal, isoDay, saveCollections, useY, yg, type DCol, type Item } from '../ygg';
 
@@ -63,25 +64,60 @@ export function Library() {
   );
 }
 
+function hue(s: string) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 360; return h; }
+
+function Tile({ p }: { p: Item }) {
+  return (
+    <a className="tile" href={`#/read/${encodeURIComponent(p.slug)}`} style={{ ['--h' as string]: hue(p.slug) }}>
+      <div className="cover">
+        <span className="kind">{p.kind === 'book' ? 'Book' : 'Paper'}</span>
+        <b className="ttl">{p.title}</b>
+        <span className="au">{p.authors.slice(0, 2).join(', ')}{p.authors.length > 2 ? ' et al.' : ''}</span>
+      </div>
+      <div className="row gap muted sm tmeta"><Sdot s={p.status} /><span className="clip">{STATUS[p.status] || p.status}{p.year ? ` · ${p.year}` : ''}</span></div>
+      {p.progress > 0 && <div className="bar"><i style={{ width: `${Math.min(100, p.progress * 100)}%` }} /></div>}
+    </a>
+  );
+}
+
+function Row({ p }: { p: Item }) {
+  return (
+    <a className="paperrow" href={`#/read/${encodeURIComponent(p.slug)}`}>
+      <b className="lead">{p.title}</b>
+      {p.authors.length > 0 && <div className="muted sm clip mt-s">{p.authors.slice(0, 3).join(', ')}{p.authors.length > 3 ? ' et al.' : ''}</div>}
+      <div className="row gap muted sm mt-s"><Sdot s={p.status} />{meta(p)}{p.progress > 0 && <span className="f1 right">{Math.round(p.progress * 100)}%</span>}</div>
+    </a>
+  );
+}
+
 export function Collection({ id }: { id: string }) {
   const { items, cols, err } = useLibrary();
+  const view = useStore().settings.libView;
+  const [kind, setKind] = useState<'all' | 'paper' | 'book'>('all');
   const [f, setF] = useState<'all' | 'want' | 'reading' | 'finished'>('all');
   const col = cols.find((c) => c.id === id);
   const kids = cols.filter((c) => c.parent === id);
   const filed = new Set(cols.flatMap((c) => c.slugs));
   const base = id === '_all' ? items : id === '_unfiled' ? items.filter((p) => !filed.has(p.slug)) : items.filter((p) => col?.slugs.includes(p.slug));
-  const list = base.filter((p) => f === 'all' || p.status === f);
+  const list = base.filter((p) => (f === 'all' || p.status === f) && (kind === 'all' || p.kind === kind));
   return (
     <Screen tab="library">
       <Top back="library" title={<b>{col?.name || (id === '_unfiled' ? 'Unfiled' : 'All items')}</b>} />
-      <div className="chips pad">
+      <div className="chips pad" style={{ alignItems: 'center' }}>
+        {(['all', 'paper', 'book'] as const).map((k) => <button key={k} className={`chip ${kind === k ? 'on' : ''}`} onClick={() => setKind(k)}>{k === 'all' ? 'Everything' : k === 'paper' ? 'Papers' : 'Books'}</button>)}
+        <div className="viewtoggle" style={{ marginLeft: 'auto', flex: 'none' }} role="group" aria-label="View">
+          <button className={view === 'list' ? 'on' : ''} aria-label="List view" aria-pressed={view === 'list'} onClick={() => update((st) => ({ ...st, settings: { ...st.settings, libView: 'list' } }))}><Icon name="list" size={18} /></button>
+          <button className={view === 'tile' ? 'on' : ''} aria-label="Tile view" aria-pressed={view === 'tile'} onClick={() => update((st) => ({ ...st, settings: { ...st.settings, libView: 'tile' } }))}><Icon name="grid" size={18} /></button>
+        </div>
+      </div>
+      <div className="chips pad" style={{ paddingTop: 0 }}>
         {(['all', 'want', 'reading', 'finished'] as const).map((k) => <button key={k} className={`chip ${f === k ? 'on' : ''}`} onClick={() => setF(k)}>{k === 'all' ? 'All' : STATUS[k]}</button>)}
       </div>
       {err && <p className="err sm pad">{err}</p>}
       <div className="list">
         {kids.map((c) => <a key={c.id} href={`#/library/${c.id}`} className="grow"><Icon name="library" size={18} /><span className="f1">{c.name}</span><span className="muted sm">{c.slugs.length}</span></a>)}
         {list.length === 0 && <p className="muted pad">No items.</p>}
-        {list.map((p) => <a key={p.slug} className="paperrow" href={`#/read/${encodeURIComponent(p.slug)}`}><b className="lead">{p.title}</b><div className="row gap muted sm mt-s"><Sdot s={p.status} />{meta(p)}</div></a>)}
+        {view === 'tile' ? <div className="tiles">{list.map((p) => <Tile key={p.slug} p={p} />)}</div> : list.map((p) => <Row key={p.slug} p={p} />)}
       </div>
     </Screen>
   );

@@ -13,7 +13,7 @@ export interface Project extends Base { name: string; source: string }
 export interface ArxivItem { id: string; title: string; abstract: string; authors: string[]; published: string; pdf: string }
 export interface Feed { cat: string; sample: boolean; fetched: number; items: ArxivItem[] }
 export type ThemeName = 'dark' | 'light' | 'paper' | 'notebook';
-export interface Settings { theme: ThemeName; accent: string; category: string; autoSync: boolean; token: string; lastSync: number; defaultCollection: string; mode: 'server' | 'local' }
+export interface Settings { theme: ThemeName; accent: string; category: string; autoSync: boolean; token: string; lastSync: number; defaultCollection: string; mode: 'server' | 'local'; libView: 'list' | 'tile' }
 export interface State {
   notes: Note[]; papers: Paper[]; collections: Collection[]; projects: Project[];
   decisions: Record<string, Decision>;
@@ -40,7 +40,7 @@ const defaults = (): State => ({
   decisions: {},
   feed: null,
   activity: {},
-  settings: { theme: 'dark', accent: '', category: 'astro-ph.HE', autoSync: true, token: '', lastSync: 0, defaultCollection: GRB, mode: 'server' },
+  settings: { theme: 'dark', accent: '', category: 'astro-ph.HE', autoSync: true, token: '', lastSync: 0, defaultCollection: GRB, mode: 'server', libView: 'list' },
 });
 
 const KEY = 'ygg.v1';

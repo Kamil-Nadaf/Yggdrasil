@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import Nav, { type NotesTab, type TasksTab, type CollectionSection, type PapersSection } from "./components/Nav";
 import SettingsPage from "./components/SettingsPage";
+import UpdatePrompt from "./components/UpdatePrompt";
 import PageThemeDrawer from "./components/PageThemeDrawer";
 import CERICEditor from "./views/CERICEditor";
 import GraphView from "./views/GraphView";
@@ -80,6 +81,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <ManualTimerRunner />
+      <UpdatePrompt />
       <Nav
         current={view}
         subs={{ notes: notesTab, tasks: tasksTab, collection: colSection, papers: papersSection }}

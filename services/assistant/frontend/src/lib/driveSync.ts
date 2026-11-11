@@ -22,6 +22,7 @@ export interface DriveStatus {
   client_id: string;
   has_secret: boolean;
   uses_task_sync_credentials: boolean;
+  builtin_client: boolean;
   root_name: string;
   sync_papers_books: boolean;
   auto: boolean;

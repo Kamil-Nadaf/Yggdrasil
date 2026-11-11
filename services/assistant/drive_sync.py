@@ -117,8 +117,25 @@ def is_connected(cfg: dict, fallback: tuple[str, str] = ("", "")) -> bool:
     return bool(cfg.get("refresh_token") and cid) and not cfg.get("needs_reconnect")
 
 
+def builtin_client() -> tuple[str, str]:
+    """The Google OAuth client shipped with the app (a "Desktop app" client), so users just click Sign in.
+
+    Set YGG_GOOGLE_CLIENT_ID / YGG_GOOGLE_CLIENT_SECRET, or put {"client_id": ..., "client_secret": ...}
+    in google_client.json next to this file. For installed apps Google does not treat the secret as confidential."""
+    cid, sec = os.environ.get("YGG_GOOGLE_CLIENT_ID", ""), os.environ.get("YGG_GOOGLE_CLIENT_SECRET", "")
+    if not cid:
+        try:
+            d = json.loads((Path(__file__).with_name("google_client.json")).read_text())
+            d = d.get("installed", d)
+            cid, sec = d.get("client_id", ""), d.get("client_secret", "")
+        except Exception:
+            pass
+    return cid, sec
+
+
 def creds(cfg: dict, fallback: tuple[str, str]) -> tuple[str, str]:
-    return (cfg.get("client_id") or fallback[0] or "", cfg.get("client_secret") or fallback[1] or "")
+    b = builtin_client()
+    return (cfg.get("client_id") or fallback[0] or b[0], cfg.get("client_secret") or fallback[1] or b[1])
 
 
 # ── Drive client ────────────────────────────────────────────────────────────
@@ -638,7 +655,7 @@ def _sync(drive: Drive, cfg: dict, config_path: Path, vault: Path, result: dict,
 def start_auth(cfg: dict, fallback: tuple[str, str], redirect_uri: str) -> str:
     cid, secret = creds(cfg, fallback)
     if not cid or not secret:
-        raise ValueError("Enter a Google client ID and secret here, or set them up under Task Sync first.")
+        raise ValueError("This build has no Google sign-in client yet. Add google_client.json (see docs) or enter your own client under Advanced.")
     verifier, state, now = secrets.token_urlsafe(64), secrets.token_urlsafe(16), time.time()
     for s in [s for s, v in _PENDING.items() if now - v["ts"] > 600]:
         _PENDING.pop(s, None)
@@ -715,6 +732,7 @@ def make_router(config_path: Callable[[], Path], get_vault: Callable[[], Path],
             "connected": is_connected(cfg, fb), "needs_reconnect": cfg["needs_reconnect"],
             "connected_at": cfg["connected_at"], "client_id": cfg["client_id"],
             "has_secret": bool(cfg["client_secret"]), "uses_task_sync_credentials": not cfg["client_id"] and bool(fb[0]),
+            "builtin_client": bool(builtin_client()[0]),
             "root_name": cfg["root_name"], "sync_papers_books": cfg["sync_papers_books"], "auto": cfg["auto"], "interval_minutes": cfg["interval_minutes"],
             "last_run": cfg["last_run"], "last_result": cfg["last_result"],
             "tracked_files": len(st.get("files", {})), "running": _RUN_LOCK.locked(),

@@ -97,7 +97,7 @@ export default function DriveSyncSettings() {
 
   if (!st) return <div className="settings-info">Loading…</div>;
 
-  const hasCreds = !!(cid.trim() && (st.has_secret || secret.trim())) || st.uses_task_sync_credentials;
+  const hasCreds = !!(cid.trim() && (st.has_secret || secret.trim())) || st.uses_task_sync_credentials || st.builtin_client;
   const connected = st.connected || st.needs_reconnect;
   const r = st.last_result;
 
@@ -105,7 +105,7 @@ export default function DriveSyncSettings() {
     <div className="tasksync">
       <div className="settings-info" style={{ marginBottom: 12 }}>
         Two-way sync of your notes, tasks, LaTeX, goals, task statuses/tags and other app data with one Google Drive folder. Papers and books are not included by default: they stay in sync through Zotero (use the sync button in Collection). Use the <b>Sync</b> button next to
-        Settings, or turn on automatic sync. Another device signed in with the same Google client sees the same folder. Only files
+        Settings, or turn on automatic sync. Sign in with the same Google account on another device to see the same folder. Only files
         Yggdrasil itself puts there are visible to it — it never reads the rest of your Drive.
       </div>
 
@@ -116,22 +116,10 @@ export default function DriveSyncSettings() {
             {st.needs_reconnect ? "⚠ Sign in again" : st.connected ? "● Connected" : "○ Not connected"}
           </span>
         </div>
-        <details className="tasksync-help">
-          <summary>One-time setup (Google Cloud, free — 15 GB included)</summary>
-          <ol>
-            <li>Open <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer">console.cloud.google.com</a> (use the same project as Task Sync if you set that up) and enable the <b>Google Drive API</b>.</li>
-            <li>OAuth consent screen: add yourself as a test user and set publishing status to <b>In production</b> (otherwise sign-in expires every 7 days). The “unverified app” warning is expected for your own app; the <code>drive.file</code> permission it asks for is the limited one.</li>
-            <li>Credentials → OAuth client ID (<b>Web application</b>): add the redirect URI below. If you already made one for Task Sync, just add this URI to it and leave the fields below empty.</li>
-          </ol>
-        </details>
-        <CopyField label="Redirect URI" value={st.redirect_uri} />
-        {st.uses_task_sync_credentials && (
-          <div className="settings-info">Using the Google client already set up under Task Sync. Fill the fields only to use a different one.</div>
+        {st.builtin_client && !st.connected && (
+          <div className="settings-info">Click <b>Sign in with Google</b>: your browser opens, you pick your Google account and allow access. No keys or setup needed.</div>
         )}
-        <label htmlFor="dsCid">Client ID</label>
-        <input id="dsCid" type="text" value={cid} onChange={(e) => setCid(e.target.value)} placeholder={st.uses_task_sync_credentials ? "Same as Task Sync" : "1234…apps.googleusercontent.com"} />
-        <label htmlFor="dsSec">Client secret</label>
-        <input id="dsSec" type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder={st.has_secret ? "Saved — leave blank to keep" : st.uses_task_sync_credentials ? "Same as Task Sync" : "GOCSPX-…"} autoComplete="off" />
+        <label htmlFor="dsFolder">Drive folder name</label>
         <label htmlFor="dsFolder">Drive folder name</label>
         <input id="dsFolder" type="text" value={folder} onChange={(e) => setFolder(e.target.value)} />
         <div className="tasksync-days">
@@ -145,9 +133,20 @@ export default function DriveSyncSettings() {
             </select>
           </label>
         </div>
+        <details className="tasksync-help" style={{ marginTop: 10 }} open={!st.builtin_client && !st.uses_task_sync_credentials}>
+          <summary>Advanced: use my own Google client</summary>
+          <ol>
+            <li>In <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer">Google Cloud</a> enable the <b>Google Drive API</b>, then create an OAuth client ID of type <b>Desktop app</b> (or Web application with the redirect URI below).</li>
+          </ol>
+          <CopyField label="Redirect URI" value={st.redirect_uri} />
+          <label htmlFor="dsCid">Client ID</label>
+          <input id="dsCid" type="text" value={cid} onChange={(e) => setCid(e.target.value)} placeholder={st.builtin_client ? "Leave empty to use the built-in client" : "1234…apps.googleusercontent.com"} />
+          <label htmlFor="dsSec">Client secret</label>
+          <input id="dsSec" type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder={st.has_secret ? "Saved — leave blank to keep" : "GOCSPX-…"} autoComplete="off" />
+        </details>
         <div className="tasksync-actions">
           <button type="button" className="btn btn-primary" disabled={busy || !hasCreds} onClick={() => void connect()}>
-            {connected ? "Reconnect Google" : "Connect Google Drive"}
+            {connected ? "Sign in again" : "Sign in with Google"}
           </button>
           {connected && <button type="button" className="btn" disabled={busy} onClick={() => void disconnect()}>Disconnect</button>}
           <button type="button" className="btn" disabled={busy} onClick={() => void wrap(async () => { await save(); })}>Save</button>

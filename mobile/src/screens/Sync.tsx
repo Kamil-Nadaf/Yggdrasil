@@ -138,7 +138,7 @@ function DriveCard() {
     <section className="card">
       <div className="row gap"><span className={`dot ${connected ? '' : 'bad'}`} /><b>Google Drive</b><span className="f1 right muted sm">{d.needs_reconnect ? 'Sign in again' : d.connected ? `Connected · ${ago(d.last_run)}` : 'Not connected'}</span></div>
       <p className="muted sm">Notes, tasks, goals and app data sync two ways with your own Google Drive. Papers and books stay in Zotero.</p>
-      {!connected && <p className="sm">Google sign-in has to happen once on the desktop (Settings → Sync → Google Drive → Connect). The phone then uses that same connection through your server.</p>}
+      {!connected && <p className="sm">Sign in once on the desktop app (Settings → Sync → Google Drive → Sign in with Google: it opens your browser, no keys needed). The phone then uses that same connection through your server.</p>}
       <StorageBar label="Google Drive" u={drive} />
       <StorageBar label="Zotero (files on the server)" u={zot} />
       {connected && <>

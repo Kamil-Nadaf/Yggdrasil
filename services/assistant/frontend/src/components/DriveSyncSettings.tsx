@@ -67,6 +67,10 @@ export default function DriveSyncSettings() {
   }
 
   async function connect() {
+    if (!hasCreds) {
+      setMsg({ ok: false, text: "This build doesn't include Google sign-in yet. Open “Advanced” below and paste your own Google client, or install a build that ships with one." });
+      return;
+    }
     await wrap(async () => {
       await save(true);
       const r = await driveApi<{ auth_url: string; opened: boolean }>("connect", "POST");
@@ -120,7 +124,6 @@ export default function DriveSyncSettings() {
           <div className="settings-info">Click <b>Sign in with Google</b>: your browser opens, you pick your Google account and allow access. No keys or setup needed.</div>
         )}
         <label htmlFor="dsFolder">Drive folder name</label>
-        <label htmlFor="dsFolder">Drive folder name</label>
         <input id="dsFolder" type="text" value={folder} onChange={(e) => setFolder(e.target.value)} />
         <div className="tasksync-days">
           <label title="Papers and books are kept in sync through Zotero instead"><input type="checkbox" checked={papers} onChange={(e) => setPapers(e.target.checked)} /> Also sync the Papers and Books folders (off: those go through Zotero)</label>
@@ -133,7 +136,7 @@ export default function DriveSyncSettings() {
             </select>
           </label>
         </div>
-        <details className="tasksync-help" style={{ marginTop: 10 }} open={!st.builtin_client && !st.uses_task_sync_credentials}>
+        <details className="tasksync-help" style={{ marginTop: 10 }} >
           <summary>Advanced: use my own Google client</summary>
           <ol>
             <li>In <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer">Google Cloud</a> enable the <b>Google Drive API</b>, then create an OAuth client ID of type <b>Desktop app</b> (or Web application with the redirect URI below).</li>
@@ -145,7 +148,7 @@ export default function DriveSyncSettings() {
           <input id="dsSec" type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder={st.has_secret ? "Saved — leave blank to keep" : "GOCSPX-…"} autoComplete="off" />
         </details>
         <div className="tasksync-actions">
-          <button type="button" className="btn btn-primary" disabled={busy || !hasCreds} onClick={() => void connect()}>
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void connect()}>
             {connected ? "Sign in again" : "Sign in with Google"}
           </button>
           {connected && <button type="button" className="btn" disabled={busy} onClick={() => void disconnect()}>Disconnect</button>}

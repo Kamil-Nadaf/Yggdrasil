@@ -1,14 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { ago } from '../syncAll';
+import { openExternal } from '../update';
 import { pollDeviceFlow, startDeviceFlow, type DeviceCode } from '../cloud/auth';
 import { cloudDisconnect, cloudRunning, cloudSync, getCloud, setCloud } from '../cloud/cloud';
-
-/** Open a page in the phone's real browser when the Capacitor Browser plugin is bundled, else the WebView/window. */
-function openExternal(url: string) {
-  const cap = (window as unknown as { Capacitor?: { nativePromise?: (p: string, m: string, o: object) => Promise<unknown> } }).Capacitor;
-  if (cap?.nativePromise) cap.nativePromise('Browser', 'open', { url }).catch(() => window.open(url, '_blank'));
-  else window.open(url, '_blank');
-}
 
 function useCloud() {
   const [, tick] = useState(0);

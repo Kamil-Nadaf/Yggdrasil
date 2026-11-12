@@ -4,17 +4,16 @@ import { ago, syncAll, type DriveState, type ZoteroState } from '../syncAll';
 import { useStore, update, type ThemeName } from '../store';
 import { ACCENTS, THEMES } from '../theme';
 import { Icon, Screen, Top } from '../ui';
+import { applyReload, checkForUpdate, openExternal } from '../update';
 
 async function checkUpdate(): Promise<string> {
-  const r = await fetch(`/version.json?t=${Date.now()}`, { cache: 'no-store' });
-  if (!r.ok) throw new Error('Could not reach the app server');
-  const { build } = (await r.json()) as { build: string };
-  if (build === __BUILD__) return 'You have the latest version.';
-  const regs = (await navigator.serviceWorker?.getRegistrations?.()) || [];
-  await Promise.all(regs.map((g) => g.unregister()));
-  for (const k of await caches.keys()) if (k !== 'ygg-pdf') await caches.delete(k);
-  location.reload();
-  return 'Updating…';
+  const r = await checkForUpdate();
+  if (r.kind === 'reload') { await applyReload(); return 'Updating…'; }
+  if (r.kind === 'app') {
+    if (confirm(`Yggdrasil v${r.release.version} is available (you have v${__APP_VERSION__}). ${r.release.apk ? 'Download the new app now?' : 'Open the release page?'}`)) openExternal(r.release.apk || r.release.url);
+    return `v${r.release.version} is available. Open the downloaded file to install it over this version; your data stays.`;
+  }
+  return `You have the latest version (v${r.version}).`;
 }
 
 async function addGoal() {

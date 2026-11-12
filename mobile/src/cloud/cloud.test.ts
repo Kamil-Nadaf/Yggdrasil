@@ -198,3 +198,10 @@ test('device sign-in polls through pending and slow_down', async () => {
   const t = await pollDeviceFlow({ id: 'c', secret: 's' }, { device_code: 'd', user_code: 'U', verification_url: 'u', expires_in: 600, interval: 5 }, { fetchImpl, sleep: async (ms) => { waits.push(ms); } });
   assert.equal(t.refresh_token, 'rt'); assert.deepEqual(waits, [5000, 5000, 10000]);
 });
+
+import { isNewer, latestRelease } from '../update.ts';
+test('update check: version compare and APK asset from GitHub release', async () => {
+  assert.ok(isNewer('0.4.28', '0.4.27')); assert.ok(isNewer('0.10.0', '0.9.9')); assert.ok(!isNewer('0.4.27', '0.4.27')); assert.ok(!isNewer('0.4.26', '0.4.27'));
+  const f = (async () => ({ ok: true, json: async () => ({ tag_name: 'v0.4.28', html_url: 'u', body: 'n', assets: [{ name: 'Yggdrasil-0.4.28-android.apk', browser_download_url: 'apk-url' }, { name: 'x.zip', browser_download_url: 'z' }] }) })) as unknown as typeof fetch;
+  assert.deepEqual(await latestRelease(f), { version: '0.4.28', url: 'u', apk: 'apk-url', notes: 'n' });
+});

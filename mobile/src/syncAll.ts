@@ -1,4 +1,5 @@
 import { isLocal, yg } from './ygg';
+import { cloudSync, isCloudConnected } from './cloud/cloud';
 
 export interface DriveState {
   connected: boolean; needs_reconnect: boolean; running: boolean; last_run: string | null;
@@ -10,7 +11,11 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Runs the backend's Google Drive sync when it is set up. Returns a problem message, or '' when fine / not set up. */
 export async function syncDrive(): Promise<string> {
-  if (isLocal()) return '';
+  if (isLocal()) {
+    if (!isCloudConnected()) return '';
+    const r = await cloudSync();
+    return r.ok || r.busy ? '' : `Drive: ${r.message}`;
+  }
   try {
     const st = await yg<DriveState>('/api/drivesync/status');
     if (!st.connected || st.running) return '';

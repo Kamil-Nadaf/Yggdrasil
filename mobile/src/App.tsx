@@ -7,6 +7,8 @@ import { Projects, LatexEditor } from './screens/Write';
 import Sync from './screens/Sync';
 import { Tasks } from './screens/Tasks';
 import Settings from './screens/Settings';
+import { isLocal } from './ygg';
+import { cloudDue, cloudSync } from './cloud/cloud';
 
 function useRoute(): string[] {
   const [hash, setHash] = useState(location.hash);
@@ -20,6 +22,14 @@ function useRoute(): string[] {
 
 export default function App() {
   const [a, b] = useRoute();
+  useEffect(() => {
+    // phone-only mode: keep Google Drive in sync while the app is open
+    const tick = () => { if (isLocal() && !document.hidden && cloudDue()) void cloudSync(); };
+    const t = setInterval(tick, 60_000);
+    const first = setTimeout(tick, 4000);
+    addEventListener('visibilitychange', tick);
+    return () => { clearInterval(t); clearTimeout(first); removeEventListener('visibilitychange', tick); };
+  }, []);
 
   switch (a) {
     case 'notes': return b ? <NoteEditor id={b} /> : <NotesList />;

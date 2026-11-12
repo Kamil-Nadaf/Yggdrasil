@@ -111,7 +111,7 @@ function ServerSync() {
 function LocalSync() {
   return (
     <section className="card group">
-      <a className="grow" href="#/sync"><span className="f1">Backup and import</span><Icon name="next" size={18} /></a>
+      <a className="grow" href="#/sync"><span className="f1">Google Drive sync and backup</span><Icon name="next" size={18} /></a>
       <button className="grow plainbtn" onClick={addGoal}><span className="f1">Add a goal (days-left card)</span><Icon name="plus" size={18} /></button>
     </section>
   );

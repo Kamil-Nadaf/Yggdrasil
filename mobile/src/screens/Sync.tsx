@@ -4,6 +4,7 @@ import { Screen, Top } from '../ui';
 import { exportBackup, mergeBackup } from '../backup';
 import { isLocal, useY, yg } from '../ygg';
 import { ago, type DriveState } from '../syncAll';
+import PhoneDrive from './PhoneDrive';
 
 function LocalConnection() {
   const [msg, setMsg] = useState('');
@@ -13,13 +14,14 @@ function LocalConnection() {
     <Screen>
       <Top back="settings" title={<h1 className="h2">Phone only</h1>} />
       <div className="stack pad">
+        <PhoneDrive />
         <section className="card">
           <b>Everything is stored on this phone</b>
-          <p className="muted sm">Notes, LaTeX, tasks, habits, goals, collections and saved papers live in the app. arXiv is fetched directly. Compiling LaTeX and Zotero sync need your Yggdrasil server.</p>
+          <p className="muted sm">Notes, LaTeX, tasks, habits, goals, collections and saved papers live in the app, and can sync with Google Drive above. arXiv is fetched directly. Compiling LaTeX needs your Yggdrasil server.</p>
         </section>
         <section className="card">
           <b>Backup and sync</b>
-          <p className="muted sm">Export a backup and send it to Google Drive (or any app) from the share sheet. On another device, Import merges it: the newer copy of each note wins and nothing is deleted.</p>
+          <p className="muted sm">You can also export a backup file and send it to any app from the share sheet. On another device, Import merges it: the newer copy of each note wins and nothing is deleted.</p>
           <div className="row gap" style={{ marginTop: 12 }}>
             <button className="btn primary" onClick={() => exportBackup().then(setMsg).catch((e) => setMsg(e.message))}>Export backup</button>
             <label className="btn" style={{ cursor: 'pointer' }}>Import<input type="file" accept="application/json,.json" hidden onChange={(e) => { file(e.target.files?.[0]); e.target.value = ''; }} /></label>

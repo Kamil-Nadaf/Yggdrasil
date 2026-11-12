@@ -173,7 +173,7 @@ jobs:
       - name: Generate Android project (Capacitor)
         working-directory: mobile
         run: |
-          npm i --no-save @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
+          npm i --no-save @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 @capacitor/browser@6
           npx cap add android
           bash scripts/android-icons.sh
           npx cap sync android

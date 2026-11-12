@@ -459,3 +459,29 @@ def test_missing_local_settings_never_trashes_drive_copy(world):
     b.sync()
     (b.vault / ".ygg-config" / "settings.json").unlink()
     assert b.sync()["ok"] and "_app/settings.json" in d.live()
+
+
+def test_books_on_drive_papers_stay_in_zotero(world):
+    d, a, b = world
+    cfg = ds.load_config(a.cfg)
+    cfg["books_storage"] = "drive"
+    ds.save_config(a.cfg, cfg)
+    a.write("80-Tasks/p/mt-1.md", "task")
+    a.write("10-Papers/x.md", "paper")
+    a.write("15-Books/b.pdf", "book")
+    a.sync()
+    assert set(d.live()) == {"80-Tasks/p/mt-1.md", "15-Books/b.pdf"}
+
+
+def test_first_sync_uploads_all_and_turns_auto_on_once(world):
+    d, a, _ = world
+    a.write("n/one.md", "1")
+    a.write("n/two.md", "2")
+    r = a.sync()
+    assert r["first_sync"] and r["uploaded"] == 2 and "First sync" in r["message"]
+    cfg = ds.load_config(a.cfg)
+    assert cfg["auto"] and cfg["initial_done"]
+    cfg["auto"] = False  # the user switches it off: later syncs must not switch it back on
+    ds.save_config(a.cfg, cfg)
+    a.write("n/three.md", "3")
+    assert "first_sync" not in a.sync() and not ds.load_config(a.cfg)["auto"]

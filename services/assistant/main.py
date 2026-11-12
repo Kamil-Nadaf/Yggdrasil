@@ -4972,7 +4972,7 @@ async def _tasksync_loop():
 # Merge logic, conflict copies and OAuth live in drive_sync.py. Tokens go in
 # .ygg-config/drive-sync.json (git-ignored, mode 600); the Google client can be
 # the one already entered for Task Sync.
-from drive_sync import auto_due as _drivesync_due, make_router as _drivesync_router, run_sync as _drivesync_run
+from drive_sync import auto_due as _drivesync_due, make_router as _drivesync_router, run_all as _drivesync_run
 
 
 def _drivesync_path() -> Path:

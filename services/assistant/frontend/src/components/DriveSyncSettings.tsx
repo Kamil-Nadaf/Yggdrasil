@@ -31,7 +31,8 @@ export default function DriveSyncSettings() {
   const [secret, setSecret] = useState("");
   const [folder, setFolder] = useState("Yggdrasil Vault");
   const [auto, setAuto] = useState(false);
-  const [papers, setPapers] = useState(false);
+  const [books, setBooks] = useState<"zotero" | "drive" | "icloud">("zotero");
+  const [icloudDir, setIcloudDir] = useState("");
   const [every, setEvery] = useState(15);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -39,7 +40,7 @@ export default function DriveSyncSettings() {
   const poll = useRef<number | null>(null);
 
   function fill(s: DriveStatus) {
-    setCid(s.client_id); setFolder(s.root_name); setAuto(s.auto); setPapers(s.sync_papers_books); setEvery(s.interval_minutes);
+    setCid(s.client_id); setFolder(s.root_name); setAuto(s.auto); setBooks(s.books_storage); setIcloudDir(s.icloud_dir); setEvery(s.interval_minutes);
   }
 
   useEffect(() => {
@@ -47,12 +48,18 @@ export default function DriveSyncSettings() {
     return () => { if (poll.current) window.clearInterval(poll.current); };
   }, []);
   useEffect(() => {
+    if (!running && !st?.running) return;
+    const t = window.setInterval(() => void refreshDriveStatus(), 1500);
+    return () => window.clearInterval(t);
+  }, [running, st?.running]);
+  useEffect(() => {
     if (st && !loaded.current) { loaded.current = true; fill(st); }
   }, [st]);
 
   async function save(quiet = false) {
     const s = await driveApi<DriveStatus>("config", "POST", {
-      client_id: cid, client_secret: secret, root_name: folder, auto, interval_minutes: every, sync_papers_books: papers,
+      client_id: cid, client_secret: secret, root_name: folder, auto, interval_minutes: every, sync_papers_books: st?.sync_papers_books ?? false,
+      books_storage: books, icloud_dir: icloudDir,
     });
     setSecret("");
     setDriveStatus(s);
@@ -85,7 +92,7 @@ export default function DriveSyncSettings() {
           if (s.connected || n > 90) {
             if (poll.current) window.clearInterval(poll.current);
             setDriveStatus(s);
-            if (s.connected) setMsg({ ok: true, text: "Google Drive connected. Press Sync now to upload your vault." });
+            if (s.connected) setMsg({ ok: true, text: "Google Drive connected. Uploading your files now — the first sync sends everything, then it keeps syncing automatically." });
           }
         } catch { /* keep polling */ }
       }, 2000);
@@ -125,9 +132,20 @@ export default function DriveSyncSettings() {
         )}
         <label htmlFor="dsFolder">Drive folder name</label>
         <input id="dsFolder" type="text" value={folder} onChange={(e) => setFolder(e.target.value)} />
-        <div className="tasksync-days">
-          <label title="Papers and books are kept in sync through Zotero instead"><input type="checkbox" checked={papers} onChange={(e) => setPapers(e.target.checked)} /> Also sync the Papers and Books folders (off: those go through Zotero)</label>
-        </div>
+        <label htmlFor="dsBooks">Where to keep your books</label>
+        <select id="dsBooks" value={books} onChange={(e) => { const v = e.target.value as typeof books; setBooks(v); if (v === "icloud" && !icloudDir) setIcloudDir(st.icloud_suggested); }}>
+          <option value="zotero">Zotero only (books aren’t synced here)</option>
+          <option value="drive">Google Drive</option>
+          <option value="icloud">iCloud Drive</option>
+        </select>
+        <div className="settings-info">Papers always stay in Zotero. {books === "drive" ? "Books are uploaded to your Drive folder (needs Google sign-in below)." : books === "icloud" ? "Books are mirrored with a folder in iCloud Drive; iCloud then uploads them. Works on Apple devices and Windows with iCloud installed." : "Pick Drive or iCloud to save Zotero’s limited storage."}</div>
+        {books === "icloud" && (
+          <>
+            <label htmlFor="dsIcloud">iCloud folder for books</label>
+            <input id="dsIcloud" type="text" value={icloudDir} onChange={(e) => setIcloudDir(e.target.value)} placeholder={st.icloud_suggested || "/Users/you/Library/Mobile Documents/com~apple~CloudDocs/Yggdrasil Books"} />
+            {!st.icloud_suggested && <div className="crit mono" style={{ fontSize: 12 }}>iCloud Drive wasn’t found on this computer. Turn it on, or enter a folder path.</div>}
+          </>
+        )}
         <div className="tasksync-days">
           <label><input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> Sync automatically</label>
           <label>every{" "}
@@ -153,13 +171,17 @@ export default function DriveSyncSettings() {
           </button>
           {connected && <button type="button" className="btn" disabled={busy} onClick={() => void disconnect()}>Disconnect</button>}
           <button type="button" className="btn" disabled={busy} onClick={() => void wrap(async () => { await save(); })}>Save</button>
-          <button type="button" className="btn btn-primary" disabled={busy || running || !st.connected} onClick={() => void runDriveSync()}>
-            {running ? "Syncing…" : "Sync now"}
+          <button type="button" className="btn btn-primary" disabled={busy || running || !(st.connected || st.books_storage === "icloud")} onClick={() => void wrap(async () => { await save(true); await runDriveSync(); })}>
+            {running ? (st.progress?.total ? `${st.progress.phase} ${st.progress.done}/${st.progress.total}…` : "Syncing…") : st.initial_done ? "Sync now" : "Upload everything now"}
           </button>
         </div>
       </div>
 
       {msg && <div className={msg.ok ? "ok mono" : "crit mono"} style={{ fontSize: 12, marginTop: 8 }}>{msg.text}</div>}
+      {running && st.progress?.total > 0 && (
+        <div className="storage-bar-track" style={{ marginTop: 8 }} aria-label="Sync progress"><div className="storage-bar-fill" style={{ width: `${Math.round((st.progress.done / st.progress.total) * 100)}%` }} /></div>
+      )}
+      {st.icloud_last && <div className="settings-info" style={{ marginTop: 8 }}>{st.icloud_last.message}</div>}
       {st.connected && (
         <div className="settings-info" style={{ marginTop: 8 }}>
           Last sync {ago(st.last_run)}{r ? ` — ${r.message}` : ""}. {st.tracked_files} files tracked.

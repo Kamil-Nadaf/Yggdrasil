@@ -25,6 +25,12 @@ export interface DriveStatus {
   builtin_client: boolean;
   root_name: string;
   sync_papers_books: boolean;
+  books_storage: "zotero" | "drive" | "icloud";
+  icloud_dir: string;
+  icloud_suggested: string;
+  icloud_last: { at: string; ok: boolean; message: string } | null;
+  initial_done: boolean;
+  progress: { phase: string; done: number; total: number };
   auto: boolean;
   interval_minutes: number;
   last_run: string | null;

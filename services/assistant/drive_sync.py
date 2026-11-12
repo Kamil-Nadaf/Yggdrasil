@@ -56,6 +56,14 @@ SMALL_UPLOAD = 5 * 1024 * 1024
 MIN_DELETE_GUARD = 25  # deletions above max(this, 30% of tracked files) need confirmation
 
 _RUN_LOCK = threading.Lock()
+_PROGRESS: dict = {"phase": "", "done": 0, "total": 0}
+
+
+def skip_top_for(cfg: dict) -> tuple:
+    """Top-level vault folders this sync leaves alone. Papers live in Zotero; books go to Drive, iCloud or Zotero."""
+    if cfg.get("sync_papers_books"):  # legacy "sync both" setting
+        return ()
+    return ("10-Papers",) if cfg.get("books_storage") == "drive" else PAPERS_BOOKS
 _PENDING: dict[str, dict] = {}
 
 
@@ -71,6 +79,7 @@ def default_config() -> dict:
         "refresh_token": "", "needs_reconnect": False, "connected_at": "",
         "root_name": "Yggdrasil Vault", "root_id": "",
         "auto": False, "interval_minutes": 15, "sync_papers_books": False,
+        "books_storage": "zotero", "icloud_dir": "", "initial_done": False, "icloud_last": None,
         "last_run": None, "last_result": None,
     }
 
@@ -430,11 +439,20 @@ def run_sync(config_path: Path, vault: Path, fallback: tuple[str, str] = ("", ""
         except Exception as e:  # noqa: BLE001
             result["message"] = f"Unexpected error: {type(e).__name__}: {e}"
         result["seconds"] = round(time.time() - started, 1)
+        flipped_auto = False
+        if result.get("ok") and not cfg.get("initial_done"):
+            cfg["initial_done"] = True
+            if not cfg.get("last_run"):
+                # very first sync: everything local has just been uploaded; keep it in sync from now on
+                cfg["auto"], flipped_auto, result["first_sync"] = True, True, True
+                result["message"] = f"First sync done ✓ — {result['uploaded']} files uploaded to Drive. Automatic sync is now on."
+        _PROGRESS.update(phase="", done=0, total=0)
         cfg["last_run"] = datetime.now().isoformat(timespec="seconds")
         slim = {k: v for k, v in result.items() if k != "notes"}
         slim["errors"] = result["errors"][:5]
         cfg["last_result"] = slim
-        cfg = {**load_config(config_path), **{k: cfg[k] for k in ("needs_reconnect", "root_id", "last_run", "last_result")}}
+        keys = ["needs_reconnect", "root_id", "last_run", "last_result", "initial_done"] + (["auto"] if flipped_auto else [])
+        cfg = {**load_config(config_path), **{k: cfg[k] for k in keys}}
         save_config(config_path, cfg)
         return result
     finally:
@@ -462,7 +480,7 @@ def _sync(drive: Drive, cfg: dict, config_path: Path, vault: Path, result: dict,
             manifest = {}  # a different Drive folder: start fresh (conflicts are kept, nothing deleted)
         cfg["root_id"] = root_id
 
-    skip_top = () if cfg.get("sync_papers_books") else PAPERS_BOOKS
+    skip_top = skip_top_for(cfg)
     drop = lambda rel: rel.split("/", 1)[0] in skip_top  # noqa: E731
     remote, folders, notes = scan_remote(items, root_id)
     remote = {k: v for k, v in remote.items() if not drop(k)}
@@ -584,9 +602,11 @@ def _sync(drive: Drive, cfg: dict, config_path: Path, vault: Path, result: dict,
         return rel, {"md5": md5, "id": j["id"], "size": len(data), "mt": st.st_mtime_ns}
 
     def run_all(jobs: list[Callable], counter: str):
+        _PROGRESS.update(phase="Uploading" if counter == "uploaded" else "Downloading", done=0, total=len(jobs))
         with ThreadPoolExecutor(max_workers=workers) as ex:
             futs = [(ex.submit(j), tag) for j, tag in jobs]
             for fut, tag in futs:
+                _PROGRESS["done"] += 1
                 try:
                     rel, entry = fut.result()
                     new_state[rel] = entry
@@ -712,6 +732,14 @@ def drive_quota(config_path: Path, fallback: tuple[str, str], client: Optional[h
             client.close()
 
 
+def _icloud_default() -> str:
+    try:
+        import icloud_sync
+        return icloud_sync.default_dir()
+    except Exception:
+        return ""
+
+
 def make_router(config_path: Callable[[], Path], get_vault: Callable[[], Path],
                 get_fallback: Callable[[], tuple[str, str]], open_browser: Optional[Callable[[str], bool]] = None):
     import asyncio
@@ -737,6 +765,8 @@ def make_router(config_path: Callable[[], Path], get_vault: Callable[[], Path],
             "last_run": cfg["last_run"], "last_result": cfg["last_result"],
             "tracked_files": len(st.get("files", {})), "running": _RUN_LOCK.locked(),
             "redirect_uri": redirect_for(request),
+            "books_storage": cfg["books_storage"], "icloud_dir": cfg["icloud_dir"], "initial_done": cfg["initial_done"],
+            "icloud_last": cfg["icloud_last"], "progress": dict(_PROGRESS), "icloud_suggested": _icloud_default(),
         }
 
     @router.get("/storage")
@@ -754,6 +784,8 @@ def make_router(config_path: Callable[[], Path], get_vault: Callable[[], Path],
         auto: bool = False
         interval_minutes: int = 15
         sync_papers_books: bool = False
+        books_storage: str = "zotero"  # "zotero" (not synced here) | "drive" | "icloud"
+        icloud_dir: str = ""
 
     @router.post("/config")
     async def save(payload: ConfigIn, request: Request):
@@ -770,6 +802,18 @@ def make_router(config_path: Callable[[], Path], get_vault: Callable[[], Path],
         cfg["root_name"] = name
         cfg["auto"] = payload.auto
         cfg["sync_papers_books"] = payload.sync_papers_books
+        if payload.books_storage not in ("zotero", "drive", "icloud"):
+            raise HTTPException(400, "Unknown books storage")
+        cfg["books_storage"] = payload.books_storage
+        d = payload.icloud_dir.strip()
+        if payload.books_storage == "icloud":
+            d = d or _icloud_default()
+            if not d:
+                raise HTTPException(400, "iCloud Drive wasn't found on this computer. Turn on iCloud Drive, or choose Google Drive.")
+            if not Path(d).expanduser().parent.is_dir():
+                raise HTTPException(400, f"Folder not found: {Path(d).expanduser().parent}")
+            d = str(Path(d).expanduser())
+        cfg["icloud_dir"] = d
         cfg["interval_minutes"] = min(max(payload.interval_minutes, 5), 1440)
         save_config(config_path(), cfg)
         return view(request)
@@ -796,7 +840,9 @@ def make_router(config_path: Callable[[], Path], get_vault: Callable[[], Path],
             await asyncio.to_thread(finish_auth, config_path(), get_fallback(), code, state, redirect_for(request))
         except Exception as e:  # noqa: BLE001
             return page(f"Could not connect: {e}", False)
-        return page("Google Drive connected", True)
+        # first connection: start uploading everything right away (progress shows in Settings)
+        threading.Thread(target=run_all, args=(config_path(), get_vault(), get_fallback()), daemon=True).start()
+        return page("Google Drive connected — uploading your files…", True)
 
     @router.post("/disconnect")
     async def disconnect(request: Request):
@@ -814,15 +860,53 @@ def make_router(config_path: Callable[[], Path], get_vault: Callable[[], Path],
 
     @router.post("/run")
     async def run(request: Request, payload: RunIn = RunIn()):
-        result = await asyncio.to_thread(run_sync, config_path(), get_vault(), get_fallback(), payload.force)
+        result = await asyncio.to_thread(run_all, config_path(), get_vault(), get_fallback(), payload.force)
         return {"result": result, **view(request)}
 
     return router
 
 
+def run_all(config_path: Path, vault: Path, fallback: tuple[str, str] = ("", ""), force: bool = False,
+            client: Optional[httpx.Client] = None) -> dict:
+    """Google Drive sync plus, when books live in iCloud, the Books <-> iCloud folder mirror."""
+    cfg = load_config(config_path)
+    icloud = cfg.get("books_storage") == "icloud" and bool(cfg.get("icloud_dir"))
+    res = run_sync(config_path, vault, fallback, force, client) if (is_connected(cfg, fallback) or not icloud) else None
+    if not icloud:
+        return res  # type: ignore[return-value]
+    import icloud_sync
+
+    _PROGRESS.update(phase="Syncing books with iCloud", done=0, total=0)
+    try:
+        r2 = icloud_sync.run_mirror(Path(vault) / "15-Books", Path(cfg["icloud_dir"]),
+                                    Path(config_path).with_name("books-icloud-state.json"),
+                                    Path(vault) / ".ygg-config" / "sync-trash", force)
+    except Exception as e:  # noqa: BLE001
+        r2 = {"ok": False, "message": f"iCloud sync failed: {type(e).__name__}: {e}", "errors": []}
+    finally:
+        _PROGRESS.update(phase="", done=0, total=0)
+    c = load_config(config_path)
+    c["icloud_last"] = {"at": datetime.now().isoformat(timespec="seconds"), "ok": r2["ok"], "message": r2["message"]}
+    if res is None:
+        c["last_run"] = c["icloud_last"]["at"]
+        c["last_result"] = {k: v for k, v in r2.items() if k != "notes"}
+    save_config(config_path, c)
+    if res is None:
+        return r2
+    out = dict(res)
+    for k in ("uploaded", "downloaded", "deleted_local", "deleted_remote", "conflicts"):
+        out[k] = res.get(k, 0) + r2.get(k, 0)
+    out["errors"] = list(res.get("errors", [])) + list(r2.get("errors", []))
+    out["ok"] = bool(res.get("ok")) and bool(r2["ok"])
+    out["needs_confirm"] = bool(res.get("needs_confirm") or r2.get("needs_confirm"))
+    out["message"] = f"{res.get('message', '')} · {r2['message']}"
+    return out
+
+
 def auto_due(config_path: Path, fallback: tuple[str, str] = ("", "")) -> bool:
     cfg = load_config(config_path)
-    if not (cfg["auto"] and is_connected(cfg, fallback)):
+    icloud_only = cfg.get("books_storage") == "icloud" and bool(cfg.get("icloud_dir"))
+    if not (cfg["auto"] and (is_connected(cfg, fallback) or icloud_only)):
         return False
     if not cfg["last_run"]:
         return True

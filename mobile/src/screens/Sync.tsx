@@ -117,7 +117,7 @@ export function StorageBar({ label, u }: { label: string; u: Usage | null }) {
 }
 
 function DriveCard() {
-  const st = useY<DriveState & { client_id: string; has_secret: boolean; root_name: string; auto: boolean; interval_minutes: number; sync_papers_books: boolean; tracked_files: number }>('/api/drivesync/status', null as never);
+  const st = useY<DriveState & { client_id: string; has_secret: boolean; root_name: string; auto: boolean; interval_minutes: number; sync_papers_books: boolean; books_storage: string; icloud_dir: string; tracked_files: number }>('/api/drivesync/status', null as never);
   const [drive, setDrive] = useState<Usage | null>(null);
   const [zot, setZot] = useState<Usage | null>(null);
   const [msg, setMsg] = useState('');
@@ -131,7 +131,7 @@ function DriveCard() {
   }, [st.data?.connected]);
   const d = st.data;
   if (!d) return <section className="card"><b>Google Drive</b><p className="muted sm">{st.err || 'Checking…'}</p></section>;
-  const cfg = (patch: Record<string, unknown>) => yg('/api/drivesync/config', { method: 'POST', body: { client_id: cid ?? d.client_id, client_secret: sec, root_name: root ?? d.root_name, auto: d.auto, interval_minutes: d.interval_minutes, sync_papers_books: d.sync_papers_books, ...patch } }).then(() => { setSec(''); st.reload(); });
+  const cfg = (patch: Record<string, unknown>) => yg('/api/drivesync/config', { method: 'POST', body: { client_id: cid ?? d.client_id, client_secret: sec, root_name: root ?? d.root_name, auto: d.auto, interval_minutes: d.interval_minutes, sync_papers_books: d.sync_papers_books, books_storage: d.books_storage, icloud_dir: d.icloud_dir, ...patch } }).then(() => { setSec(''); st.reload(); });
   const act = async (fn: () => Promise<unknown>, ok: string) => { setBusy(true); setMsg(''); try { await fn(); setMsg(ok); } catch (e) { setMsg(e instanceof Error ? e.message : 'Failed'); } setBusy(false); };
   const connected = d.connected && !d.needs_reconnect;
   return (
@@ -145,7 +145,13 @@ function DriveCard() {
         <label className="label" htmlFor="droot">Drive folder name</label>
         <input id="droot" className="input" value={root ?? d.root_name} onChange={(e) => setRoot(e.target.value)} onBlur={() => root !== null && root !== d.root_name && act(() => cfg({ root_name: root }), 'Saved.')} />
         <label className="row gap sm" style={{ marginTop: 10 }}><input type="checkbox" checked={d.auto} onChange={(e) => act(() => cfg({ auto: e.target.checked }), 'Saved.')} /> Sync automatically every {d.interval_minutes} min</label>
-        <label className="row gap sm" style={{ marginTop: 6 }}><input type="checkbox" checked={d.sync_papers_books} onChange={(e) => act(() => cfg({ sync_papers_books: e.target.checked }), 'Saved.')} /> Also sync the Papers and Books folders</label>
+        <label className="label" htmlFor="dbooks" style={{ marginTop: 10 }}>Where to keep books</label>
+        <select id="dbooks" className="input" value={d.books_storage === 'icloud' ? 'icloud' : d.books_storage === 'drive' ? 'drive' : 'zotero'} onChange={(e) => act(() => cfg({ books_storage: e.target.value }), 'Saved.')}>
+          <option value="zotero">Zotero only</option>
+          <option value="drive">Google Drive</option>
+          <option value="icloud" disabled={d.books_storage !== 'icloud'}>iCloud Drive (set on desktop)</option>
+        </select>
+        <p className="muted sm">Papers always stay in Zotero. iCloud is chosen in the desktop app.</p>
         <div className="row gap" style={{ marginTop: 12 }}>
           <button className="btn primary" disabled={busy || d.running} onClick={() => act(async () => { const r = await yg<{ result: { message: string } }>('/api/drivesync/run', { method: 'POST', body: {} }); st.reload(); setMsg(r.result.message); }, '')}>{d.running ? 'Syncing…' : 'Sync now'}</button>
           <button className="btn" disabled={busy} onClick={() => { if (confirm('Disconnect Google Drive? Files already on Drive and on disk stay as they are.')) void act(() => yg('/api/drivesync/disconnect', { method: 'POST', body: {} }).then(st.reload), 'Disconnected.'); }}>Disconnect</button>

@@ -13,7 +13,8 @@ function Err({ text }: { text: string }) { return text ? <p className="err sm">{
 
 export function ActiveTasks() {
   const today = isoDay();
-  const { data, err, loading } = useY<{ active: { project_name: string; main_task_id: string; main_task_name: string; deadline: string | null; subtask_done: number; subtask_total: number }[] }>('/api/tasks/active-summary', { active: [] });
+  const { data, err, loading } = useY<{ active: { status_id?: string; project_name: string; main_task_id: string; main_task_name: string; deadline: string | null; subtask_done: number; subtask_total: number }[] }>('/api/tasks/active-summary', { active: [] });
+  const st = useY<{ task_statuses: { id: string; name: string; color: string }[] }>('/api/settings/task-statuses', { task_statuses: [] });
   return (
     <section className="card">
       <div className="row between"><b>Active tasks</b><a className="muted sm" href="#/tasks">All tasks</a></div>
@@ -21,7 +22,7 @@ export function ActiveTasks() {
       {!loading && !err && data.active.length === 0 && <p className="muted sm">No active tasks. Mark a main task active on desktop.</p>}
       {data.active.map((t) => (
         <div key={t.project_name + t.main_task_id} className="mt">
-          <div className="row between"><span>{t.main_task_name}</span><span className="muted sm">{t.subtask_done}/{t.subtask_total}{t.deadline ? ` · ${fmtDue(t.deadline, today)}` : ''}</span></div>
+          <div className="row between"><span>{(() => { const x = st.data.task_statuses.find((y) => y.id === t.status_id); return x ? <span className="chip" style={{ borderColor: x.color, color: x.color, marginRight: 8, padding: '0 8px', minHeight: 22, fontSize: 11 }}>{x.name}</span> : null; })()}{t.main_task_name}</span><span className="muted sm">{t.subtask_done}/{t.subtask_total}{t.deadline ? ` · ${fmtDue(t.deadline, today)}` : ''}</span></div>
           <div className="muted sm">{t.project_name}</div>
           <div className="bar" style={{ marginTop: 6 }}><i style={{ width: `${t.subtask_total ? (t.subtask_done / t.subtask_total) * 100 : 0}%` }} /></div>
         </div>

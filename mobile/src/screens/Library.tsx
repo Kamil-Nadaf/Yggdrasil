@@ -1,3 +1,4 @@
+import { ProjectPicker } from './ProjectHub';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { authHeaders } from '../api';
 import PdfView from '../PdfView';
@@ -128,6 +129,7 @@ export function Collection({ id }: { id: string }) {
           <div className="sheet" role="dialog" aria-label="Manage item" onClick={(e) => e.stopPropagation()}>
             <b className="clip">{managed.title}</b>
             {mErr && <p className="err sm">{mErr}</p>}
+            <ProjectPicker item={managed} onChanged={reload} />
             <button className="grow plainbtn" onClick={async () => { const name = prompt('Rename', managed.title)?.trim(); if (!name || name === managed.title) return; try { await yg(`/api/reading/${encodeURIComponent(managed.slug)}`, { method: 'PATCH', body: { title: name } }); setManaged(null); reload(); } catch (e) { setMErr(e instanceof Error ? e.message : 'Rename failed'); } }}><span className="f1">Rename…</span></button>
             {(['want', 'reading', 'finished'] as const).filter((st) => st !== managed.status).map((st) => (
               <button key={st} className="grow plainbtn" onClick={async () => { try { await yg(`/api/reading/${encodeURIComponent(managed.slug)}`, { method: 'PATCH', body: { status: st } }); setManaged(null); reload(); } catch (e) { setMErr(e instanceof Error ? e.message : 'Failed'); } }}><span className="f1">Mark as {STATUS[st].toLowerCase()}</span></button>

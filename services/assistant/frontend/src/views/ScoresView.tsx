@@ -1210,6 +1210,7 @@ export default function ScoresView({
               return (
                 <div key={key} className="dash-task-bar dash-task-main">
                   <div className="dash-task-bar-label">
+                    <StatusPill statuses={taskStatuses} statusId={t.status_id} onChange={(sid) => void quickPatch(t, { status_id: sid })} />
                     <button type="button" className="dash-task-toggle" onClick={() => toggleCollapsed(key)} aria-expanded={open}>
                       {open ? "▾" : "▸"} ★ {t.project_name} › {t.main_task_name}
                     </button>
@@ -1219,7 +1220,6 @@ export default function ScoresView({
                     <button type="button" className="dash-task-open" title="Open in Tasks" onClick={() => onOpenTask?.(t.project_slug, t.main_task_id)}>↗</button>
                   </div>
                   <div className="dash-task-quick">
-                    <StatusPill statuses={taskStatuses} statusId={t.status_id} onChange={(sid) => void quickPatch(t, { status_id: sid })} />
                     <PriorityPill priorities={taskPriorities} value={t.priority_id} onChange={(pid) => void quickPatch(t, { priority_id: pid })} />
                     <TimerButton item={t} now={timerNow} onToggle={() => void quickTimer(t)} />
                   </div>

@@ -46,7 +46,7 @@ export interface DCol { id: string; name: string; slugs: string[]; parent?: stri
 export interface Item {
   slug: string; title: string; authors: string[]; year?: number | null; status: 'want' | 'reading' | 'done' | string;
   progress: number; last_page: number; total_pages?: number | null; kind: 'paper' | 'book'; arxiv: string;
-  has_file: boolean; format: string; venue: string; added?: string;
+  has_file: boolean; format: string; venue: string; added?: string; tags?: string[];
 }
 
 export const isoDay = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;

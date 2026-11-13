@@ -141,7 +141,7 @@ export default function BooksView({ requestSection }: { requestSection?: "all" |
   }, [books]);
   const tags = useMemo(() => {
     const m = new Map<string, number>();
-    books.forEach((b) => b.tags.forEach((t) => m.set(t, (m.get(t) || 0) + 1)));
+    books.forEach((b) => b.tags.forEach((t) => { if (!t.startsWith("project:")) m.set(t, (m.get(t) || 0) + 1); }));
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [books]);
   const title = searching ? "Search" : section === "home" ? "Home" : section === "goals" ? "Reading goals" : col ? col.name : tagName ? `Tag: ${tagName}` : section === "dupes" ? "Possible duplicates" : meta?.title || "All items";

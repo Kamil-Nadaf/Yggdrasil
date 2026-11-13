@@ -7,6 +7,7 @@ const P: Record<string, ReactNode> = {
   notes: <><path d="M6 3h9l4 4v14H6z" /><path d="M9 12h7M9 16h5" /></>,
   arxiv: <><path d="M4 5h12v14H6a2 2 0 0 1-2-2z" /><path d="M16 9h4v8a2 2 0 0 1-2 2h-2" /><path d="M7 9h6M7 13h6" /></>,
   library: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
+  projects: <><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M3 11h18" /></>,
   write: <><path d="M4 20h4L19 9l-4-4L4 16z" /><path d="M13 7l4 4" /></>,
   search: <><circle cx="11" cy="11" r="6" /><path d="M20 20l-4.5-4.5" /></>,
   back: <path d="M15 5l-7 7 7 7" />,
@@ -33,6 +34,7 @@ export function Icon({ name, size = 22 }: { name: string; size?: number }) {
 
 const TABS = [
   { to: 'today', label: 'Today' },
+  { to: 'projects', label: 'Projects' },
   { to: 'notes', label: 'Notes' },
   { to: 'arxiv', label: 'arXiv' },
   { to: 'library', label: 'Library' },

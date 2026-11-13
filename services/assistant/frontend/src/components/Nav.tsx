@@ -30,6 +30,7 @@ const svg = (d: ReactNode) => (
 
 export const ITEMS: { id: View; label: string; icon: ReactNode }[] = [
   { id: "scores", label: "Dashboard", icon: svg(<><rect x="3" y="3" width="7" height="9" rx="1" /><rect x="14" y="3" width="7" height="5" rx="1" /><rect x="14" y="12" width="7" height="9" rx="1" /><rect x="3" y="16" width="7" height="5" rx="1" /></>) },
+  { id: "projects", label: "Projects", icon: svg(<><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></>) },
   { id: "papers", label: "Papers", icon: svg(<><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5M9 13h6M9 17h6" /></>) },
   { id: "books", label: "Collection", icon: svg(<><path d="M4 19.5V5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2.5z" /><path d="M4 19.5A2 2 0 0 0 6 21h13" /></>) },
   { id: "editor", label: "Notes", icon: svg(<><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></>) },

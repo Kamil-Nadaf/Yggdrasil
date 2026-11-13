@@ -130,11 +130,14 @@ export default function TasksView({
   onFocusConsumed,
   requestTab,
   onTabChange,
+  lockedProject,
 }: {
   focus?: { projectSlug: string; mainTaskId: string } | null;
   onFocusConsumed?: () => void;
   requestTab?: TasksTab;
   onTabChange?: (t: TasksTab) => void;
+  /** Embedded in a project workspace: only this project's tasks, no project picker. */
+  lockedProject?: string;
 }) {
   const data = useTaskData();
   const [tab, setTab] = useState<Tab>(() => {
@@ -154,7 +157,8 @@ export default function TasksView({
   useEffect(() => { onTabChange?.(tab); }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
   /** What is actually on screen: the planner shows one of three views. */
   const eff: "calendar" | "timeline" | "gantt" | "list" | "board" = tab === "planner" ? plannerView : tab;
-  const [projectFilter, setProjectFilter] = useState<string>(() => readLS(PROJECT_KEY, "all"));
+  const [projectFilterState, setProjectFilter] = useState<string>(() => readLS(PROJECT_KEY, "all"));
+  const projectFilter = lockedProject ?? projectFilterState;
   const [showDone, setShowDone] = useState(() => readLS(DONE_KEY, "1") === "1");
   const [openRef, setOpenRef] = useState<string | null>(null);
   const [newOpen, setNewOpen] = useState(false);
@@ -186,10 +190,11 @@ export default function TasksView({
     setPlannerView(v);
     writeLS(PLANNER_KEY, v);
   };
-  useEffect(() => { writeLS(TAB_KEY, tab); }, [tab]);
+  useEffect(() => { if (!lockedProject) writeLS(TAB_KEY, tab); }, [tab, lockedProject]);
   const changeProject = (v: string) => {
+    if (lockedProject) return;
     setProjectFilter(v);
-    writeLS(PROJECT_KEY, v);
+    if (!lockedProject) writeLS(PROJECT_KEY, v);
     setOptsOpen(false);
   };
 
@@ -276,12 +281,14 @@ export default function TasksView({
 
         {eff !== "calendar" && (
           <>
-            <select value={projectFilter} onChange={(e) => changeProject(e.target.value)} aria-label="Project filter">
-              <option value="all">All projects</option>
-              {projects.map((p) => (
-                <option key={p.slug} value={p.slug}>{p.name}</option>
-              ))}
-            </select>
+            {!lockedProject && (
+              <select value={projectFilter} onChange={(e) => changeProject(e.target.value)} aria-label="Project filter">
+                <option value="all">All projects</option>
+                {projects.map((p) => (
+                  <option key={p.slug} value={p.slug}>{p.name}</option>
+                ))}
+              </select>
+            )}
             <label className="tk-check">
               <input
                 type="checkbox"
@@ -295,8 +302,8 @@ export default function TasksView({
             </label>
           </>
         )}
-        <button type="button" className="btn" onClick={() => setProjectModal(true)}>+ Project</button>
-        {selectedProject && eff !== "calendar" && (
+        {!lockedProject && <button type="button" className="btn" onClick={() => setProjectModal(true)}>+ Project</button>}
+        {selectedProject && !lockedProject && eff !== "calendar" && (
           <div className="tk-pop-anchor">
             <button type="button" className="btn" onClick={() => setOptsOpen((v) => !v)} aria-expanded={optsOpen}>Project options</button>
             {optsOpen && (

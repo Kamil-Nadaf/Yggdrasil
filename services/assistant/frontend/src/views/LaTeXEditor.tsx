@@ -908,6 +908,14 @@ export default function LaTeXEditor() {
   }, [editorVisible]);
 
   useEffect(() => {
+    // A project's "Paper writing" tab asks to land in one of its LaTeX folders.
+    try {
+      const f = localStorage.getItem("yggdrasil:latex-open-folder");
+      if (f) {
+        localStorage.removeItem("yggdrasil:latex-open-folder");
+        setCurrentFolder(f);
+      }
+    } catch { /* optional */ }
     refreshFiles();
     return () => {
       if (pdfObjectUrlRef.current) {

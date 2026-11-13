@@ -129,6 +129,13 @@ export async function localRequest(method: string, rawPath: string, body: any): 
     if (method === 'POST') { let s = slugify(body.name); while (d.projects.some((x) => x.slug === s)) s += '-2'; d.projects.push({ slug: s, name: body.name, pinned: false, main: [] }); return save({ ok: true, slug: s }); }
     return { projects: d.projects.map((x) => ({ slug: x.slug, name: x.name, pinned: x.pinned, main_task_count: x.main.length })) };
   }
+  if ((m = p.match(/^\/api\/task-projects\/([^/]+)\/main-tasks\/([^/]+)$/)) && method === 'PUT') {
+    const mt = d.projects.find((x) => x.slug === dec(m![1]))?.main.find((x) => x.id === m![2]); if (!mt) throw new Error('Task not found');
+    if (typeof body.is_active === 'boolean') mt.is_active = body.is_active;
+    if (body.name) mt.name = body.name;
+    if (body.deadline !== undefined) mt.deadline = body.deadline;
+    return save({ ok: true });
+  }
   if ((m = p.match(/^\/api\/task-projects\/([^/]+)\/main-tasks(?:\/([^/]+)\/subtasks(?:\/([^/]+))?)?$/))) {
     const mm = m!; const proj = d.projects.find((x) => x.slug === dec(mm[1])); if (!proj) throw new Error('Project not found');
     if (!mm[2]) {

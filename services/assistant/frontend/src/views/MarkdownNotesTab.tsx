@@ -203,9 +203,17 @@ function PresentPane({
   );
 }
 
-export default function MarkdownNotesTab({ section = "Quick Notes" }: { section?: string }) {
-  const rootFolder = section;
-  const storageKey = `${slugSection(section)}-sidebar-state`;
+export default function MarkdownNotesTab({
+  section = "Quick Notes",
+  rootFolder: rootFolderProp,
+}: {
+  /** Display name (and, without rootFolder, the folder under the notes workspace). */
+  section?: string;
+  /** Folder under the notes workspace when it differs from the name, e.g. "Projects/my-paper". */
+  rootFolder?: string;
+}) {
+  const rootFolder = rootFolderProp ?? section;
+  const storageKey = `${slugSection(rootFolder)}-sidebar-state`;
 
   const [files, setFiles] = useState<LatexFile[]>([]);
   const [folders, setFolders] = useState<string[]>([]);
@@ -1156,7 +1164,7 @@ export default function MarkdownNotesTab({ section = "Quick Notes" }: { section?
   return (
     <div className="notes-embedded-shell">
       <WorkspaceLayout
-        panelGroupId={`notes-${slugSection(section)}`}
+        panelGroupId={`notes-${slugSection(rootFolder)}`}
         menuBar={menuBar}
         sidebar={sidebar}
         sidebarCollapsed={sidebarCollapsed}

@@ -385,6 +385,26 @@ export type AiProviderConfig = {
 
 // ── API calls ──────────────────────────────────────────────────────────────
 
+
+export interface ProjectStats {
+  slug: string;
+  name: string;
+  created_at: string;
+  main_count: number;
+  task_count: number;
+  done_count: number;
+  progress: number;
+  overdue: number;
+  due_soon: number;
+  starred: number;
+  next_deadline: string | null;
+  reading: number;
+  notes: number;
+  files: number;
+  latex: string[];
+}
+export interface ProjectFile { name: string; size: number; modified: string }
+
 export const api = {
   brief: {
     today: () => req<{ date: string; raw: string }>("GET", "/api/brief/today"),
@@ -558,6 +578,20 @@ export const api = {
         "GET",
         `/api/habits/range?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
       ),
+  },
+
+  projects: {
+    list: () => req<{ projects: ProjectStats[] }>("GET", "/api/projects"),
+    get: (slug: string) =>
+      req<{ project: ProjectStats; tag: string; notes_folder: string }>("GET", `/api/projects/${encodeURIComponent(slug)}`),
+    setLatex: (slug: string, latex: string[]) =>
+      req<{ ok: boolean; latex: string[] }>("PUT", `/api/projects/${encodeURIComponent(slug)}/links`, { latex }),
+    files: (slug: string) => req<{ files: ProjectFile[] }>("GET", `/api/projects/${encodeURIComponent(slug)}/files`),
+    upload: (slug: string, file: File) =>
+      upload<{ ok: boolean; name: string; size: number }>("POST", `/api/projects/${encodeURIComponent(slug)}/files`, file),
+    fileUrl: (slug: string, name: string) => `/api/projects/${encodeURIComponent(slug)}/files/${encodeURIComponent(name)}`,
+    deleteFile: (slug: string, name: string) =>
+      req<{ ok: boolean }>("DELETE", `/api/projects/${encodeURIComponent(slug)}/files/${encodeURIComponent(name)}`),
   },
 
   taskProjects: {

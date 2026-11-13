@@ -3224,6 +3224,175 @@ async def list_task_projects():
     return {"projects": out}
 
 
+# ── Projects: tasks + tagged reading + notes + files + LaTeX drafts ──────────
+
+from projects import (  # noqa: E402
+    PROJECT_TAG_PREFIX as _PROJ_TAG,
+    clean_latex_links as _proj_clean_latex,
+    project_slugs_of as _proj_slugs_of,
+    safe_filename as _proj_safe_name,
+    summarize_tasks as _proj_summarize,
+)
+
+PROJECT_FILES_LIMIT = 100 * 1024 * 1024
+
+
+def _project_files_dir(slug: str) -> Path:
+    project_dir(slug)  # validates the slug
+    return VAULT / "50-Projects" / slug / "files"
+
+
+def _project_notes_dir(slug: str) -> Path:
+    project_dir(slug)
+    return VAULT / NOTES_WORKSPACE / "Projects" / slug
+
+
+def _count_files(d: Path, pattern: str = "*") -> int:
+    if not d.is_dir():
+        return 0
+    return sum(1 for p in d.rglob(pattern) if p.is_file() and not any(part.startswith(".") for part in p.relative_to(d).parts))
+
+
+def _reading_counts() -> dict[str, int]:
+    counts: dict[str, int] = {}
+    books = VAULT / "15-Books"
+    if not books.is_dir():
+        return counts
+    for md in books.glob("*/_book.md"):
+        try:
+            tags = frontmatter.load(str(md)).metadata.get("tags") or []
+        except Exception:
+            continue
+        for slug in _proj_slugs_of(tags):
+            counts[slug] = counts.get(slug, 0) + 1
+    return counts
+
+
+def _project_stats(d: Path, reading: dict[str, int]) -> Optional[dict]:
+    project = _project_from_dir(d)
+    if not project or project["pinned"]:
+        return None
+    mains = [(p.stem, dict(frontmatter.load(str(p)).metadata)) for p in sorted(d.glob("mt-*.md"))]
+    subs = [dict(frontmatter.load(str(p)).metadata) for p in sorted(d.glob("st-*.md"))]
+    meta = frontmatter.load(str(d / "_project.md")).metadata
+    return {
+        "slug": project["slug"],
+        "name": project["name"],
+        "created_at": project["created_at"],
+        **_proj_summarize(mains, subs, date.today()),
+        "reading": reading.get(d.name, 0),
+        "notes": _count_files(_project_notes_dir(d.name), "*.md"),
+        "files": _count_files(_project_files_dir(d.name)),
+        "latex": _proj_clean_latex(meta.get("latex")),
+    }
+
+
+@app.get("/api/projects")
+async def list_projects():
+    _ensure_pinned_project()
+    reading = _reading_counts()
+    out = []
+    for d in sorted(tasks_dir().iterdir()):
+        if d.is_dir():
+            st = _project_stats(d, reading)
+            if st:
+                out.append(st)
+    out.sort(key=lambda p: p["name"].lower())
+    return {"projects": out}
+
+
+@app.get("/api/projects/{slug}")
+async def get_project(slug: str):
+    d = project_dir(slug)
+    st = _project_stats(d, _reading_counts())
+    if not st:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {"project": st, "tag": f"{_PROJ_TAG}{slug}", "notes_folder": f"Projects/{slug}"}
+
+
+class ProjectLinks(BaseModel):
+    latex: list[str] = []
+
+
+@app.put("/api/projects/{slug}/links")
+async def set_project_links(slug: str, payload: ProjectLinks):
+    d = project_dir(slug)
+    meta = d / "_project.md"
+    if not meta.exists():
+        raise HTTPException(status_code=404, detail="Project not found")
+    post = frontmatter.load(str(meta))
+    post.metadata["latex"] = _proj_clean_latex(payload.latex)
+    meta.write_text(frontmatter.dumps(post))
+    return {"ok": True, "latex": post.metadata["latex"]}
+
+
+@app.get("/api/projects/{slug}/files")
+async def list_project_files(slug: str):
+    d = _project_files_dir(slug)
+    files = []
+    if d.is_dir():
+        for p in sorted(d.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+            if p.is_file() and not p.name.startswith("."):
+                st = p.stat()
+                files.append({"name": p.name, "size": st.st_size, "modified": datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds")})
+    return {"files": files}
+
+
+@app.post("/api/projects/{slug}/files")
+async def upload_project_file(slug: str, file: UploadFile = File(...)):
+    if not (tasks_dir() / slug / "_project.md").exists():
+        raise HTTPException(status_code=404, detail="Project not found")
+    d = _project_files_dir(slug)
+    name = _proj_safe_name(file.filename or "")
+    if not name:
+        raise HTTPException(status_code=400, detail="Invalid file name")
+    d.mkdir(parents=True, exist_ok=True)
+    dest = d / name
+    stem, suffix, n = dest.stem, dest.suffix, 2
+    while dest.exists():
+        dest = d / f"{stem} ({n}){suffix}"
+        n += 1
+    size = 0
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    try:
+        with tmp.open("wb") as fh:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > PROJECT_FILES_LIMIT:
+                    raise HTTPException(status_code=413, detail="File is larger than 100 MB")
+                fh.write(chunk)
+        os.replace(tmp, dest)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+    return {"ok": True, "name": dest.name, "size": size}
+
+
+def _project_file_path(slug: str, name: str) -> Path:
+    safe = _proj_safe_name(name)
+    if not safe or safe != name:
+        raise HTTPException(status_code=400, detail="Invalid file name")
+    p = _project_files_dir(slug) / safe
+    if not p.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return p
+
+
+@app.get("/api/projects/{slug}/files/{name}")
+async def download_project_file(slug: str, name: str):
+    p = _project_file_path(slug, name)
+    return FileResponse(p, filename=p.name, content_disposition_type="inline")
+
+
+@app.delete("/api/projects/{slug}/files/{name}")
+async def delete_project_file(slug: str, name: str):
+    _project_file_path(slug, name).unlink()
+    return {"ok": True}
+
+
 class ProjectCreate(BaseModel):
     name: str
 

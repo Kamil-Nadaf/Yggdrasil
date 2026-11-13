@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { api } from "../../api/client";
 import { CITE_STYLES, ITEM_TYPES, reading, type BookCollection, type CiteStyle, type ItemType, type ReadingBook } from "../../api/reading";
 
 interface Props {
@@ -58,8 +59,15 @@ export default function ItemInfo({ book, collections, onClose, onOpen, onAttach,
     setDirty(false);
   }, "Saved");
 
-  const saveTags = (tags: string[]) => run(() => reading.patch(book.slug, { tags }));
-  const addTag = () => { const t = tag.trim(); setTag(""); if (t && !book.tags.includes(t)) void saveTags([...book.tags, t]); };
+  // Project membership is just a reserved "project:<slug>" tag, so it syncs with the vault like any tag.
+  const [projects, setProjects] = useState<{ slug: string; name: string }[]>([]);
+  useEffect(() => { api.projects.list().then((r) => setProjects(r.projects.map((p) => ({ slug: p.slug, name: p.name })))).catch(() => {}); }, []);
+  const projTags = book.tags.filter((t) => t.startsWith("project:"));
+  const plainTags = book.tags.filter((t) => !t.startsWith("project:"));
+  const projName = (t: string) => projects.find((p) => `project:${p.slug}` === t)?.name ?? t.slice(8);
+  const saveTags = (tags: string[]) => run(() => reading.patch(book.slug, { tags: [...tags, ...projTags] }));
+  const addTag = () => { const t = tag.trim(); setTag(""); if (t && !t.startsWith("project:") && !book.tags.includes(t)) void saveTags([...plainTags, t]); };
+  const setProjTags = (next: string[]) => run(() => reading.patch(book.slug, { tags: [...plainTags, ...next] }));
   const inCols = collections.filter((c) => c.slugs.includes(book.slug));
 
   function toggleCol(c: BookCollection) {
@@ -115,9 +123,20 @@ export default function ItemInfo({ book, collections, onClose, onOpen, onAttach,
         <span className="muted ii-msg" role="status">{msg}</span>
       </div>
 
+      <div className="ii-sec">Projects</div>
+      <div className="ii-tags">
+        {projTags.map((t) => <span key={t} className="ii-tag">{projName(t)}<button type="button" aria-label={`Remove from project ${projName(t)}`} onClick={() => void setProjTags(projTags.filter((x) => x !== t))}>×</button></span>)}
+        {projects.some((p) => !projTags.includes(`project:${p.slug}`)) ? (
+          <select value="" aria-label="Add to project" disabled={busy} onChange={(e) => { if (e.target.value) void setProjTags([...projTags, `project:${e.target.value}`]); }}>
+            <option value="">+ Add to project…</option>
+            {projects.filter((p) => !projTags.includes(`project:${p.slug}`)).map((p) => <option key={p.slug} value={p.slug}>{p.name}</option>)}
+          </select>
+        ) : projects.length === 0 ? <span className="muted">No projects yet — create one in Projects.</span> : null}
+      </div>
+
       <div className="ii-sec">Tags</div>
       <div className="ii-tags">
-        {book.tags.map((t) => <span key={t} className="ii-tag">{t}<button type="button" aria-label={`Remove tag ${t}`} onClick={() => void saveTags(book.tags.filter((x) => x !== t))}>×</button></span>)}
+        {plainTags.map((t) => <span key={t} className="ii-tag">{t}<button type="button" aria-label={`Remove tag ${t}`} onClick={() => void saveTags(plainTags.filter((x) => x !== t))}>×</button></span>)}
         <form onSubmit={(e) => { e.preventDefault(); addTag(); }}><input value={tag} onChange={(e) => setTag(e.target.value)} placeholder="Add tag…" aria-label="Add tag" maxLength={60} /></form>
       </div>
 

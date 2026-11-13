@@ -70,8 +70,8 @@ cat > "${APP}/Contents/Info.plist" << 'EOF'
   <key>CFBundleName</key><string>Yggdrasil</string>
   <key>CFBundleDisplayName</key><string>Yggdrasil</string>
   <key>CFBundleIdentifier</key><string>io.yggdrasil.app</string>
-  <key>CFBundleVersion</key><string>0.4.29</string>
-  <key>CFBundleShortVersionString</key><string>0.4.29</string>
+  <key>CFBundleVersion</key><string>0.4.30</string>
+  <key>CFBundleShortVersionString</key><string>0.4.30</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>Yggdrasil</string>
   <key>CFBundleIconFile</key><string>Yggdrasil</string>
@@ -123,6 +123,7 @@ cp "${ROOT}/services/assistant/notifications.py" "${APPDIR}/notifications.py"
 cp "${ROOT}/services/assistant/task_options.py"  "${APPDIR}/task_options.py"
 cp "${ROOT}/services/assistant/task_sync.py"     "${APPDIR}/task_sync.py"
 cp "${ROOT}/services/assistant/drive_sync.py"    "${APPDIR}/drive_sync.py"
+cp "${ROOT}/services/assistant/projects.py"       "${APPDIR}/projects.py"
 cp "${ROOT}/services/assistant/mcp_server.py"    "${APPDIR}/mcp_server.py"
 rm -rf "${APPDIR}/frontend"
 mkdir -p "${APPDIR}/frontend"
@@ -210,7 +211,7 @@ pkgbuild \
   --root "$PKG_ROOT" \
   --scripts "$PKG_SCRIPTS" \
   --identifier io.yggdrasil.app \
-  --version 0.4.29 \
+  --version 0.4.30 \
   "$PKG_UNSIGNED"
 
 DIST_XML="${OUT}/distribution.xml"
@@ -227,7 +228,7 @@ cat > "$DIST_XML" << EOF
     <choice id="yggdrasil" title="Yggdrasil" description="Install Yggdrasil to /Applications">
         <pkg-ref id="io.yggdrasil.app">Yggdrasil.pkg</pkg-ref>
     </choice>
-    <pkg-ref id="io.yggdrasil.app" version="0.4.29" onConclusion="none">Yggdrasil.pkg</pkg-ref>
+    <pkg-ref id="io.yggdrasil.app" version="0.4.30" onConclusion="none">Yggdrasil.pkg</pkg-ref>
 </installer-gui-script>
 EOF
 

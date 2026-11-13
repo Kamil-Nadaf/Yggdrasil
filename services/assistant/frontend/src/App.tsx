@@ -16,17 +16,18 @@ import "./split-view.css";
 import ActivityTimer from "./components/ActivityTimer";
 import ManualTimerRunner from "./components/ManualTimerRunner";
 import TasksView from "./views/TasksView";
+import ProjectsView from "./views/ProjectsView";
 import CalendarView from "./views/CalendarView";
 import { applyTheme } from "./lib/theme";
 import { APP_WATERMARK } from "./lib/copyright";
 import { startSettingsSync } from "./lib/settingsSync";
 
-export type View = "editor" | "graph" | "ask" | "scores" | "latex" | "papers" | "books" | "tasks" | "calendar" | "settings";
+export type View = "editor" | "graph" | "ask" | "scores" | "latex" | "papers" | "books" | "tasks" | "projects" | "calendar" | "settings";
 
 type SplitableView = Exclude<View, "settings">;
 const SPLIT_KEY = "yggdrasil:split-view";
 const SPLIT_RATIO_KEY = "yggdrasil:split-ratio";
-const SPLITTABLE: SplitableView[] = ["editor", "graph", "ask", "scores", "latex", "papers", "books", "tasks", "calendar"];
+const SPLITTABLE: SplitableView[] = ["editor", "graph", "ask", "scores", "latex", "papers", "books", "tasks", "projects", "calendar"];
 function loadSplit(): SplitableView | null {
   try {
     const v = localStorage.getItem(SPLIT_KEY) as SplitableView | null;
@@ -197,6 +198,7 @@ export default function App() {
             onFocusConsumed={() => setTaskFocus(null)}
           />
         )}
+        {v === "projects" && <ProjectsView onOpenLatex={() => goView("latex")} />}
         {v === "calendar" && <CalendarView onOpenTask={openTask} />}
         {v === "graph" && <GraphView onOpenEditor={openEditor} />}
         {v === "ask" && <AskView />}

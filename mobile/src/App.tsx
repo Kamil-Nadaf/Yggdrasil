@@ -6,6 +6,7 @@ import { Library, Collection, Reader } from './screens/Library';
 import { Projects, LatexEditor } from './screens/Write';
 import Sync from './screens/Sync';
 import { Tasks } from './screens/Tasks';
+import { ProjectList, ProjectView } from './screens/ProjectHub';
 import Settings from './screens/Settings';
 import { isLocal } from './ygg';
 import { cloudDue, cloudSync } from './cloud/cloud';
@@ -37,6 +38,7 @@ export default function App() {
     case 'library': return b ? <Collection id={b} /> : <Library />;
     case 'read': return <Reader id={b} />;
     case 'write': return b ? <LatexEditor id={b} /> : <Projects />;
+    case 'projects': return b ? <ProjectView slug={b} /> : <ProjectList />;
     case 'tasks': return <Tasks slug={b} />;
     case 'settings': return <Settings />;
     case 'sync': return <Sync />;

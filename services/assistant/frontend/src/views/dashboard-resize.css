@@ -52,3 +52,8 @@
 .rg-timer-btn.running { background: color-mix(in srgb, var(--crit) 14%, var(--surface)); border-color: var(--crit); color: var(--text); }
 
 .dash-fit-btn { display: inline-flex; align-items: center; justify-content: center; padding: 0 12px; }
+
+/* Masonry dashboard: cards are packed into the first free spot (no empty holes under short cards). */
+.dashboard .dash-grid { grid-auto-rows: 8px; row-gap: 0; column-gap: 20px; grid-auto-flow: dense; align-items: start; }
+.dashboard .dash-slot { align-self: start; }
+@media (max-width: 900px) { .dashboard .dash-slot { grid-row-end: auto !important; } .dashboard .dash-grid { grid-auto-rows: auto; row-gap: 20px; } }

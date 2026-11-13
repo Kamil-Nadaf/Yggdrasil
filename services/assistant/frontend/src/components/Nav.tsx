@@ -17,7 +17,7 @@ const NOTES_TABS: { id: NotesTab; label: string }[] = [
   { id: "meeting-minutes", label: "Meeting Minutes" },
 ];
 
-const SUBS: Partial<Record<View, { key: "notes" | "tasks" | "collection" | "papers"; items: { id: string; label: string }[] }>> = {
+export const SUBS: Partial<Record<View, { key: "notes" | "tasks" | "collection" | "papers"; items: { id: string; label: string }[] }>> = {
   editor: { key: "notes", items: NOTES_TABS },
   papers: { key: "papers", items: [{ id: "daily", label: "Daily Archive" }, { id: "search", label: "Search" }] },
   tasks: { key: "tasks", items: [{ id: "planner", label: "Planner" }, { id: "list", label: "List" }, { id: "board", label: "Board" }] },
@@ -28,7 +28,7 @@ const svg = (d: ReactNode) => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{d}</svg>
 );
 
-const ITEMS: { id: View; label: string; icon: ReactNode }[] = [
+export const ITEMS: { id: View; label: string; icon: ReactNode }[] = [
   { id: "scores", label: "Dashboard", icon: svg(<><rect x="3" y="3" width="7" height="9" rx="1" /><rect x="14" y="3" width="7" height="5" rx="1" /><rect x="14" y="12" width="7" height="9" rx="1" /><rect x="3" y="16" width="7" height="5" rx="1" /></>) },
   { id: "papers", label: "Papers", icon: svg(<><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5M9 13h6M9 17h6" /></>) },
   { id: "books", label: "Collection", icon: svg(<><path d="M4 19.5V5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2.5z" /><path d="M4 19.5A2 2 0 0 0 6 21h13" /></>) },
@@ -41,7 +41,9 @@ const ITEMS: { id: View; label: string; icon: ReactNode }[] = [
 
 interface Props {
   current: View;
-  onNavigate: (v: View) => void;
+  onNavigate: (v: View, opts?: { side?: boolean }) => void;
+  split?: View | null;
+  onSplitToggle?: () => void;
   subs: { notes: string; tasks: string; collection: string; papers: string };
   onSub: (key: "notes" | "tasks" | "collection" | "papers", id: string) => void;
   onSettingsOpen?: () => void;
@@ -51,7 +53,7 @@ interface Props {
 
 const KEY = "yg-sidebar-collapsed";
 
-export default function Nav({ current, onNavigate, subs, onSub, onSettingsOpen, onPageEdit, pageEditOpen }: Props) {
+export default function Nav({ current, onNavigate, split, onSplitToggle, subs, onSub, onSettingsOpen, onPageEdit, pageEditOpen }: Props) {
   const drive = useDriveSync();
   useEffect(() => startDrivePolling(), []);
   const dst = drive.status;
@@ -86,15 +88,15 @@ export default function Nav({ current, onNavigate, subs, onSub, onSettingsOpen, 
       </div>
       <div className="side-items">
         {ITEMS.map((item) => {
-          const active = current === item.id;
+          const active = current === item.id || split === item.id;
           const sub = SUBS[item.id];
           return (
             <div key={item.id} className="side-group">
               <button
                 type="button"
                 className={`nav-item side-item${active ? " active" : ""}`}
-                onClick={() => onNavigate(item.id)}
-                title={collapsed ? item.label : undefined}
+                onClick={(e) => onNavigate(item.id, { side: e.shiftKey })}
+                title={collapsed ? item.label : `${item.label} (Shift-click: open beside current page)`}
                 aria-label={item.label}
               >
                 {item.icon}
@@ -121,6 +123,10 @@ export default function Nav({ current, onNavigate, subs, onSub, onSettingsOpen, 
         })}
       </div>
       <div className="side-bottom">
+        <button type="button" className={`nav-item side-item${split ? " active" : ""}`} onClick={onSplitToggle} title={split ? "Close split view" : "Split view — open two sections side by side"} aria-label="Split view" aria-pressed={!!split}>
+          {svg(<><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M12 4v16" /></>)}
+          {!collapsed && <span>{split ? "Close split" : "Split view"}</span>}
+        </button>
         <button type="button" className={`nav-item side-item side-sync${drive.running ? " running" : ""}${driveBad ? " bad" : ""}`} onClick={onSync} disabled={drive.running} title={driveTitle} aria-label="Sync with Google Drive">
           {svg(<><path d="M21 12a9 9 0 0 0-15-6.7L3 8" /><path d="M3 3v5h5" /><path d="M3 12a9 9 0 0 0 15 6.7L21 16" /><path d="M21 21v-5h-5" /></>)}
           {!collapsed && <span>{drive.running ? "Syncing…" : "Sync"}</span>}

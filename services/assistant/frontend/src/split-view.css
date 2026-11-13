@@ -1,0 +1,35 @@
+/* Split view: two sections side by side. */
+.app-split { flex: 1 1 auto; min-height: 0; display: flex; min-width: 0; }
+.split-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; flex-grow: 0; flex-shrink: 0; overflow: hidden; }
+.split-pane > .app-content { flex: 1 1 auto; min-height: 0; padding-left: 20px; padding-right: 20px; }
+.split-pane > .app-content--flush { padding: 0; }
+.split-pane.is-focus > .pane-head { box-shadow: inset 0 -2px 0 var(--accent); }
+.split-divider { flex: 0 0 6px; cursor: col-resize; background: var(--border); touch-action: none; position: relative; }
+.split-divider:hover, .split-divider:active { background: var(--accent); }
+
+.pane-head { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--border); background: var(--surface); min-width: 0; }
+.pane-select { height: 28px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); padding: 0 8px; font-size: 13px; font-weight: 600; }
+.pane-subs { display: flex; gap: 2px; overflow-x: auto; min-width: 0; }
+.pane-sub { height: 26px; border: 0; background: none; color: var(--muted); font-size: 12px; padding: 0 9px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+.pane-sub:hover { color: var(--text); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.pane-sub.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); font-weight: 600; }
+.pane-spacer { flex: 1; }
+.pane-btn { width: 26px; height: 26px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); cursor: pointer; line-height: 1; }
+.pane-btn:hover { border-color: var(--accent); }
+
+/* Views that size themselves by the window height must size by their pane instead */
+.split-pane .papers-view { height: 100%; }
+.split-pane .books-view.ab-shell { min-height: 0; }
+
+/* Scale page content to the pane width (set per pane from App) */
+.split-pane > .app-content { zoom: calc(var(--text-scale, 1) * var(--split-zoom, 0.8)); }
+.split-pane > .app-content h1, .split-pane > .app-content h2, .split-pane > .app-content h3 { zoom: var(--title-scale, 1); }
+
+/* Window-height sizing → pane sizing (zoom + vh don't mix) */
+.split-pane .arxiv-panel-group,
+.split-pane .notes-embedded-shell,
+.split-pane .books-tab-wrap { height: 100%; min-height: 0; }
+.split-pane .graph-container { height: 100%; min-height: 420px; }
+.split-pane .papers-main > div[style*="100vh"] { height: 100% !important; }
+.split-pane .books-view.ab-shell { min-height: 0; height: 100%; }
+.split-pane .ab-side, .split-pane .ii-pane { max-height: none; }

@@ -1155,6 +1155,21 @@ export default function ScoresView({
     commitLayout({ ...layout, hidden: layout.hidden.filter((x) => x !== id) });
   }
 
+  // Masonry packing: every card reports its height as a number of 8px grid rows, so a short card
+  // leaves room for the next card to slide up into the empty space beside/below it (grid-auto-flow: dense).
+  useEffect(() => {
+    const grid = gridRef.current;
+    if (!grid || typeof ResizeObserver === "undefined") return;
+    const ROW = 8, GAP = 20;
+    const apply = (el: HTMLElement) => {
+      el.style.gridRowEnd = `span ${Math.max(1, Math.ceil((el.offsetHeight + GAP) / ROW))}`;
+    };
+    const ro = new ResizeObserver((entries) => entries.forEach((en) => apply(en.target as HTMLElement)));
+    const slots = Array.from(grid.children) as HTMLElement[];
+    slots.forEach((el) => { apply(el); ro.observe(el); });
+    return () => ro.disconnect();
+  }, [loading, customizing, layout, drag]);
+
   if (loading) return <div className="muted">Loading…</div>;
 
   const weekItem = {

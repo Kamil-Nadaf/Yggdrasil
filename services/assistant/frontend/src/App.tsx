@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import Nav, { type NotesTab, type TasksTab, type CollectionSection, type PapersSection } from "./components/Nav";
 import SettingsPage from "./components/SettingsPage";
 import UpdatePrompt from "./components/UpdatePrompt";
 import PageThemeDrawer from "./components/PageThemeDrawer";
 import PaneHeader from "./components/PaneHeader";
+import SplitLayoutBar, { layoutDims, type SplitLayout } from "./components/SplitLayoutBar";
+import SlidesView from "./views/SlidesView";
 import CERICEditor from "./views/CERICEditor";
 import GraphView from "./views/GraphView";
 import AskView from "./views/AskView";
@@ -22,17 +24,39 @@ import { applyTheme } from "./lib/theme";
 import { APP_WATERMARK } from "./lib/copyright";
 import { startSettingsSync } from "./lib/settingsSync";
 
-export type View = "editor" | "graph" | "ask" | "scores" | "latex" | "papers" | "books" | "tasks" | "projects" | "calendar" | "settings";
+export type View = "editor" | "graph" | "ask" | "scores" | "latex" | "papers" | "books" | "tasks" | "projects" | "calendar" | "slides" | "settings";
 
-type SplitableView = Exclude<View, "settings">;
-const SPLIT_KEY = "yggdrasil:split-view";
+const SPLIT_KEY = "yggdrasil:split-view"; // older single-partner key, still read once
+const LAYOUT_KEY = "yggdrasil:split-layout";
+const PANES_KEY = "yggdrasil:split-panes";
 const SPLIT_RATIO_KEY = "yggdrasil:split-ratio";
-const SPLITTABLE: SplitableView[] = ["editor", "graph", "ask", "scores", "latex", "papers", "books", "tasks", "projects", "calendar"];
-function loadSplit(): SplitableView | null {
+/** Every section a pane can show, Settings included, in the order new panes pick their defaults. */
+const ALL_VIEWS: View[] = ["editor", "scores", "tasks", "papers", "books", "latex", "calendar", "projects", "slides", "graph", "ask", "settings"];
+const LAYOUT_IDS: SplitLayout[] = ["1x2", "2x1", "2x2", "1x3", "3x1", "2x3", "3x2", "1x4"];
+const paneCount = (l: SplitLayout) => { const [r, c] = layoutDims(l); return r * c; };
+
+/** Fill `extras` (panes after the first) up to `n - 1` entries with sections not already open. */
+function fitExtras(first: View, extras: View[], n: number): View[] {
+  const out: View[] = [];
+  for (const v of extras) if (v !== first && !out.includes(v) && ALL_VIEWS.includes(v)) out.push(v);
+  out.length = Math.min(out.length, n - 1);
+  for (const v of ALL_VIEWS) {
+    if (out.length >= n - 1) break;
+    if (v !== first && v !== "settings" && !out.includes(v)) out.push(v);
+  }
+  return out;
+}
+function loadSplit(first: View): { layout: SplitLayout; extras: View[] } | null {
   try {
-    const v = localStorage.getItem(SPLIT_KEY) as SplitableView | null;
-    return v && SPLITTABLE.includes(v) ? v : null;
-  } catch { return null; }
+    const l = localStorage.getItem(LAYOUT_KEY) as SplitLayout | null;
+    if (l && LAYOUT_IDS.includes(l)) {
+      const raw = JSON.parse(localStorage.getItem(PANES_KEY) || "[]");
+      return { layout: l, extras: fitExtras(first, Array.isArray(raw) ? raw : [], paneCount(l)) };
+    }
+    const old = localStorage.getItem(SPLIT_KEY) as View | null; // one partner from before layouts existed
+    if (old && ALL_VIEWS.includes(old)) return { layout: "1x2", extras: fitExtras(first, [old], 2) };
+  } catch { /* ignore */ }
+  return null;
 }
 function loadRatio(): number {
   try {
@@ -41,9 +65,9 @@ function loadRatio(): number {
   } catch { return 0.5; }
 }
 /** A sensible partner for the page you are on (papers↔collection, notes↔LaTeX, …). */
-function defaultPartner(v: View): SplitableView {
-  const pairs: Partial<Record<View, SplitableView>> = { papers: "books", books: "editor", editor: "latex", latex: "editor", scores: "tasks", tasks: "scores" };
-  return pairs[v] ?? "editor";
+function defaultPartner(v: View): View {
+  const pairs: Partial<Record<View, View>> = { papers: "books", books: "editor", editor: "latex", latex: "editor", scores: "tasks", tasks: "scores" };
+  return pairs[v] ?? (v === "editor" ? "latex" : "editor");
 }
 
 export default function App() {
@@ -51,23 +75,27 @@ export default function App() {
   const [editorCitekey, setEditorCitekey] = useState<string | null>(null);
   const [prevView, setPrevView] = useState<Exclude<View, "settings">>("scores");
   const [notesTab, setNotesTab] = useState<NotesTab>("collection");
-  const [tasksTab, setTasksTab] = useState<TasksTab>("planner");
+  const [tasksTab, setTasksTab] = useState<TasksTab>("list");
   const [papersSection, setPapersSection] = useState<PapersSection>("daily");
   const [colSection, setColSection] = useState<CollectionSection>("all");
   const [pageEditOpen, setPageEditOpen] = useState(false);
   const [firstRunData, setFirstRunData] = useState(false);
   const [reinstallBanner, setReinstallBanner] = useState<string | null>(null);
-  const [split, setSplit] = useState<SplitableView | null>(() => loadSplit());
-  const [focusSide, setFocusSide] = useState<"left" | "right">("left");
+  const [splitState, setSplitState] = useState<{ layout: SplitLayout; extras: View[] } | null>(() => loadSplit("scores"));
+  const layout = splitState?.layout ?? null;
+  const extras = splitState?.extras ?? [];
+  /** Which pane has focus (0 = the first pane, which is also what the sidebar highlights). */
+  const [focusIdx, setFocusIdx] = useState(0);
   const [splitRatio, setSplitRatio] = useState<number>(() => loadRatio());
   const splitRef = useRef<HTMLDivElement>(null);
   const [splitW, setSplitW] = useState(0);
   const [taskFocus, setTaskFocus] = useState<{ projectSlug: string; mainTaskId: string } | null>(null);
 
   useEffect(() => {
-    if (view === "settings") return; // Settings keeps the page theme you came from
-    applyTheme(split && focusSide === "right" ? split : view);
-  }, [view, split, focusSide]);
+    const shown = layout && focusIdx > 0 ? extras[focusIdx - 1] ?? view : view;
+    if (shown === "settings") return; // Settings keeps the page theme you came from
+    applyTheme(shown);
+  }, [view, layout, extras.join(","), focusIdx]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => startSettingsSync(), []);
 
@@ -94,7 +122,7 @@ export default function App() {
       .catch(() => {});
   }, []);
 
-  const splitOn = !!split && view !== "settings";
+  const splitOn = !!layout;
   useEffect(() => {
     const el = splitRef.current;
     if (!splitOn || !el) return;
@@ -102,37 +130,69 @@ export default function App() {
     ro.observe(el);
     setSplitW(el.offsetWidth);
     return () => ro.disconnect();
-  }, [splitOn]);
+  }, [splitOn, layout]);
+  const [rows, cols] = layout ? layoutDims(layout) : [1, 1];
   /** Narrow panes shrink their content (text, buttons, panels) so pages built for full width still fit. */
   const paneZoom = (frac: number) => Math.round(Math.min(1, Math.max(0.6, ((splitW - 6) * frac) / 1250)) * 100) / 100;
 
-  function persistSplit(v: SplitableView | null) {
-    setSplit(v);
-    try { v ? localStorage.setItem(SPLIT_KEY, v) : localStorage.removeItem(SPLIT_KEY); } catch { /* ignore */ }
+  const panes: View[] = layout ? [view, ...extras] : [view];
+
+  function persistSplit(next: { layout: SplitLayout; extras: View[] } | null) {
+    setSplitState(next);
+    try {
+      if (next) {
+        localStorage.setItem(LAYOUT_KEY, next.layout);
+        localStorage.setItem(PANES_KEY, JSON.stringify(next.extras));
+      } else {
+        localStorage.removeItem(LAYOUT_KEY);
+        localStorage.removeItem(PANES_KEY);
+      }
+      localStorage.removeItem(SPLIT_KEY);
+    } catch { /* ignore */ }
+  }
+
+  /** Show `v` in pane `i`; if another pane already shows it the two panes swap. */
+  function assign(i: number, v: View) {
+    if (!layout) { setView(v); return; }
+    const all = [...panes];
+    const j = all.indexOf(v);
+    if (j === i) return;
+    if (j >= 0) all[j] = all[i];
+    all[i] = v;
+    if (v === "settings" && i === 0 && view !== "settings") setPrevView(view as Exclude<View, "settings">);
+    setView(all[0]);
+    persistSplit({ layout, extras: all.slice(1) });
+  }
+
+  /** The section a pane returns to when its Settings page is closed. */
+  function backFrom(i: number): View {
+    if (i === 0 && !extras.includes(prevView)) return prevView;
+    return ALL_VIEWS.find((x) => x !== "settings" && !panes.includes(x)) ?? "scores";
+  }
+
+  function changeLayout(l: SplitLayout) {
+    persistSplit({ layout: l, extras: fitExtras(view, extras, paneCount(l)) });
+    setFocusIdx(0);
   }
 
   function goView(v: View, opts?: { side?: boolean }) {
     if (v === "settings" && view !== "settings") setPrevView(view as Exclude<View, "settings">);
-    if (v !== "settings" && split) {
-      if (opts?.side) { // Shift-click: open on the right
-        if (v !== view) persistSplit(v);
-        return;
-      }
-      if (v === split) { // already open on the right → swap sides instead of showing it twice
-        persistSplit(view as SplitableView);
-        setView(v);
-        return;
-      }
-    } else if (v !== "settings" && opts?.side && v !== view) {
-      persistSplit(v);
+    if (layout) {
+      if (v === "settings") { assign(Math.min(focusIdx, panes.length - 1), "settings"); return; } // gear: Settings opens in the focused pane
+      if (opts?.side) { assign(1, v); return; } // Shift-click: open in the second pane
+      assign(0, v);
+      return;
+    }
+    if (opts?.side && v !== view && v !== "settings") {
+      persistSplit({ layout: "1x2", extras: [v] });
       return;
     }
     setView(v);
   }
 
   function toggleSplit() {
-    if (split || view === "settings") { persistSplit(null); return; }
-    persistSplit(defaultPartner(view));
+    if (layout) { persistSplit(null); return; }
+    persistSplit({ layout: "1x2", extras: fitExtras(view, [defaultPartner(view)], 2) });
   }
 
   function setSub(k: "notes" | "tasks" | "collection" | "papers", id: string) {
@@ -200,6 +260,7 @@ export default function App() {
         )}
         {v === "projects" && <ProjectsView onOpenLatex={() => goView("latex")} />}
         {v === "calendar" && <CalendarView onOpenTask={openTask} />}
+        {v === "slides" && <SlidesView />}
         {v === "graph" && <GraphView onOpenEditor={openEditor} />}
         {v === "ask" && <AskView />}
         {v === "scores" && <ScoresView onOpenTask={openTask} onOpenBooks={() => goView("books")} />}
@@ -214,8 +275,17 @@ export default function App() {
       </>
     );
   }
-  const flushView = (v: View) => v === "latex" || v === "ask" || v === "settings";
-  const splitActive = !!split && view !== "settings";
+  const flushView = (v: View) => v === "latex" || v === "ask" || v === "settings" || v === "slides";
+  const settingsPage = (i: number) => (
+    <SettingsPage
+      firstRun={firstRunData}
+      onClose={() => assign(i, backFrom(i))}
+      onDataPathSaved={() => {
+        setFirstRunData(false);
+        window.location.reload();
+      }}
+    />
+  );
 
   return (
     <div className="app-shell">
@@ -225,7 +295,7 @@ export default function App() {
         current={view}
         subs={{ notes: notesTab, tasks: tasksTab, collection: colSection, papers: papersSection }}
         onSub={setSub}
-        split={view === "settings" ? null : split}
+        split={layout ? extras : null}
         onSplitToggle={toggleSplit}
         onNavigate={goView}
         onSettingsOpen={() => { setPageEditOpen(false); goView("settings"); }}
@@ -241,16 +311,43 @@ export default function App() {
           </button>
         </div>
       )}
-      {splitActive && split ? (
-        <div className="app-split" ref={splitRef}>
-          <div className={`split-pane${focusSide === "left" ? " is-focus" : ""}`} style={{ flexBasis: `${splitRatio * 100}%`, ["--split-zoom" as string]: paneZoom(splitRatio) } as React.CSSProperties} onPointerDownCapture={() => setFocusSide("left")}>
-            <PaneHeader view={view} other={split} sub={subOf(view)} onSub={setSub} onView={(v) => goView(v)} onSwap={() => { const l = view; setView(split); persistSplit(l as SplitableView); }} />
-            <main className={`app-content${flushView(view) ? " app-content--flush" : ""}`}>{renderView(view)}</main>
-          </div>
-          <div className="split-divider" onPointerDown={startDivider} role="separator" aria-orientation="vertical" title="Drag to resize · double-click to reset" onDoubleClick={() => { setSplitRatio(0.5); try { localStorage.setItem(SPLIT_RATIO_KEY, "0.5"); } catch { /* ignore */ } }} />
-          <div className={`split-pane${focusSide === "right" ? " is-focus" : ""}`} style={{ flexBasis: `${(1 - splitRatio) * 100}%`, ["--split-zoom" as string]: paneZoom(1 - splitRatio) } as React.CSSProperties} onPointerDownCapture={() => setFocusSide("right")}>
-            <PaneHeader view={split} other={view as SplitableView} sub={subOf(split)} onSub={setSub} onView={(v) => persistSplit(v as SplitableView)} onClose={() => persistSplit(null)} />
-            <main className={`app-content${flushView(split) ? " app-content--flush" : ""}`}>{renderView(split)}</main>
+      {layout ? (
+        <div className="app-split-wrap">
+          <SplitLayoutBar layout={layout} onPick={changeLayout} onClose={() => persistSplit(null)} />
+          <div
+            className={`app-split${layout === "1x2" ? "" : " is-grid"}`}
+            ref={splitRef}
+            style={{
+              gridTemplateColumns: layout === "1x2" ? `${splitRatio}fr 6px ${1 - splitRatio}fr` : `repeat(${cols}, minmax(0, 1fr))`,
+              gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
+              gap: layout === "1x2" ? 0 : 6,
+            }}
+          >
+            {panes.map((pv, i) => (
+              <Fragment key={i}>
+                {layout === "1x2" && i === 1 && (
+                  <div className="split-divider" onPointerDown={startDivider} role="separator" aria-orientation="vertical" title="Drag to resize · double-click to reset" onDoubleClick={() => { setSplitRatio(0.5); try { localStorage.setItem(SPLIT_RATIO_KEY, "0.5"); } catch { /* ignore */ } }} />
+                )}
+                <div
+                  className={`split-pane${focusIdx === i ? " is-focus" : ""}`}
+                  style={{ ["--split-zoom" as string]: paneZoom(layout === "1x2" ? (i === 0 ? splitRatio : 1 - splitRatio) : 1 / cols) } as React.CSSProperties}
+                  onPointerDownCapture={() => setFocusIdx(i)}
+                >
+                  <PaneHeader
+                    view={pv}
+                    taken={panes.filter((_, k) => k !== i)}
+                    sub={subOf(pv)}
+                    onSub={setSub}
+                    onView={(v) => assign(i, v)}
+                    onSwap={panes.length === 2 ? () => assign(0, panes[1]) : undefined}
+                    onClose={panes.length === 2 && i === 1 ? () => persistSplit(null) : undefined}
+                  />
+                  <main className={`app-content${flushView(pv) ? " app-content--flush" : ""}`}>
+                    {pv === "settings" ? settingsPage(i) : renderView(pv)}
+                  </main>
+                </div>
+              </Fragment>
+            ))}
           </div>
         </div>
       ) : (

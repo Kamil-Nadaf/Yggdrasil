@@ -4950,6 +4950,13 @@ h2 { font-size: 15px; color: var(--accent); }
 .pdf-viewer { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--surface); }
 .pdf-viewer.is-full { position: fixed; inset: 0; z-index: 2000; height: auto; background: var(--bg); }
 .pdf-viewer .latex-preview-toolbar { flex-shrink: 0; }
+/* Compact toolbar buttons in the PDF reader: the notebook theme sets .btn to 20px
+   handwriting type, which made Tools / Keep copy / Notes / My notes huge here. */
+.pdf-viewer .pdf-viewer-bar .btn,
+:root[data-theme="notebook"] .pdf-viewer .pdf-viewer-bar .btn { font-family: var(--font-sans); font-size: 13px; font-weight: 500; padding: 5px 10px; line-height: 1.2; box-shadow: none; border-width: 1px; white-space: nowrap; }
+.pdf-viewer .latex-preview-toolbar, .pdf-viewer .latex-preview-icon-btn, .pdf-viewer .pdfv-tools { font-family: var(--font-sans); font-size: 12px; }
+:root[data-theme="notebook"] .pdf-viewer .latex-preview-icon-btn,
+:root[data-theme="notebook"] .pdf-viewer .pdfv-tool-btn { box-shadow: none; font-size: 12px; }
 .pdfv-stage { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .pdfv-scroll { flex: 1; min-height: 0; overflow: auto; background: #3b3b3b; padding: 12px 14px; }
 .pdfv-page { position: relative; margin: 0 auto 12px; background: #fff; box-shadow: 0 1px 6px rgba(0,0,0,0.45); }
@@ -5526,7 +5533,7 @@ h2 { font-size: 15px; color: var(--accent); }
   color: var(--muted);
 }
 
-.notes-present-back {
+.notes-present-back { display: flex; gap: 8px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
 }
@@ -5659,3 +5666,16 @@ h2 { font-size: 15px; color: var(--accent); }
 .update-prompt h3 { margin: 0 0 8px; }
 .update-prompt-notes { max-height: 120px; overflow: auto; white-space: pre-wrap; font-size: 12px; opacity: .8; }
 .update-prompt-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+
+/* ── Note slideshow (present mode) ───────────────────────────────────────── */
+.nss-root { display: flex; flex-direction: column; height: 100%; min-height: 360px; background: var(--bg); }
+.nss-root:fullscreen { background: var(--bg); }
+.nss-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; cursor: pointer; }
+.nss-slide { position: absolute; top: 50%; left: 50%; transform-origin: center center; }
+.nss-inner { padding: 24px 32px; }
+.nss-text { font-size: 28px; line-height: 1.45; }
+.nss-text img, .nss-text svg, .nss-text table { max-width: 100%; height: auto; }
+.nss-bar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-top: 1px solid var(--border); background: var(--surface); }
+.nss-count { font-variant-numeric: tabular-nums; color: var(--muted); }
+.nss-hint { margin-left: auto; color: var(--muted); font-size: 12px; }
+@media (max-width: 700px) { .nss-hint { display: none; } }

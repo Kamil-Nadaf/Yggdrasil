@@ -9,6 +9,8 @@ export interface TaskViewProps {
   /** "all" or a project slug. */
   projectFilter: string;
   onOpen: (it: TaskItem) => void;
+  /** Research layout: Kanban uses To do / Doing / Waiting / Done and the List drops "Group by Project". */
+  research?: boolean;
 }
 
 export function mainKeyOf(it: TaskItem): string {

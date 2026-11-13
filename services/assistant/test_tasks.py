@@ -172,7 +172,7 @@ class TasksApiTests(unittest.TestCase):
 
         today = date.today().isoformat()
         r = self.client.get(f"/api/tasks/completed-by-day?start={today}&end={today}")
-        self.assertEqual(r.json()["days"], [{"date": today, "count": 1}])
+        self.assertEqual(r.json()["days"], [{"date": today, "count": 1, "names": ["Check localization"]}])
 
 
 if __name__ == "__main__":

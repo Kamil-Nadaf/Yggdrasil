@@ -3097,6 +3097,47 @@ def _subtask_counts(d: Path, main_task_id: str) -> tuple[int, int]:
     return done, total
 
 
+TASK_STAGES = ("read", "analyse", "write", "admin")  # research stage shown as a coloured chip
+MAX_COMMENT_CHARS = 4000
+MAX_COMMENTS = 500
+
+
+def clean_comments(raw: Any) -> list[dict]:
+    """Comments as stored in frontmatter: [{id, author, at, text}], oldest first; junk entries dropped."""
+    out: list[dict] = []
+    for c in raw if isinstance(raw, list) else []:
+        if not isinstance(c, dict):
+            continue
+        text = str(c.get("text") or "").strip()
+        if not text:
+            continue
+        out.append({
+            "id": str(c.get("id") or ""),
+            "author": str(c.get("author") or "me")[:80],
+            "at": str(c.get("at") or ""),
+            "text": text[:MAX_COMMENT_CHARS],
+        })
+    return out[-MAX_COMMENTS:]
+
+
+LINK_KINDS = ("paper", "note", "figure", "latex")
+
+
+def clean_links(raw: Any) -> list[dict]:
+    """Links from a task to papers, notes, figures and LaTeX projects: [{kind, ref, label}]."""
+    out: list[dict] = []
+    for x in raw if isinstance(raw, list) else []:
+        if not isinstance(x, dict) or x.get("kind") not in LINK_KINDS:
+            continue
+        ref = str(x.get("ref") or "").strip()[:300]
+        if not ref or ".." in ref.replace("\\", "/").split("/"):
+            continue
+        item = {"kind": x["kind"], "ref": ref, "label": str(x.get("label") or ref).strip()[:200]}
+        if item not in out:
+            out.append(item)
+    return out[:50]
+
+
 MAX_TIMER_SEC = 12 * 3600  # a timer left running overnight only counts a half day
 
 
@@ -3121,6 +3162,12 @@ def _task_extras(d: Path, item_id: str, post) -> dict:
         "relations": clean_relations(fm.get("relations"), f"{d.name}/{item_id}"),
         "files": files,
         "has_note": bool((post.content or "").strip()),
+        "stage": fm.get("stage") if fm.get("stage") in TASK_STAGES else None,
+        "next_step": str(fm.get("next_step") or ""),
+        "waiting_on": str(fm.get("waiting_on") or ""),
+        "milestone": bool(fm.get("milestone")),
+        "links": clean_links(fm.get("links")),
+        "comments": clean_comments(fm.get("comments")),
     }
 
 
@@ -3158,7 +3205,7 @@ def _subtask_from_post(d: Path, subtask_id: str, post) -> dict:
     }
 
 
-EXTRA_KEYS = ("priority_id", "start", "estimate_min", "tags", "note", "relations")
+EXTRA_KEYS = ("priority_id", "start", "estimate_min", "tags", "note", "relations", "stage", "next_step", "waiting_on", "milestone", "links")
 
 
 class TaskExtras(BaseModel):
@@ -3168,6 +3215,11 @@ class TaskExtras(BaseModel):
     tags: Optional[list[str]] = None
     note: Optional[str] = None
     relations: Optional[list[dict]] = None
+    stage: Optional[str] = None
+    next_step: Optional[str] = None
+    waiting_on: Optional[str] = None
+    milestone: Optional[bool] = None
+    links: Optional[list[dict]] = None
 
 
 def _apply_extras(post, data: dict, self_ref: str) -> None:
@@ -3185,6 +3237,19 @@ def _apply_extras(post, data: dict, self_ref: str) -> None:
             post.metadata["tags"] = clean_tag_ids(data["tags"])
         if "relations" in data:
             post.metadata["relations"] = clean_relations(data["relations"], self_ref)
+        if "stage" in data:
+            st = str(data["stage"] or "").strip().lower()
+            if st and st not in TASK_STAGES:
+                raise ValueError("stage must be one of: " + ", ".join(TASK_STAGES))
+            post.metadata["stage"] = st or None
+        if "next_step" in data:
+            post.metadata["next_step"] = str(data["next_step"] or "").strip()[:500]
+        if "waiting_on" in data:
+            post.metadata["waiting_on"] = str(data["waiting_on"] or "").strip()[:200]
+        if "milestone" in data:
+            post.metadata["milestone"] = bool(data["milestone"])
+        if "links" in data:
+            post.metadata["links"] = clean_links(data["links"])
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     if data.get("note") is not None:
@@ -3600,7 +3665,7 @@ async def delete_subtask(slug: str, task_id: str, subtask_id: str):
 # ── Task items: one addressing scheme for main tasks and subtasks (the Task panel, timers, files) ──
 
 _ITEM_ID_RE = re.compile(r"^(mt|st)-[a-f0-9]{12}$")
-TASK_FILE_MAX_BYTES = 20 * 1024 * 1024
+TASK_FILE_MAX_BYTES = 100 * 1024 * 1024
 
 
 def _item_path(slug: str, item_id: str) -> Path:
@@ -3690,6 +3755,43 @@ async def task_item_timer(slug: str, item_id: str, payload: TimerPayload):
     return {"ok": True, "item": _item_out(slug, item_id, post)}
 
 
+class CommentPayload(BaseModel):
+    text: str
+    author: Optional[str] = None
+
+
+@app.post("/api/task-items/{slug}/{item_id}/comments")
+async def add_task_comment(slug: str, item_id: str, payload: CommentPayload):
+    path = _item_path(slug, item_id)
+    text = payload.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Comment text is required")
+    post = frontmatter.load(str(path))
+    comments = clean_comments(post.metadata.get("comments"))
+    comments.append({
+        "id": "c-" + uuid.uuid4().hex[:10],
+        "author": (payload.author or "me").strip()[:80] or "me",
+        "at": _now_iso(),
+        "text": text[:MAX_COMMENT_CHARS],
+    })
+    post.metadata["comments"] = comments[-MAX_COMMENTS:]
+    path.write_text(frontmatter.dumps(post))
+    return {"ok": True, "comments": post.metadata["comments"]}
+
+
+@app.delete("/api/task-items/{slug}/{item_id}/comments/{comment_id}")
+async def delete_task_comment(slug: str, item_id: str, comment_id: str):
+    path = _item_path(slug, item_id)
+    post = frontmatter.load(str(path))
+    comments = clean_comments(post.metadata.get("comments"))
+    kept = [c for c in comments if c["id"] != comment_id]
+    if len(kept) == len(comments):
+        raise HTTPException(status_code=404, detail="Comment not found")
+    post.metadata["comments"] = kept
+    path.write_text(frontmatter.dumps(post))
+    return {"ok": True, "comments": kept}
+
+
 def _safe_task_filename(name: str) -> str:
     base = Path(str(name or "")).name
     base = re.sub(r"[^A-Za-z0-9._ -]", "_", base).strip(" .")
@@ -3713,7 +3815,7 @@ async def upload_task_file(slug: str, item_id: str, payload: TaskFilePayload):
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid file data: {exc}") from exc
     if len(content) > TASK_FILE_MAX_BYTES:
-        raise HTTPException(status_code=413, detail="File is larger than 20 MB")
+        raise HTTPException(status_code=413, detail="File is larger than 100 MB")
     name = _safe_task_filename(payload.name)
     files_dir = project_dir(slug) / "_files" / item_id
     files_dir.mkdir(parents=True, exist_ok=True)
@@ -5429,6 +5531,78 @@ async def _revalidate_frontend(request, call_next):
         response.headers["Cache-Control"] = "no-cache"
     return response
 
+
+# ── Slides (PPTist decks stored as JSON in 50-Projects/<slug>/slides) ─────────
+SLIDES_MAX_BYTES = 100 * 1024 * 1024
+
+
+def _slides_dir(slug: str) -> Path:
+    project_dir(slug)  # validates the slug
+    return VAULT / "50-Projects" / slug / "slides"
+
+
+def _deck_path(slug: str, name: str) -> Path:
+    base = re.sub(r"[^A-Za-z0-9._ -]+", "_", (name or "").strip()).strip(" .")
+    if base.lower().endswith(".json"):
+        base = base[:-5].strip(" .")
+    if not base:
+        raise HTTPException(status_code=400, detail="Invalid deck name")
+    return _slides_dir(slug) / f"{base[:80]}.json"
+
+
+@app.get("/api/projects/{slug}/slides")
+async def list_slide_decks(slug: str):
+    d = _slides_dir(slug)
+    out = []
+    if d.is_dir():
+        for p in sorted(d.glob("*.json")):
+            st = p.stat()
+            out.append({"name": p.stem, "size": st.st_size, "updated_at": datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds")})
+    return {"decks": out}
+
+
+@app.get("/api/projects/{slug}/slides/{name}")
+async def get_slide_deck(slug: str, name: str):
+    p = _deck_path(slug, name)
+    if not p.is_file():
+        raise HTTPException(status_code=404, detail="Deck not found")
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        raise HTTPException(status_code=500, detail="Deck file is not valid JSON")
+
+
+@app.put("/api/projects/{slug}/slides/{name}")
+async def put_slide_deck(slug: str, name: str, request: Request):
+    raw = await request.body()
+    if len(raw) > SLIDES_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Deck is larger than 100 MB")
+    try:
+        data = json.loads(raw)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Body must be JSON")
+    if not isinstance(data, dict) or not isinstance(data.get("slides"), list):
+        raise HTTPException(status_code=400, detail="Deck needs a slides list")
+    p = _deck_path(slug, name)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_bytes(raw)
+    tmp.replace(p)
+    return {"ok": True, "name": p.stem}
+
+
+@app.delete("/api/projects/{slug}/slides/{name}")
+async def delete_slide_deck(slug: str, name: str):
+    p = _deck_path(slug, name)
+    if not p.is_file():
+        raise HTTPException(status_code=404, detail="Deck not found")
+    p.unlink()
+    return {"ok": True}
+
+
+SLIDES_DIST = Path(os.environ.get("SLIDES_DIST", str(Path(__file__).resolve().parent / "slides" / "dist")))
+if SLIDES_DIST.exists():
+    app.mount("/slides", StaticFiles(directory=str(SLIDES_DIST), html=True), name="slides-module")
 
 FRONTEND_DIST = Path(os.environ.get("FRONTEND_DIST", "/app/frontend/dist"))
 if FRONTEND_DIST.exists():

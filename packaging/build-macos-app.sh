@@ -70,8 +70,8 @@ cat > "${APP}/Contents/Info.plist" << 'EOF'
   <key>CFBundleName</key><string>Yggdrasil</string>
   <key>CFBundleDisplayName</key><string>Yggdrasil</string>
   <key>CFBundleIdentifier</key><string>io.yggdrasil.app</string>
-  <key>CFBundleVersion</key><string>0.4.30</string>
-  <key>CFBundleShortVersionString</key><string>0.4.30</string>
+  <key>CFBundleVersion</key><string>0.4.31</string>
+  <key>CFBundleShortVersionString</key><string>0.4.31</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>Yggdrasil</string>
   <key>CFBundleIconFile</key><string>Yggdrasil</string>
@@ -128,6 +128,8 @@ cp "${ROOT}/services/assistant/mcp_server.py"    "${APPDIR}/mcp_server.py"
 rm -rf "${APPDIR}/frontend"
 mkdir -p "${APPDIR}/frontend"
 cp -R "${FRONTEND}/dist" "${APPDIR}/frontend/dist"
+# Slides module (PPTist, AGPL-3.0): optional, needs git + network once
+if bash "${ROOT}/services/assistant/slides/build.sh" "${APPDIR}/slides/dist"; then :; else echo "! slides module not built (Slides view will be unavailable)"; fi
 mkdir -p "${RES}/latex" "${RES}/feynman"
 cp "${ROOT}/services/latex/latex_service.py"     "${RES}/latex/latex_service.py"
 cp -R "${ROOT}/services/latex/aastex"            "${RES}/latex/aastex"
@@ -211,7 +213,7 @@ pkgbuild \
   --root "$PKG_ROOT" \
   --scripts "$PKG_SCRIPTS" \
   --identifier io.yggdrasil.app \
-  --version 0.4.30 \
+  --version 0.4.31 \
   "$PKG_UNSIGNED"
 
 DIST_XML="${OUT}/distribution.xml"
@@ -228,7 +230,7 @@ cat > "$DIST_XML" << EOF
     <choice id="yggdrasil" title="Yggdrasil" description="Install Yggdrasil to /Applications">
         <pkg-ref id="io.yggdrasil.app">Yggdrasil.pkg</pkg-ref>
     </choice>
-    <pkg-ref id="io.yggdrasil.app" version="0.4.30" onConclusion="none">Yggdrasil.pkg</pkg-ref>
+    <pkg-ref id="io.yggdrasil.app" version="0.4.31" onConclusion="none">Yggdrasil.pkg</pkg-ref>
 </installer-gui-script>
 EOF
 

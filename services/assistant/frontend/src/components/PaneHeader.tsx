@@ -3,8 +3,8 @@ import { ITEMS, SUBS } from "./Nav";
 
 interface Props {
   view: View;
-  /** Section shown in the other pane (can't be picked again here). */
-  other: View;
+  /** Sections shown in the other panes (can't be picked again here). */
+  taken: View[];
   sub?: string;
   onSub: (key: "notes" | "tasks" | "collection" | "papers", id: string) => void;
   onView: (v: View) => void;
@@ -13,14 +13,16 @@ interface Props {
 }
 
 /** Slim header on top of each split-view pane: pick the section, its subsection, swap sides or close. */
-export default function PaneHeader({ view, other, sub, onSub, onView, onSwap, onClose }: Props) {
+export default function PaneHeader({ view, taken, sub, onSub, onView, onSwap, onClose }: Props) {
   const subs = SUBS[view];
   return (
     <div className="pane-head">
       <select className="pane-select" value={view} onChange={(e) => onView(e.target.value as View)} aria-label="Section in this pane">
-        {ITEMS.filter((i) => i.id === view || i.id !== other).map((i) => (
-          <option key={i.id} value={i.id}>{i.label}</option>
-        ))}
+        {[...ITEMS.map((i) => ({ id: i.id, label: i.label })), { id: "settings" as View, label: "Settings" }]
+          .filter((i) => i.id === view || !taken.includes(i.id))
+          .map((i) => (
+            <option key={i.id} value={i.id}>{i.label}</option>
+          ))}
       </select>
       {subs && (
         <div className="pane-subs">

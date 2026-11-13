@@ -8,6 +8,7 @@ import BoardView from "./tasks/BoardView";
 import GanttView from "./tasks/GanttView";
 import ListView from "./tasks/ListView";
 import TaskPanel from "./tasks/TaskPanel";
+import ResearchTasks from "./tasks/ResearchTasks";
 import TimelineView from "./tasks/TimelineView";
 import { doneStatusId } from "./tasks/TaskBits";
 import { useNow, useTaskData } from "./tasks/useTaskData";
@@ -125,7 +126,7 @@ function ProjectOptionsPopover({
   );
 }
 
-export default function TasksView({
+function TasksViewBase({
   focus,
   onFocusConsumed,
   requestTab,
@@ -156,7 +157,8 @@ export default function TasksView({
   useEffect(() => { if (firstTab.current) { firstTab.current = false; return; } if (requestTab) setTab(requestTab); }, [requestTab]);
   useEffect(() => { onTabChange?.(tab); }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
   /** What is actually on screen: the planner shows one of three views. */
-  const eff: "calendar" | "timeline" | "gantt" | "list" | "board" = tab === "planner" ? plannerView : tab;
+  // Inside a project only List and Kanban exist: no calendar, planner, timeline or Gantt.
+  const eff: "calendar" | "timeline" | "gantt" | "list" | "board" = lockedProject ? (tab === "board" ? "board" : "list") : tab === "planner" ? plannerView : tab;
   const [projectFilterState, setProjectFilter] = useState<string>(() => readLS(PROJECT_KEY, "all"));
   const projectFilter = lockedProject ?? projectFilterState;
   const [showDone, setShowDone] = useState(() => readLS(DONE_KEY, "1") === "1");
@@ -235,7 +237,7 @@ export default function TasksView({
     }
   }
 
-  const viewProps = { data, items: visible, now, projectFilter, onOpen: (it: TaskItem) => setOpenRef(it.ref) };
+  const viewProps = { data, items: visible, now, projectFilter, research: !!lockedProject, onOpen: (it: TaskItem) => setOpenRef(it.ref) };
 
   return (
     <div className="tk-page">
@@ -269,7 +271,7 @@ export default function TasksView({
           )}
         </div>
 
-        {tab === "planner" && (
+        {tab === "planner" && !lockedProject && (
           <div className="tk-seg" role="tablist" aria-label="Planner view">
             {PLANNER_VIEWS.map((v) => (
               <button key={v.id} type="button" role="tab" aria-selected={plannerView === v.id} className={`tk-seg-b${plannerView === v.id ? " on" : ""}`} onClick={() => changePlannerView(v.id)}>
@@ -356,4 +358,11 @@ export default function TasksView({
       />
     </div>
   );
+}
+
+type TasksViewProps = Parameters<typeof TasksViewBase>[0];
+
+/** Tasks section = research workspace (views, kanban, week planner, calendar); inside a project = List + Kanban only. */
+export default function TasksView(props: TasksViewProps) {
+  return props.lockedProject ? <TasksViewBase {...props} /> : <ResearchTasks {...props} />;
 }

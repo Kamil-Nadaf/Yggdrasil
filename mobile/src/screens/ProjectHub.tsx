@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import DeckPlayer, { deckList } from './DeckPlayer';
 import { Icon, Screen, Top } from '../ui';
 import { daysBetween, isoDay, useY, yg, type Item } from '../ygg';
 
@@ -58,8 +59,8 @@ export function ProjectList() {
   );
 }
 
-type Tab = 'overview' | 'tasks' | 'notes' | 'reading';
-const TABS: [Tab, string][] = [['overview', 'Overview'], ['tasks', 'Tasks'], ['notes', 'Notes'], ['reading', 'Reading']];
+type Tab = 'overview' | 'tasks' | 'notes' | 'slides' | 'reading';
+const TABS: [Tab, string][] = [['overview', 'Overview'], ['tasks', 'Tasks'], ['notes', 'Notes'], ['slides', 'Slides'], ['reading', 'Reading']];
 
 export function ProjectView({ slug }: { slug: string }) {
   const [tab, setTab] = useState<Tab>('overview');
@@ -74,6 +75,7 @@ export function ProjectView({ slug }: { slug: string }) {
       {tab === 'overview' && <Overview slug={slug} />}
       {tab === 'tasks' && <TasksTab slug={slug} />}
       {tab === 'notes' && <NotesTab slug={slug} />}
+      {tab === 'slides' && <SlidesTab slug={slug} />}
       {tab === 'reading' && <ReadingTab slug={slug} />}
     </Screen>
   );
@@ -145,6 +147,25 @@ function NotesTab({ slug }: { slug: string }) {
           </a>
         ))}
       </div>
+    </div>
+  );
+}
+
+function SlidesTab({ slug }: { slug: string }) {
+  const [playing, setPlaying] = useState<string | null>(null);
+  const decks = deckList(slug);
+  return (
+    <div>
+      <p className="muted sm pad">View and present only. Make or edit decks in the desktop app; they arrive with Drive sync.</p>
+      <div className="list">
+        {decks.length === 0 && <p className="muted pad">No decks in this project yet.</p>}
+        {decks.map((d) => (
+          <button key={d.name} className="note" onClick={() => setPlaying(d.name)}>
+            <span className="t">{d.name.replace(/\.json$/i, '')}</span>
+          </button>
+        ))}
+      </div>
+      {playing && <DeckPlayer slug={slug} name={playing} onClose={() => setPlaying(null)} />}
     </div>
   );
 }

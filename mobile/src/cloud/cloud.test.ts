@@ -8,7 +8,7 @@ import { runSync, type RemoteApi, type RItem } from './engine.ts';
 import { scanRemote, findRoot } from './drive.ts';
 import { pollDeviceFlow } from './auth.ts';
 
-const emptyDB = () => ({ notes: {}, tex: {}, cols: [], items: {}, habits: {}, goals: [], projects: [], log: {} }) as any;
+const emptyDB = () => ({ notes: {}, tex: {}, decks: {}, cols: [], items: {}, habits: {}, goals: [], projects: [], log: {} }) as any;
 
 test('md5 matches node crypto', () => {
   for (const s of ['', 'a', 'hello world', 'é✓ünï'.repeat(50), 'x'.repeat(55), 'x'.repeat(56), 'x'.repeat(64), 'y'.repeat(1000)])

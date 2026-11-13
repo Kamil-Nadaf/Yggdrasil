@@ -39,3 +39,5 @@
 .pj-bar-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
 .pj-add { border: 1px dashed var(--border); border-radius: 8px; padding: 10px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 6px; max-height: 340px; overflow: auto; }
 @media (max-width: 700px) { .pj-bar-lg { width: 90px; } .pj-notes, .pj-reader { height: calc(100vh - 260px); } }
+.pj-slides { height: calc(100vh - 230px); min-height: 420px; }
+@media (max-width: 700px) { .pj-slides { height: calc(100vh - 260px); } }

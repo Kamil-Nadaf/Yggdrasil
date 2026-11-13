@@ -9,18 +9,26 @@ export interface LItem {
 }
 interface LCol { id: string; name: string; slugs: string[]; parent?: string; zotero_key?: string }
 interface LFile { source: string; modified: string }
-interface LSub { id: string; name: string; deadline: string | null; status_id: string; done_at?: string }
-interface LMain { id: string; name: string; deadline: string | null; is_active: boolean; subtasks: LSub[] }
+export interface LComment { id: string; author: string; at: string; text: string }
+export interface LLink { kind: string; ref: string; label: string }
+/** Research fields shared by main tasks and subtasks (same names as the desktop backend). */
+export interface LExtra {
+  stage?: string | null; next_step?: string; waiting_on?: string; milestone?: boolean; estimate_min?: number | null;
+  comments?: LComment[]; links?: LLink[];
+}
+export const EXTRA_KEYS = ['stage', 'next_step', 'waiting_on', 'milestone', 'estimate_min', 'comments', 'links'] as const;
+export interface LSub extends LExtra { id: string; name: string; deadline: string | null; status_id: string; done_at?: string }
+export interface LMain extends LExtra { id: string; name: string; deadline: string | null; is_active: boolean; subtasks: LSub[] }
 interface LProj { slug: string; name: string; pinned: boolean; main: LMain[] }
 interface LGoal { id: string; name: string; start_date: string; end_date: string }
 export interface LocalDB {
-  notes: Record<string, LFile>; tex: Record<string, LFile>; cols: LCol[]; items: Record<string, LItem>;
+  notes: Record<string, LFile>; tex: Record<string, LFile>; decks: Record<string, LFile>; cols: LCol[]; items: Record<string, LItem>;
   habits: Record<string, Record<string, unknown>>; goals: LGoal[]; projects: LProj[];
   log: Record<string, { papers: number; books: number; writing: number }>;
 }
 
 const KEY = 'ygg.local.v1';
-const emptyDB = (): LocalDB => ({ notes: {}, tex: {}, cols: [{ id: 'c_inbox', name: 'Inbox', slugs: [] }], items: {}, habits: {}, goals: [], projects: [], log: {} });
+const emptyDB = (): LocalDB => ({ notes: {}, tex: {}, decks: {}, cols: [{ id: 'c_inbox', name: 'Inbox', slugs: [] }], items: {}, habits: {}, goals: [], projects: [], log: {} });
 
 let db: LocalDB | null = null;
 export function getDB(): LocalDB {
@@ -62,7 +70,23 @@ async function arxivFetch(params: string): Promise<{ papers: unknown[]; total: n
 
 const folders = (names: string[]) => [...new Set(names.flatMap((n) => { const p = n.split('/'); return p.slice(0, -1).map((_, i) => p.slice(0, i + 1).join('/')); }))].sort();
 const fileList = (m: Record<string, LFile>) => Object.entries(m).map(([name, f]) => ({ name, modified: f.modified, size: f.source.length, kind: 'tex' }));
-const mainView = (m: LMain) => ({ id: m.id, name: m.name, deadline: m.deadline, is_active: m.is_active, subtask_done: m.subtasks.filter((s) => s.status_id === 'done').length, subtask_total: m.subtasks.length });
+const STAGES = ['read', 'analyse', 'write', 'admin'];
+const extraView = (x: LExtra) => ({
+  stage: x.stage && STAGES.includes(x.stage) ? x.stage : null, next_step: x.next_step || '', waiting_on: x.waiting_on || '', milestone: !!x.milestone,
+  estimate_min: x.estimate_min || null, comments: x.comments || [], links: x.links || [],
+  priority_id: null, start: null, tags: [], tracked_sec: 0, timer_started_at: null, relations: [], files: [], has_note: false,
+});
+/** Copy the research fields present in `body` onto a task; invalid stages are ignored. */
+const applyExtra = (t: LExtra, body: any) => {
+  if ('stage' in body) { const st = String(body.stage || '').toLowerCase(); t.stage = STAGES.includes(st) ? st : null; }
+  if ('next_step' in body) t.next_step = String(body.next_step || '').trim().slice(0, 500);
+  if ('waiting_on' in body) t.waiting_on = String(body.waiting_on || '').trim().slice(0, 200);
+  if ('milestone' in body) t.milestone = !!body.milestone;
+  if ('estimate_min' in body) t.estimate_min = Number(body.estimate_min) > 0 ? Math.round(Number(body.estimate_min)) : null;
+  if (Array.isArray(body.links)) t.links = body.links.filter((l: any) => l && ['paper', 'note', 'figure', 'latex'].includes(l.kind) && l.ref).map((l: any) => ({ kind: l.kind, ref: String(l.ref), label: String(l.label || l.ref) }));
+};
+const subView = (s: LSub, slug: string, mainId: string) => ({ id: s.id, main_task_id: mainId, project_slug: slug, name: s.name, deadline: s.deadline, status_id: s.status_id, done: s.status_id === 'done', completed_at: s.done_at || null, created_at: '', ...extraView(s) });
+const mainView = (m: LMain, slug = '') => ({ id: m.id, project_slug: slug, name: m.name, deadline: m.deadline, is_active: m.is_active, status_id: 'todo', created_at: '', subtask_done: m.subtasks.filter((s) => s.status_id === 'done').length, subtask_total: m.subtasks.length, ...extraView(m) });
 const addTime = (date: string, cat: 'papers' | 'books' | 'writing', sec: number) => { const d = getDB(); const e = d.log[date] || { papers: 0, books: 0, writing: 0 }; e[cat] += sec; d.log[date] = e; };
 
 export async function localRequest(method: string, rawPath: string, body: any): Promise<any> {
@@ -134,22 +158,50 @@ export async function localRequest(method: string, rawPath: string, body: any): 
     if (typeof body.is_active === 'boolean') mt.is_active = body.is_active;
     if (body.name) mt.name = body.name;
     if (body.deadline !== undefined) mt.deadline = body.deadline;
+    applyExtra(mt, body);
     return save({ ok: true });
   }
   if ((m = p.match(/^\/api\/task-projects\/([^/]+)\/main-tasks(?:\/([^/]+)\/subtasks(?:\/([^/]+))?)?$/))) {
     const mm = m!; const proj = d.projects.find((x) => x.slug === dec(mm[1])); if (!proj) throw new Error('Project not found');
     if (!mm[2]) {
-      if (method === 'POST') { proj.main.push({ id: uid('mt'), name: body.name, deadline: body.deadline || null, is_active: true, subtasks: [] }); return save({ ok: true }); }
-      return { main_tasks: proj.main.map(mainView) };
+      if (method === 'POST') { const nm: LMain = { id: uid('mt'), name: body.name, deadline: body.deadline || null, is_active: true, subtasks: [] }; applyExtra(nm, body); proj.main.push(nm); return save({ ok: true, main_task: mainView(nm, proj.slug) }); }
+      return { main_tasks: proj.main.map((x) => mainView(x, proj.slug)) };
     }
     const main = proj.main.find((x) => x.id === mm[2]); if (!main) throw new Error('Task not found');
     if (!mm[3]) {
-      if (method === 'POST') { main.subtasks.push({ id: uid('st'), name: body.name, deadline: body.deadline || null, status_id: 'todo' }); return save({ ok: true }); }
-      return { subtasks: main.subtasks };
+      if (method === 'POST') { const ns: LSub = { id: uid('st'), name: body.name, deadline: body.deadline || null, status_id: 'todo' }; applyExtra(ns, body); main.subtasks.push(ns); return save({ ok: true, subtask: subView(ns, proj.slug, main.id) }); }
+      return { subtasks: main.subtasks.map((x) => subView(x, proj.slug, main.id)) };
     }
     const sub = main.subtasks.find((x) => x.id === mm[3]); if (!sub) throw new Error('Subtask not found');
-    if (method === 'PUT') { Object.assign(sub, body); sub.done_at = sub.status_id === 'done' ? sub.done_at || now() : undefined; return save({ ok: true }); }
+    if (method === 'PUT') { const { stage, next_step, waiting_on, milestone, estimate_min, links, comments, ...plain } = body; Object.assign(sub, plain); applyExtra(sub, { stage, next_step, waiting_on, milestone, estimate_min, links }); sub.done_at = sub.status_id === 'done' ? sub.done_at || now() : undefined; return save({ ok: true }); }
     if (method === 'DELETE') { main.subtasks = main.subtasks.filter((x) => x !== sub); return save({ ok: true }); }
+  }
+  if ((m = p.match(/^\/api\/task-items\/([^/]+)\/((?:mt|st)-[^/]+)(?:\/(comments)(?:\/([^/]+))?)?$/))) {
+    const mm = m!; const proj = d.projects.find((x) => x.slug === dec(mm[1])); if (!proj) throw new Error('Project not found');
+    let main: LMain | undefined; let sub: LSub | undefined;
+    for (const x of proj.main) { if (x.id === mm[2]) main = x; const s2 = x.subtasks.find((s) => s.id === mm[2]); if (s2) { main = x; sub = s2; } }
+    if (!main) throw new Error('Task not found');
+    const t: LExtra = sub ?? main;
+    const out = () => (sub ? { kind: 'subtask', ...subView(sub, proj.slug, main!.id) } : { kind: 'main', ...mainView(main!, proj.slug) });
+    if (mm[3]) {
+      if (method === 'POST') {
+        const text = String(body.text || '').trim(); if (!text) throw new Error('Comment text is required');
+        t.comments = [...(t.comments || []), { id: uid('c'), author: String(body.author || 'me').slice(0, 80), at: now().slice(0, 19), text: text.slice(0, 4000) }];
+        return save({ ok: true, comments: t.comments });
+      }
+      if (method === 'DELETE') { t.comments = (t.comments || []).filter((c) => c.id !== mm[4]); return save({ ok: true, comments: t.comments }); }
+    }
+    if (method === 'PUT') {
+      const { name, deadline, status_id, is_active } = body;
+      if (name) (sub ?? main).name = name;
+      if (deadline !== undefined) (sub ?? main).deadline = deadline;
+      if (sub && status_id) { sub.status_id = status_id; sub.done_at = status_id === 'done' ? sub.done_at || now() : undefined; }
+      if (!sub && typeof is_active === 'boolean') main.is_active = is_active;
+      applyExtra(t, body);
+      return save({ ok: true });
+    }
+    if (method === 'DELETE') { if (sub) main.subtasks = main.subtasks.filter((x) => x !== sub); else proj.main = proj.main.filter((x) => x !== main); return save({ ok: true }); }
+    return { item: out(), note: '' };
   }
   if (p === '/api/tasks/active-summary') {
     return { active: d.projects.flatMap((pr) => pr.main.filter((x) => x.is_active).map((x) => { const v = mainView(x); return { project_slug: pr.slug, project_name: pr.name, main_task_id: x.id, main_task_name: x.name, deadline: x.deadline, subtask_done: v.subtask_done, subtask_total: v.subtask_total }; })) };

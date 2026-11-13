@@ -81,3 +81,5 @@ release/
 .env.development
 .env.test
 local_config.py
+# Built PPTist slides module
+services/assistant/slides/dist/

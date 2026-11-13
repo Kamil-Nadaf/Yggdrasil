@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../api/client";
-import type { TaskItem, TaskRelationType } from "../../api/client";
+import { TASK_STAGES } from "../../api/client";
+import type { TaskItem, TaskLinkKind, TaskRelationType, TaskStage } from "../../api/client";
 import DeadlinePicker from "../../components/DeadlinePicker";
 import StatusPill from "../../components/StatusPill";
 import { allowedFor, formatMinutes, parseMinutes } from "../../lib/taskOptions";
@@ -53,6 +54,11 @@ export default function TaskPanel({
   const [relateType, setRelateType] = useState<TaskRelationType | "blocking">("related");
   const [newSub, setNewSub] = useState("");
   const [busyFile, setBusyFile] = useState(false);
+  const [nextStep, setNextStep] = useState("");
+  const [waitingOn, setWaitingOn] = useState("");
+  const [commentText, setCommentText] = useState("");
+  const [linkKind, setLinkKind] = useState<TaskLinkKind>("paper");
+  const [linkRef, setLinkRef] = useState("");
   const noteTimer = useRef<number | null>(null);
   const nameTimer = useRef<number | null>(null);
   const loadedFor = useRef<string | null>(null);
@@ -70,6 +76,9 @@ export default function TaskPanel({
     setNoteLoaded(false);
     setName(item.name);
     setEstimate(formatMinutes(item.estimate_min));
+    setNextStep(item.next_step);
+    setWaitingOn(item.waiting_on);
+    setCommentText("");
     setRelateOpen(false);
     setNewSub("");
     api.taskItems
@@ -205,6 +214,27 @@ export default function TaskPanel({
     onClose();
   }
 
+  async function postComment() {
+    const t = commentText.trim();
+    if (!t) return;
+    setCommentText("");
+    try {
+      await api.taskItems.addComment(item!.project_slug, item!.id, t, localStorage.getItem("yggdrasil:author") || undefined);
+      await reload();
+    } catch (e) {
+      say(e instanceof Error ? e.message : "Could not add comment");
+    }
+  }
+
+  function addLink() {
+    const ref = linkRef.trim();
+    if (!ref) return;
+    setLinkRef("");
+    void save({ links: [...item!.links, { kind: linkKind, ref, label: ref }] });
+  }
+
+  const isImage = (n: string) => /\.(png|jpe?g|gif|webp|svg)$/i.test(n);
+
   const q = relateQuery.trim().toLowerCase();
   const candidates = items
     .filter((i) => i.ref !== item.ref && !item.relations.some((r) => r.target === i.ref))
@@ -263,6 +293,43 @@ export default function TaskPanel({
           <div className="tk-prop-label">Timer</div>
           <div><TimerButton item={item} now={now} onToggle={() => void toggleTimer(item)} /></div>
 
+          <div className="tk-prop-label">Stage</div>
+          <div className="tk-stage-pick" role="group" aria-label="Research stage">
+            {TASK_STAGES.map((st: TaskStage) => (
+              <button key={st} type="button" className={`tk-stage tk-stage-${st}${item.stage === st ? " on" : ""}`} aria-pressed={item.stage === st} onClick={() => void save({ stage: item.stage === st ? "" : st })}>
+                {st[0].toUpperCase() + st.slice(1)}
+              </button>
+            ))}
+          </div>
+
+          <div className="tk-prop-label">Next step</div>
+          <div>
+            <input
+              type="text"
+              className="tk-wide"
+              value={nextStep}
+              placeholder="The very next action, one line"
+              aria-label="Next step"
+              onChange={(e) => setNextStep(e.target.value)}
+              onBlur={() => nextStep.trim() !== item.next_step && void save({ next_step: nextStep.trim() })}
+              onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
+            />
+          </div>
+
+          <div className="tk-prop-label">Waiting on</div>
+          <div>
+            <input
+              type="text"
+              className="tk-wide"
+              value={waitingOn}
+              placeholder="Person or event (empty = not waiting)"
+              aria-label="Waiting on"
+              onChange={(e) => setWaitingOn(e.target.value)}
+              onBlur={() => waitingOn.trim() !== item.waiting_on && void save({ waiting_on: waitingOn.trim() })}
+              onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
+            />
+          </div>
+
           <div className="tk-prop-label">Tags</div>
           <div className="tk-tag-edit">
             {item.tags.map((id) => {
@@ -300,6 +367,9 @@ export default function TaskPanel({
               <div>
                 <button type="button" className={`btn${item.is_active ? " btn-primary" : ""}`} aria-pressed={item.is_active} onClick={() => void save({ is_active: !item.is_active })}>
                   {item.is_active ? "★ Starred" : "☆ Star"}
+                </button>
+                <button type="button" className={`btn${item.milestone ? " btn-primary" : ""}`} style={{ marginLeft: 6 }} aria-pressed={item.milestone} title="Show as a milestone card in Tasks" onClick={() => void save({ milestone: !item.milestone })}>
+                  {item.milestone ? "◆ Milestone" : "◇ Milestone"}
                 </button>
               </div>
             </>
@@ -381,6 +451,44 @@ export default function TaskPanel({
         </section>
 
         <section className="tk-section">
+          <h3>Linked papers, notes, figures, LaTeX</h3>
+          {item.links.map((l) => (
+            <div key={`${l.kind}:${l.ref}`} className="tk-subrow">
+              <span className="tk-linkkind mono">{l.kind}</span>
+              <span className="tk-subname" title={l.ref}>{l.label}</span>
+              <button type="button" className="tk-x" aria-label={`Remove link ${l.label}`} onClick={() => void save({ links: item.links.filter((x) => !(x.kind === l.kind && x.ref === l.ref)) })}>×</button>
+            </div>
+          ))}
+          <div className="tk-subrow">
+            <select value={linkKind} onChange={(e) => setLinkKind(e.target.value as TaskLinkKind)} aria-label="Link type">
+              <option value="paper">Paper</option>
+              <option value="note">Note</option>
+              <option value="figure">Figure</option>
+              <option value="latex">LaTeX</option>
+            </select>
+            <input type="text" style={{ flex: 1 }} placeholder={linkKind === "paper" ? "arXiv id or title" : linkKind === "latex" ? "LaTeX project folder" : "path or name"} value={linkRef} onChange={(e) => setLinkRef(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addLink()} />
+            <button type="button" className="btn" disabled={!linkRef.trim()} onClick={addLink}>Add</button>
+          </div>
+        </section>
+
+        <section className="tk-section">
+          <h3>Comments <span className="muted mono">{item.comments.length}</span></h3>
+          {item.comments.map((c) => (
+            <div key={c.id} className="tk-comment">
+              <div className="tk-comment-head">
+                <b>{c.author}</b>
+                <span className="muted mono">{c.at.replace("T", " ").slice(0, 16)}</span>
+                <span style={{ flex: 1 }} />
+                <button type="button" className="tk-x" aria-label="Delete comment" onClick={async () => { await api.taskItems.deleteComment(item.project_slug, item.id, c.id); await reload(); }}>×</button>
+              </div>
+              <div className="tk-comment-text">{c.text}</div>
+            </div>
+          ))}
+          <textarea className="tk-note" rows={2} placeholder="Write a comment…  (Ctrl/⌘+Enter to post)" value={commentText} onChange={(e) => setCommentText(e.target.value)} onKeyDown={(e) => (e.metaKey || e.ctrlKey) && e.key === "Enter" && void postComment()} />
+          <div className="tk-note-actions"><button type="button" className="btn btn-primary" disabled={!commentText.trim()} onClick={() => void postComment()}>Comment</button></div>
+        </section>
+
+        <section className="tk-section">
           <h3>Note</h3>
           <textarea className="tk-note" value={note} disabled={!noteLoaded} onChange={(e) => onNote(e.target.value)} placeholder="Markdown notes for this task…" rows={7} />
           <div className="tk-note-actions">
@@ -400,6 +508,7 @@ export default function TaskPanel({
           <h3>Files</h3>
           {item.files.map((f) => (
             <div key={f.name} className="tk-subrow">
+              {isImage(f.name) && <img className="tk-thumb" src={api.taskItems.fileUrl(item.project_slug, item.id, f.name)} alt="" loading="lazy" />}
               <a className="tk-subname" href={api.taskItems.fileUrl(item.project_slug, item.id, f.name)} download={f.name}>{f.name}</a>
               <span className="muted mono">{formatSize(f.size)}</span>
               <button
@@ -419,7 +528,7 @@ export default function TaskPanel({
             {busyFile ? "Uploading…" : "Attach file"}
             <input type="file" multiple hidden onChange={(e) => { void uploadFiles(e.target.files); e.target.value = ""; }} />
           </label>
-          <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>or drop files here (max 20 MB each)</span>
+          <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>or drop files or plot images here (max 100 MB each)</span>
         </section>
       </aside>
 

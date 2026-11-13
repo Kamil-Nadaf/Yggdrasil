@@ -5,18 +5,20 @@ import { reading, type ReadingBook } from "../api/reading";
 import { LatexPromptModal } from "../components/LatexMenuBar";
 import MarkdownNotesTab from "./MarkdownNotesTab";
 import TasksView, { type TasksTab } from "./TasksView";
+import SlidesView from "./SlidesView";
 import BookReader from "./books/BookReader";
 import TaskPanel from "./tasks/TaskPanel";
 import { doneStatusId } from "./tasks/TaskBits";
 import { useNow, useTaskData } from "./tasks/useTaskData";
 import "./projects.css";
 
-type Tab = "overview" | "tasks" | "notes" | "documents" | "paper" | "reading";
+type Tab = "overview" | "tasks" | "notes" | "documents" | "slides" | "paper" | "reading";
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "tasks", label: "Tasks" },
   { id: "notes", label: "Notes" },
   { id: "documents", label: "Documents" },
+  { id: "slides", label: "Slides" },
   { id: "paper", label: "Paper writing" },
   { id: "reading", label: "Reading" },
 ];
@@ -157,6 +159,7 @@ function Workspace({ project, onBack, onChanged, onOpenLatex }: { project: Proje
         {tab === "tasks" && <ProjectTasks slug={project.slug} onChanged={onChanged} />}
         {tab === "notes" && <div className="pj-notes"><MarkdownNotesTab key={project.slug} section={project.name} rootFolder={`Projects/${project.slug}`} /></div>}
         {tab === "documents" && <Documents project={project} onChanged={onChanged} />}
+        {tab === "slides" && <div className="pj-slides"><SlidesView lockedProject={project.slug} /></div>}
         {tab === "paper" && <PaperWriting project={project} onChanged={onChanged} onOpenLatex={onOpenLatex} />}
         {tab === "reading" && <Reading project={project} onChanged={onChanged} />}
       </div>
@@ -170,8 +173,8 @@ function ProjectTasks({ slug, onChanged }: { slug: string; onChanged: () => void
   return (
     <>
       <div className="tk-seg pj-sub" role="tablist">
-        {(["list", "board", "planner"] as TasksTab[]).map((x) => (
-          <button key={x} type="button" role="tab" aria-selected={t === x} className={`tk-seg-b${t === x ? " on" : ""}`} onClick={() => setT(x)}>{x === "planner" ? "Planner" : x === "list" ? "List" : "Board"}</button>
+        {(["list", "board"] as TasksTab[]).map((x) => (
+          <button key={x} type="button" role="tab" aria-selected={t === x} className={`tk-seg-b${t === x ? " on" : ""}`} onClick={() => setT(x)}>{x === "list" ? "List" : "Kanban"}</button>
         ))}
       </div>
       <TasksView lockedProject={slug} requestTab={t} onTabChange={setT} />

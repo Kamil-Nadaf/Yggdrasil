@@ -18,9 +18,9 @@ function loadGroup(): GroupBy {
   }
 }
 
-export default function ListView({ data, items, now, onOpen }: TaskViewProps) {
+export default function ListView({ data, items, now, onOpen, research }: TaskViewProps) {
   const { statuses, priorities, tags, projects, patch, toggleTimer, reload } = data;
-  const [groupBy, setGroupBy] = useState<GroupBy>(loadGroup);
+  const [groupBy, setGroupBy] = useState<GroupBy>(() => (research ? "status" : loadGroup()));
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [addText, setAddText] = useState<Record<string, string>>({});
 
@@ -115,10 +115,12 @@ export default function ListView({ data, items, now, onOpen }: TaskViewProps) {
           )}
           <span className="tk-name">
             {it.kind === "subtask" && <KindBadge kind="subtask" />} {it.name}
+            {it.stage && <span className={`tk-stage tk-stage-${it.stage} on`}>{it.stage[0].toUpperCase() + it.stage.slice(1)}</span>}
           </span>
           {it.kind === "main" && it.subtask_total > 0 && (
             <span className="tk-sub-count mono muted" title="Subtasks done">
               {it.subtask_done}/{it.subtask_total}
+              <span className="tk-mini-bar" aria-hidden="true"><i style={{ width: `${Math.round((100 * it.subtask_done) / it.subtask_total)}%` }} /></span>
             </span>
           )}
           <span className="tk-cell tk-cell-status">
@@ -174,7 +176,7 @@ export default function ListView({ data, items, now, onOpen }: TaskViewProps) {
 
   return (
     <div className="tk-list">
-      <div className="tk-list-bar">
+      {!research && <div className="tk-list-bar">
         <span className="muted">Group by</span>
         <button type="button" className={`btn${groupBy === "status" ? " btn-primary" : ""}`} onClick={() => setGroup("status")}>
           Status
@@ -182,7 +184,7 @@ export default function ListView({ data, items, now, onOpen }: TaskViewProps) {
         <button type="button" className={`btn${groupBy === "project" ? " btn-primary" : ""}`} onClick={() => setGroup("project")}>
           Project
         </button>
-      </div>
+      </div>}
       {groups.map((g) => {
         if (groupBy === "status" && g.rows.length === 0) return null;
         return (

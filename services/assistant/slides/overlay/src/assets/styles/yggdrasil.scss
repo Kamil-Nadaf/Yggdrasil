@@ -1,0 +1,32 @@
+// Dark purple skin for the editor chrome. The slide canvas itself keeps the deck's own colours.
+:root {
+  --yg-bg: #0d1117;
+  --yg-surface: #161b27;
+  --yg-surface2: #1c2333;
+  --yg-border: #2a3447;
+  --yg-text: #cdd9e5;
+  --yg-muted: #8b95a5;
+  --yg-accent: #8b5cf6;
+}
+html, body, #app { background: var(--yg-bg); color: var(--yg-text); font-family: "IBM Plex Sans", system-ui, sans-serif; }
+.pptist-editor, .editor-header, .thumbnails, .toolbar, .canvas-tool, .layout-pool { font-family: "IBM Plex Sans", system-ui, sans-serif; }
+
+.pptist-editor, .editor-header, .thumbnails, .toolbar, .canvas-tool, .remark, .notes-panel,
+.search-panel, .select-panel, .symbol-panel, .markup-panel, .image-lib-panel {
+  background-color: var(--yg-surface) !important;
+  color: var(--yg-text);
+  border-color: var(--yg-border) !important;
+}
+.editor-header { border-bottom: 1px solid var(--yg-border); }
+.canvas { background-color: var(--yg-bg) !important; }
+.thumbnails { border-right: 1px solid var(--yg-border); }
+.toolbar { border-left: 1px solid var(--yg-border); }
+.thumbnail-item .thumbnail { outline-color: var(--yg-border); }
+.thumbnail-item.active .thumbnail { outline-color: var(--yg-accent) !important; }
+.menu-item, .handler-item, .tabs .tab { color: var(--yg-text); }
+.menu-item:hover, .handler-item:hover:not(.disable) { background-color: var(--yg-surface2) !important; }
+.tabs .tab.active { color: var(--yg-accent); border-bottom-color: var(--yg-accent); }
+input, textarea, select, .select, .input, .number-input { background: var(--yg-surface2); color: var(--yg-text); border-color: var(--yg-border); }
+.popover-content, .modal, .dialog, .menu, .dropdown-menu { background: var(--yg-surface); color: var(--yg-text); border-color: var(--yg-border); }
+.button.primary { background-color: var(--yg-accent); border-color: var(--yg-accent); }
+::-webkit-scrollbar-thumb { background: var(--yg-border); }

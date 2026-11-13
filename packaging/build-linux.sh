@@ -29,6 +29,8 @@ for f in main.py gate.py zotero.py data_manifest.py graph_links.py graph_keyword
 done
 mkdir -p "$DIST/app/frontend"
 cp -R "${FRONTEND}/dist" "$DIST/app/frontend/dist"
+# Slides module (PPTist, AGPL-3.0): optional, needs git + network once
+if bash "${ROOT}/services/assistant/slides/build.sh" "$DIST/app/slides/dist"; then :; else echo "! slides module not built (Slides view will be unavailable)"; fi
 cp "${ROOT}/services/latex/latex_service.py" "$DIST/latex/"
 cp -R "${ROOT}/services/latex/aastex" "$DIST/latex/aastex" 2>/dev/null || true
 cp -R "${ROOT}/services/latex/posters" "$DIST/latex/posters" 2>/dev/null || true

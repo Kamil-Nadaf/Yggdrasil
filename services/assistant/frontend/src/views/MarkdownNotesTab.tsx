@@ -1,3 +1,4 @@
+import NoteSlideshow from "../components/NoteSlideshow";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, type LatexFile } from "../api/client";
 import AbstractText from "../components/AbstractText";
@@ -155,6 +156,7 @@ function PresentPane({
   const { zoom, zoomIn, zoomOut, atMinZoom, atMaxZoom } = useZoom();
   const { fullscreen, setFullscreen } = useFullscreenPane();
   const [exporting, setExporting] = useState(false);
+  const [slideshow, setSlideshow] = useState(false);
   const body = stripFrontmatter(source);
   const words = useMemo(() => wordCount(body), [body]);
 
@@ -171,10 +173,15 @@ function PresentPane({
     }
   }
 
+  if (slideshow) {
+    return <NoteSlideshow body={body} imageBase={imageBase} onClose={() => setSlideshow(false)} />;
+  }
+
   return (
     <div className={`latex-preview-pane${fullscreen ? " is-fullscreen" : ""}`}>
       <div className="notes-present-back">
         <button type="button" className="btn" onClick={onClose}>← Back to page</button>
+        <button type="button" className="btn" onClick={() => setSlideshow(true)} disabled={!body.trim()} title="Split at headings and --- lines">▶ Slideshow</button>
       </div>
       <PreviewToolbar
         statusLabel={`${words} word${words === 1 ? "" : "s"}`}

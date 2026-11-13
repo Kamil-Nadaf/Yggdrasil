@@ -9,6 +9,13 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
+# ── Stage 1b: PPTist slides module (pinned upstream commit + Yggdrasil overlay) ─
+FROM node:20-alpine AS slides-builder
+RUN apk add --no-cache git bash
+WORKDIR /slides
+COPY slides/ ./
+RUN bash build.sh /slides/out
+
 # ── Stage 2: Python FastAPI ───────────────────────────────────────────────────
 FROM python:3.12-slim
 
@@ -30,6 +37,9 @@ COPY gate.py zotero.py main.py data_manifest.py graph_links.py graph_keywords.py
 
 # Copy built frontend from stage 1
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
+
+# Slides module (served at /slides, only fetched when the Slides view opens)
+COPY --from=slides-builder /slides/out ./slides/dist
 
 EXPOSE 8000
 

@@ -153,3 +153,91 @@
 .task-status-edit-row.tk-opt-row > input[type="text"] { flex: 1 1 0; width: auto; min-width: 0; }
 .task-status-edit-row.tk-opt-row > .btn { width: 28px; min-width: 28px; padding: 0; flex: none; }
 .task-status-edit-row.tk-opt-row > input[type="color"] { flex: none; }
+
+/* ── Research tasks: stage chips, comments, links ───────────────────────── */
+.tk-stage { --st: #8b8993; display: inline-flex; align-items: center; font-family: var(--font-mono, monospace); font-size: 11.5px; line-height: 1.2; padding: 2px 8px; border: 1px solid color-mix(in srgb, var(--st) 55%, var(--border)); background: transparent; color: var(--text); cursor: default; white-space: nowrap; border-radius: 4px; }
+.tk-stage.on { background: color-mix(in srgb, var(--st) 22%, transparent); }
+.tk-stage-read { --st: #3f9b63; } .tk-stage-analyse { --st: #5b86d6; } .tk-stage-write { --st: #c9803f; } .tk-stage-admin { --st: #8b8993; }
+.tk-stage-pick { display: flex; gap: 6px; flex-wrap: wrap; }
+.tk-stage-pick .tk-stage { cursor: pointer; padding: 4px 10px; font-size: 12.5px; }
+.tk-wide { width: 100%; box-sizing: border-box; }
+.tk-linkkind { font-size: 11px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 4px; min-width: 44px; text-align: center; color: var(--muted); }
+.tk-comment { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
+.tk-comment-head { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
+.tk-comment-text { white-space: pre-wrap; font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; }
+.tk-thumb { width: 36px; height: 36px; object-fit: cover; border: 1px solid var(--border); border-radius: 4px; flex: none; }
+.tk-card-research { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tk-card-next { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-rcol { font-weight: 600; }
+.tk-mini-bar { display: inline-block; width: 34px; height: 5px; margin-left: 6px; background: color-mix(in srgb, var(--text) 14%, transparent); vertical-align: middle; }
+.tk-mini-bar > i { display: block; height: 100%; background: var(--accent); }
+
+/* ── Tasks section (research workspace) ─────────────────────────────────── */
+.rt-page { display: flex; min-height: 0; gap: 0; align-items: flex-start; }
+.rt-side { flex: 0 0 220px; position: sticky; top: 0; align-self: flex-start; display: flex; flex-direction: column; gap: 2px; padding: 4px 12px 16px 0; margin-right: 18px; border-right: 1px solid var(--border); max-height: calc(100vh - 110px); overflow-y: auto; }
+.rt-side-title { margin: 0 0 10px 8px; }
+.rt-side-h { font-family: var(--font-mono, monospace); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding: 16px 8px 6px; }
+.rt-side-b { display: flex; align-items: center; gap: 8px; justify-content: space-between; min-height: 34px; padding: 0 10px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 14px; text-align: left; cursor: pointer; border-radius: 6px; }
+.rt-side-b:hover { background: color-mix(in srgb, var(--text) 7%, transparent); }
+.rt-side-b.on { background: color-mix(in srgb, var(--accent) 20%, transparent); font-weight: 600; }
+.rt-side-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rt-dot { width: 9px; height: 9px; flex: none; }
+.rt-newproj { margin-top: 10px; align-self: flex-start; }
+.rt-main-col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.rt-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+.rt-h1 { margin: 0; }
+.rt-quick { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 14px; border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border)); background: var(--surface); }
+.rt-quick input { flex: 1; min-width: 0; background: transparent !important; border: 0 !important; outline: 0; color: var(--text); font: inherit; font-size: 15px; box-shadow: none !important; }
+.rt-quick-plus { color: var(--accent); font-size: 20px; }
+.rt-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.rt-ms-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.rt-ms { display: flex; flex-direction: column; gap: 6px; text-align: left; padding: 10px 12px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; cursor: pointer; min-width: 0; }
+.rt-ms.big { padding: 14px 16px; gap: 9px; }
+.rt-ms:hover { border-color: var(--accent); }
+.rt-ms-top { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
+.rt-ms-label { font-family: var(--font-mono, monospace); text-transform: uppercase; letter-spacing: .06em; color: var(--accent); }
+.rt-ms-left { font-family: var(--font-mono, monospace); color: #d9a93a; }
+.rt-ms-left.over { color: var(--crit); }
+.rt-ms-name { font-size: 14.5px; font-weight: 600; overflow-wrap: anywhere; }
+.rt-ms-bar { display: block; height: 6px; background: color-mix(in srgb, var(--text) 14%, transparent); }
+.rt-ms-bar > i { display: block; height: 100%; background: var(--accent); }
+.rt-ms-meta { font-size: 12px; }
+.rt-group { display: flex; flex-direction: column; }
+.rt-group-head { display: flex; align-items: center; gap: 10px; padding: 6px 4px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+.rt-group-head .muted { font-weight: 400; text-transform: none; letter-spacing: 0; font-size: 12.5px; flex: 1; }
+.rt-row, .rt-subrow { display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 0 8px; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); cursor: pointer; }
+.rt-row:hover, .rt-subrow:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
+.rt-row.done .rt-title, .rt-subrow.done .rt-title { text-decoration: line-through; color: var(--muted); }
+.rt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 4px 0; }
+.rt-title { flex: 1; min-width: 0; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rt-main .rt-title { flex: none; }
+.rt-next { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rt-proj { font-size: 12px; padding: 2px 8px; border: 1px solid; white-space: nowrap; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+.rt-est { width: 44px; text-align: right; font-size: 12px; }
+.rt-due { width: 74px; text-align: right; font-size: 12px; color: var(--muted); }
+.rt-due.over { color: var(--crit); }
+.rt-subs { padding-left: 28px; }
+.rt-subrow { min-height: 38px; }
+.rt-subadd { margin: 6px 0 8px 8px; width: min(420px, 90%); }
+
+/* ── Week planner ───────────────────────────────────────────────────────── */
+.tk-plan-grid { display: grid; grid-template-columns: repeat(7, minmax(130px, 1fr)) minmax(150px, 1fr); gap: 10px; overflow-x: auto; padding-bottom: 10px; align-items: stretch; }
+.tk-plan-col { display: flex; flex-direction: column; min-height: 320px; background: color-mix(in srgb, var(--surface) 70%, var(--bg)); border: 1px solid var(--border); border-radius: 8px; }
+.tk-plan-col.today { border-color: var(--accent); }
+.tk-plan-col.over { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+.tk-plan-head { display: flex; align-items: baseline; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.tk-plan-load { margin-left: auto; font-size: 11.5px; color: var(--muted); }
+.tk-plan-load.over { color: var(--crit); }
+.tk-plan-body { padding: 8px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+.tk-plan-card { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; cursor: grab; font-size: 13.5px; touch-action: none; }
+.tk-plan-card.dragging { opacity: .45; }
+.tk-plan-title { overflow-wrap: anywhere; }
+.tk-plan-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+
+@media (max-width: 900px) {
+  .rt-page { flex-direction: column; }
+  .rt-side { position: static; flex: none; width: 100%; flex-direction: row; flex-wrap: wrap; border-right: 0; margin: 0 0 10px; max-height: none; padding: 0; }
+  .rt-side-h, .rt-side-title { display: none; }
+  .rt-main-col { width: 100%; }
+  .rt-proj, .rt-est { display: none; }
+}

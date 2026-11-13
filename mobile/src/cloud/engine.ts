@@ -47,7 +47,7 @@ export async function runSync(inp: SyncInput, api: RemoteApi, device = 'phone'):
       else if (bm === rm) ups.push([p, R.id]);
       else conflicts.push(p);
     } else if (L && !R) { if (B && bm === lm) delLocal.push(p); else ups.push([p, undefined]); }
-    else if (R && !L) { if (B && bm === rm) delRemote.push([p, R.id]); else downs.push(p); }
+    else if (R && !L) { if (B && bm === rm && kindOf(p) !== 'deck') delRemote.push([p, R.id]); else downs.push(p); } // decks are view-only here: never delete them on Drive
   }
 
   const nDel = delLocal.length + delRemote.length;

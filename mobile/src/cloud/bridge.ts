@@ -2,8 +2,8 @@
  * Translates between the phone's own database (local.ts) and the desktop vault's files, so the phone can
  * sync with the same Drive folder as the desktop app: notes, LaTeX, habits, tasks and goals.
  */
-import type { LocalDB } from '../local.ts';
-import { canonicalJson, parseFm, patchFm, same } from './fm.ts';
+import { EXTRA_KEYS, type LExtra, type LMain, type LSub, type LocalDB } from '../local.ts';
+import { canonicalJson, parseFm, patchFm, same, type Meta } from './fm.ts';
 
 export interface VFile { text: string; mtime: number }
 export type Files = Record<string, VFile>;
@@ -18,15 +18,22 @@ export const TASK_RE = /^80-Tasks\/([^/]+)\/(_project|mt-[^/]+|st-[^/]+)\.md$/;
 export const SETTINGS = '_app/settings.json';
 export const PINNED = '_daily-habits';
 
-export type Kind = 'note' | 'tex' | 'structured' | 'settings';
+export const DECK_RE = /^50-Projects\/([^/]+)\/slides\/([^/]+\.json)$/;
+export type Kind = 'note' | 'tex' | 'structured' | 'settings' | 'deck';
 /** Which synced paths the phone understands (everything else in the vault is left alone). */
 export function kindOf(path: string): Kind | null {
   if (path === SETTINGS) return 'settings';
+  if (DECK_RE.test(path)) return 'deck';
   if (DAILY_RE.test(path) || TASK_RE.test(path)) return 'structured';
   if (path.startsWith(NOTES) && path.endsWith('.md') && !path.split('/').some((p, i) => i > 0 && p.startsWith('.'))) return 'note';
   if (path.startsWith(TEX) && path.endsWith('.tex')) return 'tex';
   return null;
 }
+
+/** Research fields (stage, next step, comments...) a task has set, as front-matter keys. */
+const extraMeta = (x: LExtra): Meta => { const o: Meta = {}; for (const k of EXTRA_KEYS) if (x[k] !== undefined) o[k] = x[k]; return o; };
+/** The same fields read back from a task file; empty values are left unset. */
+const extraOf = (meta: Meta): LExtra => { const o: Record<string, unknown> = {}; for (const k of EXTRA_KEYS) { const v = meta[k]; if (v !== undefined && v !== null && v !== '') o[k] = v; } return o as LExtra; };
 
 const ms = (iso: string) => { const t = Date.parse(iso); return Number.isFinite(t) ? t : 0; };
 const nowIso = () => new Date().toISOString().slice(0, 19);
@@ -34,6 +41,7 @@ const nowIso = () => new Date().toISOString().slice(0, 19);
 export function exportFiles(db: LocalDB, raw: Raw): Files {
   const out: Files = {};
   for (const [name, f] of Object.entries(db.notes)) out[NOTES + (name.endsWith('.md') ? name : `${name}.md`)] = { text: f.source, mtime: ms(f.modified) };
+  for (const [key, f] of Object.entries(db.decks ?? {})) out[`50-Projects/${key.replace('/', '/slides/')}`] = { text: f.source, mtime: ms(f.modified) };
   for (const [name, f] of Object.entries(db.tex)) out[TEX + (name.endsWith('.tex') ? name : `${name}.tex`)] = { text: f.source, mtime: ms(f.modified) };
 
   for (const [day, habits] of Object.entries(db.habits)) {
@@ -45,11 +53,11 @@ export function exportFiles(db: LocalDB, raw: Raw): Files {
     out[`${dir}_project.md`] = { text: patchFm(raw[`${dir}_project.md`], { type: 'project', name: pr.name }, { created_at: nowIso() }), mtime: 0 };
     for (const mt of pr.main) {
       const p = `${dir}${mt.id}.md`;
-      out[p] = { text: patchFm(raw[p], { type: 'main_task', name: mt.name, deadline: mt.deadline || null, is_active: mt.is_active }, { status_id: 'todo', created_at: nowIso() }), mtime: 0 };
+      out[p] = { text: patchFm(raw[p], { type: 'main_task', name: mt.name, deadline: mt.deadline || null, is_active: mt.is_active, ...extraMeta(mt) }, { status_id: 'todo', created_at: nowIso() }), mtime: 0 };
       for (const st of mt.subtasks) {
         const sp = `${dir}${st.id}.md`;
         out[sp] = {
-          text: patchFm(raw[sp], { type: 'subtask', main_task_id: mt.id, name: st.name, deadline: st.deadline || null, status_id: st.status_id, completed_at: st.status_id === 'done' ? st.done_at || nowIso() : null }, { created_at: nowIso() }),
+          text: patchFm(raw[sp], { type: 'subtask', main_task_id: mt.id, name: st.name, deadline: st.deadline || null, status_id: st.status_id, completed_at: st.status_id === 'done' ? st.done_at || nowIso() : null, ...extraMeta(st) }, { created_at: nowIso() }),
           mtime: 0,
         };
       }
@@ -65,13 +73,16 @@ export function exportFiles(db: LocalDB, raw: Raw): Files {
 
 /** Rebuild the phone's notes, LaTeX, habits, tasks and goals from the final synced file set. */
 export function importFiles(db: LocalDB, files: Files): void {
-  db.notes = {}; db.tex = {}; db.habits = {};
-  const projects = new Map<string, { slug: string; name: string; pinned: boolean; main: Map<string, { id: string; name: string; deadline: string | null; is_active: boolean; created: string; subtasks: { id: string; name: string; deadline: string | null; status_id: string; done_at?: string; created: string }[] }> }>();
-  const subs: { slug: string; main: string; sub: { id: string; name: string; deadline: string | null; status_id: string; done_at?: string; created: string } }[] = [];
+  db.notes = {}; db.tex = {}; db.habits = {}; db.decks = {};
+  type SubIn = LSub & { created: string };
+  type MainIn = Omit<LMain, 'subtasks'> & { created: string; subtasks: SubIn[] };
+  const projects = new Map<string, { slug: string; name: string; pinned: boolean; main: Map<string, MainIn> }>();
+  const subs: { slug: string; main: string; sub: SubIn }[] = [];
   const str = (v: unknown): string | null => (v === null || v === undefined || v === '' ? null : String(v));
   for (const [path, f] of Object.entries(files)) {
     const k = kindOf(path);
     if (k === 'note') db.notes[path.slice(NOTES.length)] = { source: f.text, modified: new Date(f.mtime || Date.now()).toISOString() };
+    else if (k === 'deck') { const m = DECK_RE.exec(path)!; db.decks[`${m[1]}/${m[2]}`] = { source: f.text, modified: new Date(f.mtime || Date.now()).toISOString() }; }
     else if (k === 'tex') db.tex[path.slice(TEX.length)] = { source: f.text, modified: new Date(f.mtime || Date.now()).toISOString() };
     else if (k === 'settings') { try { const g = JSON.parse(f.text).goals; if (Array.isArray(g)) db.goals = g; } catch { /* keep goals */ } }
     else if (k === 'structured') {
@@ -82,8 +93,8 @@ export function importFiles(db: LocalDB, files: Files): void {
       const pr = projects.get(slug) ?? { slug, name: slug, pinned: slug === PINNED, main: new Map() };
       projects.set(slug, pr);
       if (file === '_project') pr.name = str(meta.name) || slug;
-      else if (file.startsWith('mt-')) pr.main.set(file, { id: file, name: str(meta.name) || file, deadline: str(meta.deadline), is_active: !!meta.is_active, created: str(meta.created_at) || '', subtasks: [] });
-      else subs.push({ slug, main: String(meta.main_task_id || ''), sub: { id: file, name: str(meta.name) || file, deadline: str(meta.deadline), status_id: str(meta.status_id ?? meta.status) || 'todo', done_at: str(meta.completed_at) || undefined, created: str(meta.created_at) || '' } });
+      else if (file.startsWith('mt-')) pr.main.set(file, { id: file, name: str(meta.name) || file, deadline: str(meta.deadline), is_active: !!meta.is_active, created: str(meta.created_at) || '', subtasks: [], ...extraOf(meta) });
+      else subs.push({ slug, main: String(meta.main_task_id || ''), sub: { id: file, name: str(meta.name) || file, deadline: str(meta.deadline), status_id: str(meta.status_id ?? meta.status) || 'todo', done_at: str(meta.completed_at) || undefined, created: str(meta.created_at) || '', ...extraOf(meta) } });
     }
   }
   for (const s of subs) projects.get(s.slug)?.main.get(s.main)?.subtasks.push(s.sub);
@@ -91,7 +102,7 @@ export function importFiles(db: LocalDB, files: Files): void {
   db.projects = [...projects.values()]
     .map((p) => ({
       slug: p.slug, name: p.name, pinned: p.pinned,
-      main: [...p.main.values()].sort(byCreated).map((mt) => ({ id: mt.id, name: mt.name, deadline: mt.deadline, is_active: mt.is_active, subtasks: mt.subtasks.sort(byCreated).map(({ created: _c, ...s }) => s) })),
+      main: [...p.main.values()].sort(byCreated).map(({ created: _m, subtasks, ...mt }) => ({ ...mt, subtasks: subtasks.sort(byCreated).map(({ created: _c, ...s }) => s) })),
     }))
     .sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.name.localeCompare(b.name));
 }

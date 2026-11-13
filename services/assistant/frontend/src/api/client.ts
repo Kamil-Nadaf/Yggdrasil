@@ -273,6 +273,34 @@ export interface TaskExtras {
   relations: TaskRelation[];
   files: TaskFile[];
   has_note: boolean;
+  /** Research stage chip. */
+  stage: TaskStage | null;
+  next_step: string;
+  /** Who or what the task is waiting on; non-empty puts it in the Waiting view/column. */
+  waiting_on: string;
+  /** A main task shown as a milestone card (days left + subtask progress). */
+  milestone: boolean;
+  links: TaskLink[];
+  comments: TaskComment[];
+}
+
+export type TaskLinkKind = "paper" | "note" | "figure" | "latex";
+/** A link from a task to a paper (arXiv id / title), a note path, a figure file or a LaTeX project. */
+export interface TaskLink {
+  kind: TaskLinkKind;
+  ref: string;
+  label: string;
+}
+
+export type TaskStage = "read" | "analyse" | "write" | "admin";
+export const TASK_STAGES: TaskStage[] = ["read", "analyse", "write", "admin"];
+
+/** One comment on a task: author + timestamp + text, so several people can comment later. */
+export interface TaskComment {
+  id: string;
+  author: string;
+  at: string;
+  text: string;
 }
 
 /** Writable counterpart of TaskExtras (all optional on create/update). */
@@ -283,6 +311,11 @@ export interface TaskExtrasInput {
   tags?: string[];
   note?: string;
   relations?: TaskRelation[];
+  stage?: TaskStage | "" | null;
+  next_step?: string;
+  waiting_on?: string;
+  milestone?: boolean;
+  links?: TaskLink[];
 }
 
 /** A user-defined shape token — grayscale-safe status differentiation, color is secondary. */
@@ -592,6 +625,12 @@ export const api = {
     fileUrl: (slug: string, name: string) => `/api/projects/${encodeURIComponent(slug)}/files/${encodeURIComponent(name)}`,
     deleteFile: (slug: string, name: string) =>
       req<{ ok: boolean }>("DELETE", `/api/projects/${encodeURIComponent(slug)}/files/${encodeURIComponent(name)}`),
+    decks: (slug: string) =>
+      req<{ decks: { name: string; size: number; updated_at: string }[] }>("GET", `/api/projects/${encodeURIComponent(slug)}/slides`),
+    saveDeck: (slug: string, name: string, deck: unknown) =>
+      req<{ ok: boolean; name: string }>("PUT", `/api/projects/${encodeURIComponent(slug)}/slides/${encodeURIComponent(name)}`, deck),
+    deleteDeck: (slug: string, name: string) =>
+      req<{ ok: boolean }>("DELETE", `/api/projects/${encodeURIComponent(slug)}/slides/${encodeURIComponent(name)}`),
   },
 
   taskProjects: {
@@ -663,6 +702,17 @@ export const api = {
         "POST",
         `/api/task-items/${encodeURIComponent(slug)}/${encodeURIComponent(id)}/files`,
         { name, content_b64 }
+      ),
+    addComment: (slug: string, id: string, text: string, author?: string) =>
+      req<{ ok: boolean; comments: TaskComment[] }>(
+        "POST",
+        `/api/task-items/${encodeURIComponent(slug)}/${encodeURIComponent(id)}/comments`,
+        { text, author }
+      ),
+    deleteComment: (slug: string, id: string, commentId: string) =>
+      req<{ ok: boolean; comments: TaskComment[] }>(
+        "DELETE",
+        `/api/task-items/${encodeURIComponent(slug)}/${encodeURIComponent(id)}/comments/${encodeURIComponent(commentId)}`
       ),
     fileUrl: (slug: string, id: string, name: string) =>
       `/api/task-items/${encodeURIComponent(slug)}/${encodeURIComponent(id)}/files/${encodeURIComponent(name)}`,

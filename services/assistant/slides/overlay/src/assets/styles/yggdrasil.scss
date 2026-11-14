@@ -48,3 +48,61 @@ input, textarea, select, .select, .input, .number-input { background: var(--yg-s
 .switch.active, .checkbox.checked .checkbox-inner, .radio.checked .radio-inner { background-color: var(--yg-accent); border-color: var(--yg-accent); }
 
 ::-webkit-scrollbar-thumb { background: var(--yg-border); }
+
+// ── Theme-safe controls ────────────────────────────────────────────────────────
+// PPTist's components hard-code white backgrounds in *scoped* styles, which outrank the plain rules above; on a dark
+// app theme that left light text on a white control (text "merged" with the button). Force every control and popup
+// surface onto the theme variables so text and background can never end up the same colour.
+.select, .input, .number-input, .textarea, .color-input, .select-custom,
+.input input, .number-input input, .textarea textarea {
+  background-color: var(--yg-surface) !important;
+  color: var(--yg-text) !important;
+  border-color: var(--yg-border) !important;
+}
+.select .selector, .select-custom .selector, .input .input-inner { color: var(--yg-text) !important; }
+.select .icon, .select-custom .icon, .number-input .btn, .number-input .prefix, .number-input .suffix { color: var(--yg-muted) !important; }
+.select.disabled, .input.disabled, .number-input.disabled, .textarea.disabled, .select-custom.disabled {
+  background-color: var(--yg-surface2) !important;
+  color: var(--yg-muted) !important;
+}
+input::placeholder, textarea::placeholder { color: var(--yg-muted) !important; opacity: 1; }
+.option { color: var(--yg-text); }
+.option.disabled { color: var(--yg-muted) !important; }
+.option:not(.disabled):hover { background-color: var(--yg-surface2) !important; }
+.option.selected { color: var(--yg-text) !important; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+
+.button, .button.default {
+  background-color: var(--yg-surface) !important;
+  color: var(--yg-text) !important;
+  border-color: var(--yg-text) !important;
+}
+.button.primary, .button.default.checked, .button.checked {
+  background-color: var(--yg-accent) !important;
+  color: var(--yg-accent-text) !important;
+  border-color: var(--yg-accent) !important;
+}
+.button.disabled, .button.default.disabled { background-color: var(--yg-surface2) !important; color: var(--yg-muted) !important; border-color: var(--yg-border) !important; }
+.button:not(.disabled):not(.primary):hover { background-color: var(--yg-surface2) !important; }
+.button-group .button { color: var(--yg-text); }
+.radio-button, .checkbox-button { color: var(--yg-text) !important; background-color: var(--yg-surface) !important; border-color: var(--yg-border) !important; }
+.radio-button.checked, .checkbox-button.checked { background-color: var(--yg-accent) !important; color: var(--yg-accent-text) !important; border-color: var(--yg-accent) !important; }
+
+.popover-content, .modal-content, .drawer, .message-container, .menu-content, .moveable-panel, .color-picker,
+.select .options, .select-custom .options, .options {
+  background-color: var(--yg-surface) !important;
+  color: var(--yg-text) !important;
+  border-color: var(--yg-border) !important;
+}
+.popover-menu-item, .menu-item-content, .modal-content *:not(.button):not(input):not(textarea) { color: inherit; }
+.popover-menu-item:hover, .menu-item:hover:not(.disable):not(.divider) { background-color: var(--yg-surface2) !important; }
+.menu-item.disable { color: var(--yg-muted) !important; }
+
+.checkbox-input, .switch-core, .slider .track { background-color: var(--yg-surface2) !important; border-color: var(--yg-border) !important; }
+.checkbox.checked .checkbox-input { background-color: var(--yg-accent) !important; border-color: var(--yg-accent) !important; }
+.checkbox-label, .switch-label, .slider-label { color: var(--yg-text); }
+.switch.active .switch-core { background-color: var(--yg-accent) !important; }
+.divider.horizontal { border-block-start-color: var(--yg-border) !important; }
+.divider.vertical { border-inline-start-color: var(--yg-border) !important; }
+.checkbox.checked .checkbox-input::after { border-color: var(--yg-accent-text) !important; }
+.switch.active .switch-core::after { background-color: var(--yg-accent-text) !important; }
+.tabs .tab:not(.active):hover { color: var(--yg-text); }

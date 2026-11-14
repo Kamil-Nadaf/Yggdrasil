@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the small in-app update package: Yggdrasil-app-vX.Y.Z.zip (app Python files + built frontend + update.json).
-# Run after `npm run build` in services/assistant/frontend. Installed apps download this from the GitHub release
+# Run after `npm run build` in services/assistant/frontend (and slides/build.sh for the Slides editor). Installed apps download this from the GitHub release
 # (Settings -> Updates) instead of a full installer. Output goes to release/ (or $1).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -27,5 +27,13 @@ with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as z:
     for f in sorted(dist.rglob("*")):
         if f.is_file():
             z.write(f, "frontend/dist/" + f.relative_to(dist).as_posix())
+    # Slides editor (built by services/assistant/slides/build.sh); older installs have no copy, so ship it in the update.
+    slides = app / "slides" / "dist"
+    if (slides / "index.html").exists():
+        for f in sorted(slides.rglob("*")):
+            if f.is_file():
+                z.write(f, "slides/dist/" + f.relative_to(slides).as_posix())
+    else:
+        print("! slides/dist missing - update will not carry the Slides editor", file=sys.stderr)
 print(f"wrote {target} ({target.stat().st_size // 1024} KiB)")
 PY

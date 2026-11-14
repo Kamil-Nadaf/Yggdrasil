@@ -137,6 +137,8 @@ jobs:
         run: |
           npm ci
           npm run build
+      - name: Build Slides editor
+        run: bash services/assistant/slides/build.sh
       - name: Package update
         run: bash scripts/make-update-payload.sh
       - name: Tag must match APP_VERSION

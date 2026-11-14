@@ -1,14 +1,16 @@
-// Dark purple skin for the editor chrome. The slide canvas itself keeps the deck's own colours.
+// App-theme skin for the editor chrome. The host app posts its colours (see yggdrasil/theme.ts);
+// these defaults are the app's light "paper" theme. The slide canvas keeps the deck's own colours.
 :root {
-  --yg-bg: #0d1117;
-  --yg-surface: #161b27;
-  --yg-surface2: #1c2333;
-  --yg-border: #2a3447;
-  --yg-text: #cdd9e5;
-  --yg-muted: #8b95a5;
-  --yg-accent: #8b5cf6;
+  --yg-bg: #f8f8f6;
+  --yg-surface: #ffffff;
+  --yg-surface2: #f1f1ee;
+  --yg-border: #d9d9d4;
+  --yg-text: #141414;
+  --yg-muted: #6b6b6b;
+  --yg-accent: #141414;
+  --yg-accent-text: #ffffff;
 }
-html, body, #app { background: var(--yg-bg); color: var(--yg-text); font-family: "IBM Plex Sans", system-ui, sans-serif; }
+html, body, #app { height: 100%; background: var(--yg-bg); color: var(--yg-text); font-family: "IBM Plex Sans", system-ui, sans-serif; }
 .pptist-editor, .editor-header, .thumbnails, .toolbar, .canvas-tool, .layout-pool { font-family: "IBM Plex Sans", system-ui, sans-serif; }
 
 .pptist-editor, .editor-header, .thumbnails, .toolbar, .canvas-tool, .remark, .notes-panel,
@@ -17,16 +19,32 @@ html, body, #app { background: var(--yg-bg); color: var(--yg-text); font-family:
   color: var(--yg-text);
   border-color: var(--yg-border) !important;
 }
-.editor-header { border-bottom: 1px solid var(--yg-border); }
-.canvas { background-color: var(--yg-bg) !important; }
-.thumbnails { border-right: 1px solid var(--yg-border); }
-.toolbar { border-left: 1px solid var(--yg-border); }
+.editor-header { border-bottom: 1px solid var(--yg-border); background-color: var(--yg-bg) !important; }
+.canvas-tool { background-color: var(--yg-bg) !important; }
+.canvas { background-color: var(--yg-surface2) !important; }
+.thumbnails { border-right: 1px solid var(--yg-border); background-color: var(--yg-surface2) !important; }
+.toolbar { border-left: 1px solid var(--yg-border); background-color: var(--yg-bg) !important; }
+.remark { background-color: var(--yg-bg) !important; }
 .thumbnail-item .thumbnail { outline-color: var(--yg-border); }
-.thumbnail-item.active .thumbnail { outline-color: var(--yg-accent) !important; }
-.menu-item, .handler-item, .tabs .tab { color: var(--yg-text); }
+.thumbnail-item.active .thumbnail { outline: 2px solid var(--yg-accent) !important; }
+.thumbnail-item.active .page-number, .thumbnail-item .page-number { color: var(--yg-muted); }
+.thumbnail-item.active .page-number { color: var(--yg-text); font-weight: 600; }
+
+.menu-item, .handler-item, .tabs .tab, .editor-header .title-text, .editor-header .icon, .canvas-tool .icon, .toolbar .label { color: var(--yg-text); }
 .menu-item:hover, .handler-item:hover:not(.disable) { background-color: var(--yg-surface2) !important; }
-.tabs .tab.active { color: var(--yg-accent); border-bottom-color: var(--yg-accent); }
-input, textarea, select, .select, .input, .number-input { background: var(--yg-surface2); color: var(--yg-text); border-color: var(--yg-border); }
-.popover-content, .modal, .dialog, .menu, .dropdown-menu { background: var(--yg-surface); color: var(--yg-text); border-color: var(--yg-border); }
-.button.primary { background-color: var(--yg-accent); border-color: var(--yg-accent); }
+.tabs .tab { color: var(--yg-muted); }
+.tabs .tab.active { color: var(--yg-text); font-weight: 600; border-bottom: 2px solid var(--yg-accent) !important; }
+.editor-header .menu-item:has(> .text.ai) { display: none; } // no AI backend in Yggdrasil
+
+input, textarea, select, .select, .input, .number-input { background: var(--yg-surface); color: var(--yg-text); border-color: var(--yg-border); border-radius: 0; }
+.popover-content, .modal, .dialog, .menu, .dropdown-menu { background: var(--yg-surface); color: var(--yg-text); border: 1px solid var(--yg-border); border-radius: 0; box-shadow: 4px 4px 0 var(--yg-text); }
+
+.button { border-radius: 0; background-color: var(--yg-surface); color: var(--yg-text); border-color: var(--yg-text); }
+.button.primary { background-color: var(--yg-accent); border-color: var(--yg-accent); color: var(--yg-accent-text); }
+.button.disabled, .button.default.disabled { opacity: .5; }
+.button:hover:not(.disabled) { background-color: var(--yg-surface2); }
+.button.primary:hover:not(.disabled) { background-color: var(--yg-accent); opacity: .88; }
+.select, .color-input, .number-input { border-radius: 0; }
+.switch.active, .checkbox.checked .checkbox-inner, .radio.checked .radio-inner { background-color: var(--yg-accent); border-color: var(--yg-accent); }
+
 ::-webkit-scrollbar-thumb { background: var(--yg-border); }

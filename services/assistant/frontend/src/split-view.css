@@ -44,6 +44,10 @@
 .split-bar-label { font-family: var(--font-mono, monospace); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 .split-bar-btns { display: flex; gap: 6px; flex-wrap: wrap; }
 .split-bar-hint { margin-left: auto; font-size: 12px; color: var(--muted); }
+.split-bar-toggle { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 12px; }
+.split-bar-toggle:hover { border-color: var(--accent); }
+.split-bar-min { padding: 2px 12px; gap: 10px; }
+.split-bar-min .split-bar-title { font-size: 13px; }
 .split-lay { width: 52px; height: 48px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; padding: 0; }
 .split-lay:hover { border-color: var(--accent); }
 .split-lay.on { border: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--bg)); }
@@ -51,3 +55,6 @@
 .split-glyph i { background: var(--muted); display: block; }
 .split-lay-l { font-family: var(--font-mono, monospace); font-size: 10.5px; line-height: 1; }
 .split-pane > .app-content { overflow: auto; }
+.pane-num { font-family: var(--font-mono); font-size: 11px; color: var(--muted); margin-right: 4px; }
+.split-pane.is-hidden { display: none; }
+.split-pane.is-max { grid-column: 1 / -1; grid-row: 1 / -1; }

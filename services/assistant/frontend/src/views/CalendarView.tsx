@@ -14,7 +14,15 @@ import {
  */
 
 type View = "month" | "week" | "day" | "schedule";
-type Props = { onOpenTask: (projectSlug: string, mainTaskId: string) => void };
+type Props = {
+  onOpenTask: (projectSlug: string, mainTaskId: string) => void;
+  /** Embedded beside the task list: month/week/day only, no side column, click a day or hour to add a task. */
+  compact?: boolean;
+  projects?: { slug: string; name: string }[];
+  onCreateTask?: (projectSlug: string, name: string, date: string) => Promise<void>;
+  /** Bump to reload tasks after the list changed. */
+  refreshKey?: number;
+};
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const HOUR_PX = 46;
@@ -105,44 +113,49 @@ function layoutDay(evs: CalEvent[]): { ev: CalEvent; s: number; e: number; col: 
   return out;
 }
 
-function HourGutter({ h0, h1 }: { h0: number; h1: number }) {
+function HourGutter({ h0, h1, fill }: { h0: number; h1: number; fill?: boolean }) {
+  const n = h1 - h0;
   return (
-    <div className="cal2-gutter" style={{ height: (h1 - h0) * HOUR_PX }}>
-      {Array.from({ length: h1 - h0 }, (_, i) => (
-        <div key={i} className="cal2-gutter-h" style={{ top: i * HOUR_PX }}>{String(h0 + i).padStart(2, "0")}:00</div>
+    <div className="cal2-gutter" style={{ height: fill ? "100%" : n * HOUR_PX }}>
+      {Array.from({ length: n }, (_, i) => (
+        <div key={i} className="cal2-gutter-h" style={{ top: fill ? `${(i / n) * 100}%` : i * HOUR_PX }}>{String(h0 + i).padStart(2, "0")}:00</div>
       ))}
     </div>
   );
 }
 
 function DayTrack({
-  iso, evs, h0, h1, isToday, onSlot, onEvent,
+  iso, evs, h0, h1, isToday, onSlot, onEvent, fill,
 }: {
-  iso: string; evs: CalEvent[]; h0: number; h1: number; isToday: boolean;
+  iso: string; evs: CalEvent[]; h0: number; h1: number; isToday: boolean; fill?: boolean;
   onSlot: (iso: string, start: string) => void; onEvent: (e: CalEvent) => void;
 }) {
   const laid = layoutDay(evs.filter((e) => evRange(e)));
   const now = new Date();
   const nowMin = now.getHours() * 60 + now.getMinutes();
+  const n = h1 - h0;
+  const pos = (min: number) => (fill ? `${((min - h0 * 60) / (n * 60)) * 100}%` : ((min - h0 * 60) / 60) * HOUR_PX);
   return (
     <div
       className={`cal2-track${isToday ? " today" : ""}`}
-      style={{ height: (h1 - h0) * HOUR_PX }}
+      style={{ height: fill ? "100%" : n * HOUR_PX }}
       onClick={(e) => {
         const r = e.currentTarget.getBoundingClientRect();
-        const mins = h0 * 60 + Math.floor(((e.clientY - r.top) / HOUR_PX) * 2) * 30;
+        const hourPx = fill ? r.height / n : HOUR_PX;
+        const mins = h0 * 60 + Math.floor(((e.clientY - r.top) / hourPx) * 2) * 30;
         onSlot(iso, fmtMin(Math.max(0, Math.min(23 * 60 + 30, mins))));
       }}
     >
-      {Array.from({ length: h1 - h0 }, (_, i) => <div key={i} className="cal2-hline" style={{ top: i * HOUR_PX }} />)}
+      {Array.from({ length: h1 - h0 }, (_, i) => <div key={i} className="cal2-hline" style={{ top: fill ? `${(i / n) * 100}%` : i * HOUR_PX }} />)}
       {laid.map(({ ev, s, e, col, cols }) => (
         <button
           key={ev.id}
           type="button"
           className="cal2-ev"
           style={{
-            top: ((s - h0 * 60) / 60) * HOUR_PX,
-            height: Math.max(22, ((e - s) / 60) * HOUR_PX - 2),
+            top: pos(s),
+            height: fill ? `calc(${((e - s) / (n * 60)) * 100}% - 2px)` : Math.max(22, ((e - s) / 60) * HOUR_PX - 2),
+            minHeight: 22,
             left: `calc(${(col / cols) * 100}% + 2px)`,
             width: `calc(${100 / cols}% - 4px)`,
             background: tint(colorOf(ev.calendar), 30),
@@ -156,8 +169,83 @@ function DayTrack({
         </button>
       ))}
       {isToday && nowMin >= h0 * 60 && nowMin <= h1 * 60 && (
-        <div className="cal2-now" style={{ top: ((nowMin - h0 * 60) / 60) * HOUR_PX }} />
+        <div className="cal2-now" style={{ top: pos(nowMin) }} />
       )}
+    </div>
+  );
+}
+
+/** Click-to-add popup used when the calendar sits beside the task list: a task (default) or an event. */
+function QuickAddDialog({
+  at, projects, onTask, onEvent, onClose,
+}: {
+  at: { date: string; start?: string };
+  projects: { slug: string; name: string }[];
+  onTask: (slug: string, name: string, date: string) => Promise<void>;
+  onEvent: (e: Omit<CalEvent, "id">) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [kind, setKind] = useState<"task" | "event">("task");
+  const [name, setName] = useState("");
+  const [date, setDate] = useState(at.date);
+  const [project, setProject] = useState(projects.find((p) => p.slug !== "daily-habits")?.slug ?? projects[0]?.slug ?? "");
+  const [calendar, setCalendar] = useState("research");
+  const [start, setStart] = useState(at.start ?? "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  async function go() {
+    const n = name.trim();
+    if (!n) return;
+    setBusy(true);
+    setErr("");
+    try {
+      if (kind === "task") await onTask(project, n, date);
+      else await onEvent({ title: n, date, start, end: start ? fmtMin(toMin(start) + 60) : "", all_day: !start, calendar, notes: "" });
+      onClose();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not add");
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="cal2-qa-back" onClick={onClose}>
+      <div className="cal2-qa" role="dialog" aria-label="Add to calendar" onClick={(e) => e.stopPropagation()}>
+        <div className="cal2-qa-kind" role="tablist">
+          <button type="button" role="tab" aria-selected={kind === "task"} className={kind === "task" ? "on" : ""} onClick={() => setKind("task")}>Task</button>
+          <button type="button" role="tab" aria-selected={kind === "event"} className={kind === "event" ? "on" : ""} onClick={() => setKind("event")}>Event</button>
+        </div>
+        <label className="cal2-qa-f">{kind === "task" ? "Task name" : "Event name"}
+          <input autoFocus type="text" value={name} placeholder={kind === "task" ? "What needs doing?" : "Meeting, seminar…"} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void go(); if (e.key === "Escape") onClose(); }} />
+        </label>
+        <div className="cal2-qa-row">
+          <label className="cal2-qa-f">{kind === "task" ? "Due" : "Date"}
+            <input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} />
+          </label>
+          {kind === "task" ? (
+            <label className="cal2-qa-f">Project
+              <select value={project} onChange={(e) => setProject(e.target.value)}>
+                {projects.map((p) => <option key={p.slug} value={p.slug}>{p.name}</option>)}
+              </select>
+            </label>
+          ) : (
+            <>
+              <label className="cal2-qa-f">Start
+                <input type="time" value={start} onChange={(e) => setStart(e.target.value)} />
+              </label>
+              <label className="cal2-qa-f">Calendar
+                <select value={calendar} onChange={(e) => setCalendar(e.target.value)}>
+                  {CALS.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                </select>
+              </label>
+            </>
+          )}
+        </div>
+        {err && <div className="cal-error" role="alert">{err}</div>}
+        <div className="cal2-qa-act">
+          <button type="button" className="btn" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn btn-primary" disabled={busy || !name.trim() || (kind === "task" && !project)} onClick={() => void go()}>Add {kind}</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -230,10 +318,10 @@ function EventModal({
   );
 }
 
-export default function CalendarView({ onOpenTask }: Props) {
+export default function CalendarView({ onOpenTask, compact, projects, onCreateTask, refreshKey }: Props) {
   const todayIso = toIso(new Date());
   const [view, setView] = useState<View>(() => {
-    try { const v = localStorage.getItem(VIEW_KEY); if (v === "month" || v === "week" || v === "day" || v === "schedule") return v; } catch { /* ignore */ }
+    try { const v = localStorage.getItem(VIEW_KEY); if (v === "month" || v === "week" || v === "day" || v === "schedule") return compact && v === "schedule" ? "month" : v; } catch { /* ignore */ }
     return "month";
   });
   const [selected, setSelected] = useState<string>(todayIso);
@@ -254,6 +342,12 @@ export default function CalendarView({ onOpenTask }: Props) {
   const [modal, setModal] = useState<(Partial<CalEvent> & { date: string }) | null>(null);
   const [quick, setQuick] = useState("");
   const [quickCal, setQuickCal] = useState("other");
+  const [quickAt, setQuickAt] = useState<{ date: string; start?: string } | null>(null);
+  /** Empty-slot click: the task/event popup beside the list, the event dialog elsewhere. */
+  const slotClick = (date: string, start?: string) => {
+    if (compact && onCreateTask) setQuickAt({ date, start });
+    else setModal(start ? { date, start, end: fmtMin(toMin(start) + 60), all_day: false } : { date });
+  };
 
   const load = useCallback(async () => {
     try {
@@ -268,7 +362,7 @@ export default function CalendarView({ onOpenTask }: Props) {
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void load(); }, [load, refreshKey]);
   useEffect(() => {
     ensureTaskStatuses(() => api.taskStatuses.get()).then(setStatuses);
     const onUpdate = () => setStatuses(getCachedTaskStatuses());
@@ -416,8 +510,8 @@ export default function CalendarView({ onOpenTask }: Props) {
             <div
               key={iso}
               className={`cal2-cell${d.getMonth() !== monthCells.month ? " out" : ""}${iso === todayIso ? " today" : ""}${iso === selected ? " sel" : ""}`}
-              onClick={() => setSelected(iso)}
-              onDoubleClick={() => setModal({ date: iso })}
+              onClick={() => { setSelected(iso); if (compact) slotClick(iso); }}
+              onDoubleClick={() => { if (!compact) setModal({ date: iso }); }}
             >
               <span className="cal2-num">{d.getDate()}</span>
               {all.slice(0, MAX_PER_CELL).map((x) => <span key={x.k} className="cal2-chip-wrap">{x.n}</span>)}
@@ -445,13 +539,14 @@ export default function CalendarView({ onOpenTask }: Props) {
             <input type="date" className="cal2-pick" value={selected} onChange={(e) => e.target.value && setSelected(e.target.value)} />
             <span style={{ flex: 1 }} />
             <button type="button" className="btn" onClick={() => setSelected(todayIso)}>Today</button>
+            {viewSwitch}
           </div>
         )}
         <div className="cal2-dayhead">{fromIso(iso).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}{iso === todayIso ? " · today" : ""}</div>
         {allDay.length > 0 && <div className="cal2-allday">{allDay.map((n, i) => <span key={i} className="cal2-chip-wrap">{n}</span>)}</div>}
         <div className="cal2-timeline">
-          <HourGutter h0={h0} h1={h1} />
-          <DayTrack iso={iso} evs={evs} h0={h0} h1={h1} isToday={iso === todayIso} onSlot={(d, s) => setModal({ date: d, start: s, end: fmtMin(toMin(s) + 60), all_day: false })} onEvent={setModal} />
+          <HourGutter h0={h0} h1={h1} fill={compact} />
+          <DayTrack iso={iso} evs={evs} h0={h0} h1={h1} isToday={iso === todayIso} onSlot={slotClick} onEvent={setModal} fill={compact} />
         </div>
       </>
     );
@@ -477,10 +572,10 @@ export default function CalendarView({ onOpenTask }: Props) {
           })}
         </div>
         <div className="cal2-week-body">
-          <HourGutter h0={h0} h1={h1} />
+          <HourGutter h0={h0} h1={h1} fill={compact} />
           {days.map((iso) => (
             <DayTrack key={iso} iso={iso} evs={eventsOn(iso)} h0={h0} h1={h1} isToday={iso === todayIso}
-              onSlot={(d, s) => setModal({ date: d, start: s, end: fmtMin(toMin(s) + 60), all_day: false })} onEvent={setModal} />
+              onSlot={slotClick} onEvent={setModal} fill={compact} />
           ))}
         </div>
       </div>
@@ -553,6 +648,15 @@ export default function CalendarView({ onOpenTask }: Props) {
     } catch (e) { setNotifyMsg(e instanceof Error ? e.message : "Test failed"); }
   }
 
+  /** Compact mode has no header row; Month/Week/Day sit at the right end of the toolbar instead. */
+  const viewSwitch = compact ? (
+    <div className="cal2-views cal2-views-in" role="tablist" aria-label="Calendar view">
+      {([["month", "Month"], ["week", "Week"], ["day", "Day"]] as [View, string][]).map(([v, l]) => (
+        <button key={v} type="button" role="tab" aria-selected={view === v} className={`btn${view === v ? " btn-primary" : ""}`} onClick={() => changeView(v)}>{l}</button>
+      ))}
+    </div>
+  ) : null;
+
   const sel = fromIso(selected);
   const mainTitle =
     view === "week"
@@ -560,17 +664,17 @@ export default function CalendarView({ onOpenTask }: Props) {
       : sel.toLocaleDateString(undefined, { month: "long", year: "numeric" });
 
   return (
-    <div className="calendar-view cal2">
-      <header className="cal2-top">
+    <div className={`calendar-view cal2${compact ? " cal2-compact" : ""}`}>
+      {!compact && <header className="cal2-top">
         <h1 className="cal2-h1">Calendar</h1>
         <div className="cal2-views">
-          {([["month", "Month"], ["week", "Week"], ["day", "Day"], ["schedule", "Schedule"]] as [View, string][]).map(([v, l]) => (
+          {([["month", "Month"], ["week", "Week"], ["day", "Day"], ["schedule", "Schedule"]] as [View, string][]).filter(([v]) => !compact || v !== "schedule").map(([v, l]) => (
             <button key={v} type="button" className={`btn${view === v ? " btn-primary" : ""}`} onClick={() => changeView(v)}>{l}</button>
           ))}
         </div>
         <span style={{ flex: 1 }} />
         <button type="button" className="btn btn-primary" onClick={() => setModal({ date: selected })}>+ New Event</button>
-      </header>
+      </header>}
 
       {error && <div className="cal-error" role="alert">{error}</div>}
       {loading && <div className="cal-loading">Loading…</div>}
@@ -589,6 +693,7 @@ export default function CalendarView({ onOpenTask }: Props) {
               )}
               <span style={{ flex: 1 }} />
               <button type="button" className="btn" onClick={() => setSelected(todayIso)}>Today</button>
+              {viewSwitch}
             </div>
           )}
           {view === "month" && renderMonth()}
@@ -602,9 +707,9 @@ export default function CalendarView({ onOpenTask }: Props) {
           )}
         </section>
 
-        {view === "month" && <section className="cal2-daypanel card">{renderDay(selected, true)}</section>}
+        {view === "month" && !compact && <section className="cal2-daypanel card">{renderDay(selected, true)}</section>}
 
-        <aside className="cal2-side">
+        {!compact && <aside className="cal2-side">
           <div className="card cal2-card">
             <h3 className="cal2-card-t">Calendars</h3>
             {[...CALS, TASKS_CAL].map((c) => (
@@ -652,8 +757,19 @@ export default function CalendarView({ onOpenTask }: Props) {
               {notifyMsg && <div className="cal-notify-msg" role="status">{notifyMsg}</div>}
             </div>
           )}
-        </aside>
+        </aside>}
       </div>
+
+      {quickAt && onCreateTask && (
+        <QuickAddDialog
+          key={`${quickAt.date}-${quickAt.start ?? ""}`}
+          at={quickAt}
+          projects={projects ?? []}
+          onTask={onCreateTask}
+          onEvent={saveEvent}
+          onClose={() => setQuickAt(null)}
+        />
+      )}
 
       {modal && (
         <EventModal

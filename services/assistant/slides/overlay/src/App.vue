@@ -18,6 +18,7 @@ import { deleteDiscardedDB } from '@/utils/database'
 import { isPC } from '@/utils/common'
 import api from '@/services'
 import { loadDeck, saveDeck, tell, hasDeck, viewOnly, autoPresent } from '@/yggdrasil/bridge'
+import useImport from '@/hooks/useImport'
 
 import Editor from './views/Editor/index.vue'
 import Screen from './views/Screen/index.vue'
@@ -25,6 +26,7 @@ import Mobile from './views/Mobile/index.vue'
 import FullscreenSpin from '@/components/FullscreenSpin.vue'
 
 const _isPC = isPC()
+const { importPPTXFile, importSpecificFile, importJSON } = useImport()
 
 const mainStore = useMainStore()
 const slidesStore = useSlidesStore()
@@ -73,6 +75,18 @@ onMounted(async () => {
     slidesStore.setSlides(hasDeck ? [{ id: nanoid(10), elements: [] }] : mock)
   }
   loaded = true
+
+  // The host page hands over a file picked outside the editor (Import button / Decks list).
+  window.addEventListener('message', (e: MessageEvent) => {
+    const d = e.data
+    if (!d || d.source !== 'yggdrasil-host' || d.type !== 'import' || !d.file) return
+    const file = d.file as File
+    const cover = !!d.cover
+    const name = (file.name || '').toLowerCase()
+    if (name.endsWith('.pptx')) importPPTXFile([file], { cover })
+    else if (name.endsWith('.pptist')) importSpecificFile([file], cover)
+    else if (name.endsWith('.json')) importJSON([file], cover)
+  })
 
   await deleteDiscardedDB()
   snapshotStore.initSnapshotDatabase()

@@ -422,6 +422,9 @@ def boot(window) -> None:
     os.environ["YGG_EXISTING_DATA"] = "1" if recovered else "0"
     os.environ["YGG_PREVIOUS_VERSION"] = previous
     os.environ["FRONTEND_DIST"] = str(resources / "frontend" / "dist")
+    # An installed in-app update only ships main.py + frontend/dist; the Slides module stays in the bundled app.
+    slides_dist = next((c for c in (resources / "slides" / "dist", _base_resources_dir() / "slides" / "dist") if (c / "index.html").exists()), resources / "slides" / "dist")
+    os.environ.setdefault("SLIDES_DIST", str(slides_dist))
     os.environ.setdefault("OLLAMA_URL", "http://127.0.0.1:11434")
     os.environ.setdefault("GATE_CHECK", "true")
     latex_port = free_port()

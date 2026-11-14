@@ -5679,3 +5679,21 @@ h2 { font-size: 15px; color: var(--accent); }
 .nss-count { font-variant-numeric: tabular-nums; color: var(--muted); }
 .nss-hint { margin-left: auto; color: var(--muted); font-size: 12px; }
 @media (max-width: 700px) { .nss-hint { display: none; } }
+
+/* ── Calendar, compact (beside the task list) ────────────────────────────── */
+.cal2-compact { gap: 10px; }
+.cal2-compact .cal2-body, .cal2-compact .cal2-body.view-month, .cal2-compact .cal2-body.view-week, .cal2-compact .cal2-body.view-day { grid-template-columns: minmax(0, 1fr); }
+.cal2-compact .cal2-cell { min-height: 92px; cursor: pointer; }
+.cal2-qa-back { position: fixed; inset: 0; z-index: 90; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, .28); }
+.cal2-qa { width: min(420px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 12px; padding: 16px; background: var(--surface); color: var(--text); border: 1px solid var(--text); box-shadow: 5px 5px 0 var(--text); }
+.cal2-qa-kind { display: inline-flex; align-self: flex-start; border: 1px solid var(--text); }
+.cal2-qa-kind button { padding: 5px 14px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
+.cal2-qa-kind button + button { border-left: 1px solid var(--text); }
+.cal2-qa-kind button.on { background: var(--text); color: var(--bg); }
+.cal2-qa-f { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); flex: 1; min-width: 0; }
+.cal2-qa-f input, .cal2-qa-f select { font-size: 14px; color: var(--text); }
+.cal2-qa-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.cal2-qa-act { display: flex; justify-content: flex-end; gap: 8px; }
+
+.dash-task-filter { height: 28px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; font-size: 12.5px; padding: 0 8px; border-radius: 0; cursor: pointer; max-width: 100%; }
+.dash-task-filter:hover { border-color: var(--text); }

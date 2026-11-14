@@ -2,15 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api/client";
 import type { TaskItem } from "../../api/client";
 import { LatexPromptModal } from "../../components/LatexMenuBar";
-import { addDaysISO, diffDays, parseISO, todayISO } from "../../lib/taskDates";
+import { addDaysISO, parseISO, todayISO } from "../../lib/taskDates";
 import { allowedFor, formatMinutes } from "../../lib/taskOptions";
 import CalendarView from "../CalendarView";
 import BoardView from "./BoardView";
 import GanttView from "./GanttView";
+import ScheduleView from "./ScheduleView";
 import TaskPanel from "./TaskPanel";
 import { doneStatusId, isDone } from "./TaskBits";
-import TimelineView from "./TimelineView";
-import WeekPlanner from "./WeekPlanner";
 import { matchProject, parseQuickAdd } from "./quickAdd";
 import { mainKeyOf } from "./viewTypes";
 import { useNow, useTaskData } from "./useTaskData";
@@ -18,41 +17,33 @@ import "./tasks.css";
 
 /** A main task (only these carry subtask counts and the starred flag). */
 type MainItem = Extract<TaskItem, { kind: "main" }>;
-type ViewId = "today" | "inbox" | "upcoming" | "waiting" | "milestones" | "done";
-type LayoutId = "board" | "week" | "calendar" | "timeline" | "gantt";
-type Sel = { v: ViewId } | { l: LayoutId };
+type LayoutId = "main" | "schedule" | "board" | "gantt";
+type ListFilter = "open" | "done";
 
-const VIEWS: { id: ViewId; name: string }[] = [
-  { id: "today", name: "Today" },
-  { id: "inbox", name: "Inbox" },
-  { id: "upcoming", name: "Upcoming" },
-  { id: "waiting", name: "Waiting on" },
-  { id: "milestones", name: "Milestones" },
-  { id: "done", name: "Done" },
-];
 const LAYOUTS: { id: LayoutId; name: string }[] = [
-  { id: "board", name: "Kanban board" },
-  { id: "week", name: "Week planner" },
-  { id: "calendar", name: "Calendar" },
-  { id: "timeline", name: "Timeline" },
+  { id: "main", name: "List + Calendar" },
+  { id: "schedule", name: "Schedule" },
+  { id: "board", name: "Kanban" },
   { id: "gantt", name: "Gantt" },
 ];
-const SEL_KEY = "yggdrasil:research-sel";
+const LAYOUT_KEY = "yggdrasil:tasks-layout";
+const FILTER_KEY = "yggdrasil:tasks-list-filter";
 const PROJECT_KEY = "yggdrasil:tasks-project";
+const SPLIT_KEY = "yggdrasil:tasks-split";
+const HIDE_KEY = "yggdrasil:tasks-split-hide";
+const SPLIT_MIN = 0.24;
+const SPLIT_MAX = 0.7;
+const SPLIT_DEFAULT = 0.4;
 const PALETTE = ["#b89ae0", "#7fb3e8", "#e8a97f", "#8fd4a4", "#e88fb0", "#d4c46f"];
 
-function readSel(): Sel {
+function readLayout(): LayoutId {
   try {
-    const raw = localStorage.getItem(SEL_KEY);
-    if (raw) {
-      const s = JSON.parse(raw);
-      if (s && VIEWS.some((x) => x.id === s.v)) return { v: s.v };
-      if (s && LAYOUTS.some((x) => x.id === s.l)) return { l: s.l };
-    }
+    const v = localStorage.getItem(LAYOUT_KEY);
+    if (v === "main" || v === "schedule" || v === "board" || v === "gantt") return v;
   } catch {
     /* optional */
   }
-  return { v: "today" };
+  return "main";
 }
 
 function projectColor(slug: string): string {
@@ -68,8 +59,9 @@ function fmtDue(d: string | null, today: string): { text: string; over: boolean 
   if (day === addDaysISO(today, 1)) return { text: "Tomorrow", over: false };
   const dt = parseISO(day);
   const text = dt.toLocaleDateString(undefined, { day: "numeric", month: "short" });
-  return { text, over: day < today };
+  return { text: day < today ? `Overdue · ${text}` : text, over: day < today };
 }
+const fmtDay = (iso: string | null | undefined) => (iso ? parseISO(iso.slice(0, 10)).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "—");
 
 type Props = {
   focus?: { projectSlug: string; mainTaskId: string } | null;
@@ -78,14 +70,20 @@ type Props = {
   onTabChange?: (t: "planner" | "list" | "board") => void;
 };
 
-/** The Tasks section for research work: view list, quick add, milestones, and kanban / week planner / calendar layouts. */
+/**
+ * The Tasks section: one page with the task list on the left and the calendar on the right,
+ * plus Kanban and Gantt as the two other views. Click a day (or an hour) to add a task.
+ */
 export default function ResearchTasks({ focus, onFocusConsumed, requestTab, onTabChange }: Props) {
   const data = useTaskData();
-  const { items, projects, statuses } = data;
-  const [sel, setSel] = useState<Sel>(() => {
-    if (requestTab === "planner") return { l: "calendar" };
-    if (requestTab === "board") return { l: "board" };
-    return readSel();
+  const { items, projects, statuses, priorities, tags } = data;
+  const [layout, setLayout] = useState<LayoutId>(() => (requestTab === "board" ? "board" : requestTab === "planner" ? "main" : readLayout()));
+  const [filter, setFilter] = useState<ListFilter>(() => {
+    try {
+      return localStorage.getItem(FILTER_KEY) === "done" ? "done" : "open";
+    } catch {
+      return "open";
+    }
   });
   const [projectFilter, setProjectFilter] = useState<string>(() => {
     try {
@@ -100,17 +98,45 @@ export default function ResearchTasks({ focus, onFocusConsumed, requestTab, onTa
   const [quick, setQuick] = useState("");
   const [quickMsg, setQuickMsg] = useState<string | null>(null);
   const [projectModal, setProjectModal] = useState(false);
+  const [calKey, setCalKey] = useState(0);
   const firstReq = useRef(true);
+  const [split, setSplit] = useState<number>(() => {
+    try {
+      const v = Number(localStorage.getItem(SPLIT_KEY));
+      return v >= SPLIT_MIN && v <= SPLIT_MAX ? v : SPLIT_DEFAULT;
+    } catch {
+      return SPLIT_DEFAULT;
+    }
+  });
+  const [hidden, setHidden] = useState<"" | "list" | "cal">(() => {
+    try {
+      const v = localStorage.getItem(HIDE_KEY);
+      return v === "list" || v === "cal" ? v : "";
+    } catch {
+      return "";
+    }
+  });
+  const [dragging, setDragging] = useState(false);
+  const fillRef = useRef<HTMLDivElement>(null);
+  const [fillH, setFillH] = useState(640);
 
   const anyRunning = items.some((i) => i.timer_started_at);
   const now = useNow(anyRunning);
   const today = todayISO();
   const doneId = doneStatusId(statuses);
 
-  const choose = (s: Sel) => {
-    setSel(s);
+  const chooseLayout = (l: LayoutId) => {
+    setLayout(l);
     try {
-      localStorage.setItem(SEL_KEY, JSON.stringify(s));
+      localStorage.setItem(LAYOUT_KEY, l);
+    } catch {
+      /* optional */
+    }
+  };
+  const chooseFilter = (f: ListFilter) => {
+    setFilter(f);
+    try {
+      localStorage.setItem(FILTER_KEY, f);
     } catch {
       /* optional */
     }
@@ -121,20 +147,94 @@ export default function ResearchTasks({ focus, onFocusConsumed, requestTab, onTa
       firstReq.current = false;
       return;
     }
-    if (requestTab === "planner") choose({ l: "calendar" });
-    else if (requestTab === "board") choose({ l: "board" });
-    else if (requestTab === "list") choose({ v: "today" });
+    if (requestTab === "board") chooseLayout("board");
+    else if (requestTab === "planner") {
+      // Gantt reports itself as "planner"; keep it instead of bouncing back to main.
+      if (layout !== "gantt") chooseLayout("main");
+    } else if (requestTab === "list") {
+      // Both List + Calendar and Schedule report "list"; only leave Kanban/Gantt.
+      if (layout === "board" || layout === "gantt") chooseLayout("main");
+    }
   }, [requestTab]);
 
   useEffect(() => {
-    if (!onTabChange) return;
-    onTabChange("l" in sel ? (sel.l === "board" ? "board" : "planner") : "list");
-  }, [sel]); // eslint-disable-line react-hooks/exhaustive-deps
+    onTabChange?.(layout === "board" ? "board" : layout === "gantt" ? "planner" : "list");
+  }, [layout]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const filled = layout === "main" || layout === "schedule";
+  useEffect(() => {
+    if (!filled) return;
+    const fit = () => {
+      const el = fillRef.current;
+      if (!el) return;
+      setFillH(Math.max(480, Math.floor(window.innerHeight - el.getBoundingClientRect().top - 20)));
+    };
+    fit();
+    const t = window.setTimeout(fit, 250);
+    window.addEventListener("resize", fit);
+    const ro = new ResizeObserver(fit);
+    ro.observe(document.body);
+    return () => {
+      window.clearTimeout(t);
+      window.removeEventListener("resize", fit);
+      ro.disconnect();
+    };
+  }, [filled, data.loading, data.error]);
+
+  const saveSplit = (v: number, h: "" | "list" | "cal" = "") => {
+    setSplit(v);
+    setHidden(h);
+    try {
+      localStorage.setItem(SPLIT_KEY, String(v));
+      localStorage.setItem(HIDE_KEY, h);
+    } catch {
+      /* optional */
+    }
+  };
+  const toggleHide = (side: "list" | "cal") => {
+    const h = hidden === side ? "" : side;
+    setHidden(h);
+    try {
+      localStorage.setItem(HIDE_KEY, h);
+    } catch {
+      /* optional */
+    }
+  };
+  const startDrag = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    const box = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();
+    setDragging(true);
+    let last = split;
+    const move = (ev: MouseEvent) => {
+      last = Math.max(SPLIT_MIN, Math.min(SPLIT_MAX, (ev.clientX - box.left) / box.width));
+      setSplit(last);
+    };
+    const up = () => {
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", up);
+      setDragging(false);
+      try {
+        localStorage.setItem(SPLIT_KEY, String(last));
+      } catch {
+        /* optional */
+      }
+    };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  };
+  const keySplit = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      saveSplit(Math.max(SPLIT_MIN, split - 0.02));
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      saveSplit(Math.min(SPLIT_MAX, split + 0.02));
+    }
+  };
 
   useEffect(() => {
     if (!focus) return;
     setOpenRef(`${focus.projectSlug}/${focus.mainTaskId}`);
-    if ("l" in sel && sel.l === "calendar") choose({ v: "today" });
     onFocusConsumed?.();
   }, [focus]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -173,34 +273,28 @@ export default function ResearchTasks({ focus, onFocusConsumed, requestTab, onTa
     [subsOf, statuses]
   );
 
-  const sections = useMemo(() => {
-    const open = mains.filter((m) => !isDone(m, statuses));
-    const waiting = open.filter((m) => !!m.waiting_on);
-    const active = open.filter((m) => !m.waiting_on);
-    const byDue = (a: MainItem, b: MainItem) => (effDue(a) || "9999").localeCompare(effDue(b) || "9999");
-    const focusToday = active.filter((m) => m.is_active || (effDue(m) !== null && (effDue(m) as string) <= today)).sort(byDue);
-    const inFocus = new Set(focusToday.map((m) => m.ref));
-    const week = active.filter((m) => !inFocus.has(m.ref) && effDue(m) !== null && (effDue(m) as string) <= addDaysISO(today, 7)).sort(byDue);
-    const inbox = active.filter((m) => effDue(m) === null && !m.stage).sort((a, b) => b.created_at.localeCompare(a.created_at));
-    const upcoming = active.filter((m) => effDue(m) !== null && (effDue(m) as string) > today).sort(byDue);
-    const done = mains.filter((m) => isDone(m, statuses));
-    const milestones = mains.filter((m) => m.milestone && !isDone(m, statuses)).sort(byDue);
-    return { focusToday, week, waiting, inbox, upcoming, done, milestones, todayCount: focusToday.length + week.length };
-  }, [mains, statuses, effDue, today]);
-
-  const counts: Record<ViewId, number> = {
-    today: sections.focusToday.length,
-    inbox: sections.inbox.length,
-    upcoming: sections.upcoming.length,
-    waiting: sections.waiting.length,
-    milestones: sections.milestones.length,
-    done: sections.done.length,
-  };
-
-  const plannedMin = sections.focusToday.reduce((a, m) => a + (m.estimate_min || 0), 0);
+  const openMains = useMemo(() => mains.filter((m) => !isDone(m, statuses)), [mains, statuses]);
+  const doneMains = useMemo(
+    () => mains.filter((m) => isDone(m, statuses)).sort((a, b) => (b.completed_at || "").localeCompare(a.completed_at || "")),
+    [mains, statuses]
+  );
+  /** Open tasks grouped by project, the project with the nearest deadline first. */
+  const groups = useMemo(() => {
+    const by = new Map<string, MainItem[]>();
+    for (const m of openMains) by.set(m.project_slug, [...(by.get(m.project_slug) || []), m]);
+    const key = (l: MainItem[]) => l.map((m) => effDue(m) || "9999").sort()[0];
+    return [...by.entries()]
+      .map(([slug, list]) => ({
+        slug,
+        name: list[0].project_name,
+        list: [...list].sort((a, b) => (effDue(a) || "9999").localeCompare(effDue(b) || "9999")),
+      }))
+      .sort((a, b) => key(a.list).localeCompare(key(b.list)) || a.name.localeCompare(b.name));
+  }, [openMains, effDue]);
 
   async function toggleDone(it: TaskItem) {
     await data.patch(it, { status_id: isDone(it, statuses) ? statuses[0]?.id : doneId });
+    setCalKey((k) => k + 1);
   }
 
   async function addSub(main: TaskItem) {
@@ -218,11 +312,7 @@ export default function ResearchTasks({ focus, onFocusConsumed, requestTab, onTa
       return;
     }
     const real = projects.filter((p) => !p.pinned);
-    const proj =
-      matchProject(projects, q.project) ??
-      projects.find((p) => p.slug === projectFilter) ??
-      real[0] ??
-      projects[0];
+    const proj = matchProject(projects, q.project) ?? projects.find((p) => p.slug === projectFilter) ?? real[0] ?? projects[0];
     if (!proj) {
       setQuickMsg("Create a project first (+ Project).");
       return;
@@ -240,11 +330,24 @@ export default function ResearchTasks({ focus, onFocusConsumed, requestTab, onTa
       });
       setQuick("");
       await data.reload();
+      setCalKey((k) => k + 1);
       if (!q.deadline && !q.stage) setOpenRef(`${proj.slug}/${r.main_task.id}`);
     } catch (e) {
       data.setError(e instanceof Error ? e.message : "Could not add task");
     }
   }
+
+  /** Calendar click → a task due on that day. */
+  const createFromCalendar = useCallback(
+    async (slug: string, name: string, date: string) => {
+      const proj = projects.find((p) => p.slug === slug);
+      const allowed = allowedFor(statuses, proj?.options?.status_ids);
+      await api.mainTasks.create(slug, { name, status_id: allowed[0]?.id, deadline: date });
+      await data.reload();
+      setCalKey((k) => k + 1);
+    },
+    [projects, statuses, data]
+  );
 
   async function createProject(name: string) {
     setProjectModal(false);
@@ -257,11 +360,14 @@ export default function ResearchTasks({ focus, onFocusConsumed, requestTab, onTa
     }
   }
 
+  const priName = (id: string | null) => priorities.find((p) => p.id === id)?.name ?? "";
+
   function row(it: MainItem) {
     const subs = subsOf.get(it.ref) || [];
     const open = expanded.has(it.ref);
     const done = isDone(it, statuses);
     const due = fmtDue(effDue(it), today);
+    const pri = priName(it.priority_id);
     return (
       <div key={it.ref} className="rt-item">
         <div className={`rt-row${done ? " done" : ""}`} onClick={() => setOpenRef(it.ref)}>
@@ -294,10 +400,8 @@ export default function ResearchTasks({ focus, onFocusConsumed, requestTab, onTa
               <span className="tk-mini-bar" aria-hidden="true"><i style={{ width: `${Math.round((100 * it.subtask_done) / Math.max(1, it.subtask_total))}%` }} /></span>
             </span>
           )}
-          {it.stage && <span className={`tk-stage tk-stage-${it.stage} on`}>{it.stage[0].toUpperCase() + it.stage.slice(1)}</span>}
-          <span className="rt-proj" style={{ borderColor: projectColor(it.project_slug), color: projectColor(it.project_slug) }}>{it.project_name}</span>
-          <span className="rt-est mono muted">{formatMinutes(it.estimate_min)}</span>
-          <span className={`rt-due mono${due.over ? " over" : ""}`}>{due.text}</span>
+          {pri && <span className="tp-pri mono">{pri}</span>}
+          <span className={`rt-due tp-due mono${due.over ? " over" : ""}`}>{due.text}</span>
         </div>
         {open && (
           <div className="rt-subs">
@@ -308,8 +412,7 @@ export default function ResearchTasks({ focus, onFocusConsumed, requestTab, onTa
                 <div key={s.ref} className={`rt-subrow${sd ? " done" : ""}`} onClick={() => setOpenRef(s.ref)}>
                   <input type="checkbox" checked={sd} aria-label="Mark subtask done" onClick={(e) => e.stopPropagation()} onChange={() => void toggleDone(s)} />
                   <span className="rt-title">{s.name}</span>
-                  {s.stage && <span className={`tk-stage tk-stage-${s.stage} on`}>{s.stage[0].toUpperCase() + s.stage.slice(1)}</span>}
-                  <span className={`rt-due mono${sdue.over ? " over" : ""}`}>{sdue.text}</span>
+                  <span className={`rt-due tp-due mono${sdue.over ? " over" : ""}`}>{sdue.text}</span>
                 </div>
               );
             })}
@@ -328,126 +431,201 @@ export default function ResearchTasks({ focus, onFocusConsumed, requestTab, onTa
     );
   }
 
-  const group = (title: string, hint: string, rows: MainItem[]) =>
-    rows.length === 0 ? null : (
-      <section className="rt-group" key={title}>
-        <div className="rt-group-head"><span>{title}</span><span className="muted">{hint}</span><span className="mono muted">{rows.length}</span></div>
-        {rows.map(row)}
-      </section>
-    );
-
-  function milestoneCard(m: MainItem, big?: boolean) {
-    const total = m.subtask_total;
-    const pct = total > 0 ? Math.round((100 * m.subtask_done) / total) : 0;
-    const d = m.deadline ? m.deadline.slice(0, 10) : null;
-    const left = d ? diffDays(today, d) : null;
-    const leftText = left === null ? "set a date" : left < 0 ? `${-left} days late` : left === 0 ? "today" : `${left} day${left === 1 ? "" : "s"}`;
-    return (
-      <button key={m.ref} type="button" className={`rt-ms${big ? " big" : ""}`} onClick={() => setOpenRef(m.ref)}>
-        <span className="rt-ms-top"><span className="rt-ms-label">Milestone</span><span className={`rt-ms-left${left !== null && left < 0 ? " over" : ""}`}>{leftText}</span></span>
-        <span className="rt-ms-name">{m.name}</span>
-        <span className="rt-ms-bar" aria-label={`${pct}% done`}><i style={{ width: `${pct}%` }} /></span>
-        <span className="muted rt-ms-meta">{total > 0 ? `${m.subtask_done} of ${total} subtasks` : "no subtasks yet"}{d ? ` · ${parseISO(d).toLocaleDateString(undefined, { day: "numeric", month: "short" })}` : ""} · {m.project_name}</span>
-      </button>
-    );
-  }
-
+  const overdueCount = openMains.filter((m) => { const d = effDue(m); return !!d && d < today; }).length;
+  const totalSpentMin = doneMains.reduce((a, m) => a + Math.round((m.tracked_sec || 0) / 60), 0);
   const viewProps = { data, items: scoped, now, projectFilter, research: true, onOpen: (it: TaskItem) => setOpenRef(it.ref) };
-  const layout = "l" in sel ? sel.l : null;
-  const view = "v" in sel ? sel.v : null;
-  const heading = layout ? LAYOUTS.find((x) => x.id === layout)!.name : VIEWS.find((x) => x.id === view)!.name;
-  const showStrip = view === "today" || view === "inbox" || view === "upcoming" || view === "waiting";
-
-  const upcomingGroups = (() => {
-    const a: MainItem[] = [], b: MainItem[] = [], c: MainItem[] = [];
-    for (const m of sections.upcoming) {
-      const d = effDue(m) as string;
-      if (d <= addDaysISO(today, 7)) a.push(m);
-      else if (d <= addDaysISO(today, 14)) b.push(m);
-      else c.push(m);
-    }
-    return [group("Next 7 days", "", a), group("Following week", "", b), group("Later", "", c)];
-  })();
+  const calProjects = projects.map((p) => ({ slug: p.slug, name: p.name }));
 
   return (
-    <div className="rt-page">
-      <nav className="rt-side" aria-label="Task views">
-        <h2 className="rt-side-title">Tasks</h2>
-        {VIEWS.map((v) => (
-          <button key={v.id} type="button" className={`rt-side-b${view === v.id ? " on" : ""}`} aria-current={view === v.id ? "page" : undefined} onClick={() => choose({ v: v.id })}>
-            <span>{v.name}</span><span className="mono muted">{counts[v.id]}</span>
-          </button>
-        ))}
-        <div className="rt-side-h">Layouts</div>
-        {LAYOUTS.map((l) => (
-          <button key={l.id} type="button" className={`rt-side-b${layout === l.id ? " on" : ""}`} aria-current={layout === l.id ? "page" : undefined} onClick={() => choose({ l: l.id })}>
-            <span>{l.name}</span>
-          </button>
-        ))}
-        <div className="rt-side-h">Projects</div>
-        <button type="button" className={`rt-side-b${projectFilter === "all" ? " on" : ""}`} onClick={() => pickProject("all")}><span>All projects</span></button>
-        {projects.map((p) => (
-          <button key={p.slug} type="button" className={`rt-side-b${projectFilter === p.slug ? " on" : ""}`} onClick={() => pickProject(p.slug)}>
-            <span className="rt-dot" style={{ background: projectColor(p.slug) }} /><span className="rt-side-name">{p.name}</span>
-            <span className="mono muted">{p.main_task_count}</span>
-          </button>
-        ))}
-        <button type="button" className="btn rt-newproj" onClick={() => setProjectModal(true)}>+ Project</button>
-      </nav>
-
-      <div className="rt-main-col">
-        <div className="rt-head">
-          <h1 className="rt-h1">{heading}</h1>
-          {view === "today" && <span className="muted">{new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "short" })} · {plannedMin ? `${formatMinutes(plannedMin)} planned` : "nothing estimated yet"}</span>}
+    <div className="tp-page">
+      <div className="tp-head">
+        <h1 className="tp-h1">Tasks</h1>
+        <span className="muted tp-meta mono">{new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "short" })} · {openMains.length} open</span>
+        <span style={{ flex: 1 }} />
+        <select value={projectFilter} onChange={(e) => pickProject(e.target.value)} aria-label="Project filter" className="tp-select">
+          <option value="all">All projects</option>
+          {projects.map((p) => (
+            <option key={p.slug} value={p.slug}>{p.name}</option>
+          ))}
+        </select>
+        {layout === "main" && (
+          <div className="tk-seg tp-seg tp-presets" role="group" aria-label="Split">
+            <button type="button" className={!hidden && Math.abs(split - 0.62) < 0.02 ? "on" : ""} title="Wide list" onClick={() => saveSplit(0.62)}>List</button>
+            <button type="button" className={!hidden && Math.abs(split - 0.5) < 0.02 ? "on" : ""} title="Even split" onClick={() => saveSplit(0.5)}>Even</button>
+            <button type="button" className={!hidden && Math.abs(split - 0.3) < 0.02 ? "on" : ""} title="Wide calendar" onClick={() => saveSplit(0.3)}>Calendar</button>
+          </div>
+        )}
+        <button type="button" className="btn" onClick={() => setProjectModal(true)}>+ Project</button>
+        <div className="tk-seg tp-seg" role="tablist" aria-label="Task layout">
+          {LAYOUTS.map((l) => (
+            <button key={l.id} type="button" role="tab" aria-selected={layout === l.id} className={layout === l.id ? "on" : ""} onClick={() => chooseLayout(l.id)}>{l.name}</button>
+          ))}
         </div>
-
-        <label className="rt-quick">
-          <span className="rt-quick-plus" aria-hidden="true">+</span>
-          <input
-            type="text"
-            aria-label="Quick add task"
-            placeholder="Add task…  #project  !read|analyse|write|admin  ~2h  fri"
-            value={quick}
-            onChange={(e) => setQuick(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && void submitQuick()}
-          />
-          <span className="mono muted">Enter</span>
-        </label>
-        {quickMsg && <div className="muted" role="status" style={{ fontSize: 12.5 }}>{quickMsg}</div>}
-        {data.error && (
-          <div className="tk-error" role="alert">{data.error} <button type="button" className="tk-link" onClick={() => data.setError(null)}>dismiss</button></div>
-        )}
-
-        {showStrip && sections.milestones.length > 0 && <div className="rt-strip">{sections.milestones.slice(0, 4).map((m) => milestoneCard(m))}</div>}
-
-        {data.loading && <div className="muted tk-empty">Loading…</div>}
-        {!data.loading && view === "today" && (
-          <>
-            {group("Focus today", "starred, due, or overdue", sections.focusToday)}
-            {group("This week", "next deadlines", sections.week)}
-            {group("Waiting on others", "nothing to do until someone replies", sections.waiting)}
-            {sections.focusToday.length + sections.week.length + sections.waiting.length === 0 && <div className="muted tk-empty">Nothing due. Add a task above, or look in Inbox.</div>}
-          </>
-        )}
-        {!data.loading && view === "inbox" && (sections.inbox.length ? sections.inbox.map(row) : <div className="muted tk-empty">Inbox is empty: every open task has a date or a stage.</div>)}
-        {!data.loading && view === "upcoming" && (sections.upcoming.length ? upcomingGroups : <div className="muted tk-empty">No dated tasks ahead.</div>)}
-        {!data.loading && view === "waiting" && (sections.waiting.length ? sections.waiting.map(row) : <div className="muted tk-empty">Not waiting on anyone. Set “Waiting on” in a task to park it here.</div>)}
-        {!data.loading && view === "milestones" && (
-          sections.milestones.length
-            ? <div className="rt-ms-grid">{sections.milestones.map((m) => milestoneCard(m, true))}</div>
-            : <div className="muted tk-empty">No milestones. Open a task and press “◇ Milestone” to turn it into one; its subtasks become the progress.</div>
-        )}
-        {!data.loading && view === "done" && (sections.done.length ? sections.done.map(row) : <div className="muted tk-empty">Nothing finished yet.</div>)}
-
-        {!data.loading && layout === "board" && <BoardView {...viewProps} />}
-        {!data.loading && layout === "week" && <WeekPlanner {...viewProps} />}
-        {layout === "calendar" && <CalendarView onOpenTask={(slug, id) => setOpenRef(`${slug}/${id}`)} />}
-        {!data.loading && layout === "timeline" && <TimelineView {...viewProps} />}
-        {!data.loading && layout === "gantt" && <GanttView {...viewProps} />}
       </div>
 
+      {data.error && (
+        <div className="tk-error" role="alert">{data.error} <button type="button" className="tk-link" onClick={() => data.setError(null)}>dismiss</button></div>
+      )}
+
+      {filled && (
+        <div ref={fillRef} className="tp-fill" style={{ height: fillH }}>
+          {layout === "main" && (
+            <div className={`tp-split${dragging ? " dragging" : ""}`}>
+              <section
+                className={`tp-panel tp-list${hidden === "list" ? " collapsed" : ""}`}
+                style={{ flex: hidden === "list" ? "0 0 44px" : hidden === "cal" ? "1 1 0" : `0 0 calc(${(split * 100).toFixed(2)}% - 7px)` }}
+                aria-label="Task list"
+              >
+                {hidden === "list" ? (
+                  <button type="button" className="tp-rail" onClick={() => toggleHide("list")} aria-label="Show task list" title="Show task list">
+                    <span aria-hidden="true">›</span>
+                    <span className="tp-rail-t">Tasks · {openMains.length}</span>
+                  </button>
+                ) : (
+                  <>
+                    <div className="tp-bar">
+                      <div className="tp-filter" role="tablist" aria-label="Show">
+                        <button type="button" role="tab" aria-selected={filter === "open"} className={filter === "open" ? "on" : ""} onClick={() => chooseFilter("open")}>Open <span className="mono">{openMains.length}</span></button>
+                        <button type="button" role="tab" aria-selected={filter === "done"} className={filter === "done" ? "on" : ""} onClick={() => chooseFilter("done")}>Done <span className="mono">{doneMains.length}</span></button>
+                      </div>
+                      <span style={{ flex: 1 }} />
+                      <button type="button" className="tp-sq" onClick={() => toggleHide("list")} aria-label="Hide task list" title="Hide task list">‹</button>
+                    </div>
+                    <div className="tp-scroll">
+            <label className="rt-quick tp-quick">
+              <span className="rt-quick-plus" aria-hidden="true">+</span>
+              <input
+                type="text"
+                aria-label="Quick add task"
+                placeholder="Add task…  #project  !priority  ~2h  fri"
+                value={quick}
+                onChange={(e) => setQuick(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && void submitQuick()}
+              />
+              <span className="mono muted">Enter</span>
+            </label>
+            {quickMsg && <div className="muted" role="status" style={{ fontSize: 12.5 }}>{quickMsg}</div>}
+
+
+            {data.loading && <div className="muted tk-empty">Loading…</div>}
+
+            {!data.loading && filter === "open" && (
+              groups.length === 0 ? (
+                <div className="muted tk-empty">Nothing open. Add a task above, or click a day in the calendar.</div>
+              ) : (
+                groups.map((g) => (
+                  <section className="rt-group" key={g.slug}>
+                    <div className="rt-group-head">
+                      <i className="rt-dot" style={{ background: projectColor(g.slug) }} />
+                      <span>{g.name}</span>
+                      <span className="muted" />
+                      <span className="mono muted">{g.list.length}</span>
+                    </div>
+                    {g.list.map(row)}
+                  </section>
+                ))
+              )
+            )}
+
+            {!data.loading && filter === "done" && (
+              doneMains.length === 0 ? (
+                <div className="muted tk-empty">Nothing finished yet.</div>
+              ) : (
+                <div className="tp-done" role="table" aria-label="Finished tasks">
+                  <div className="tp-done-row tp-done-head mono" role="row">
+                    <span>Task</span><span>Started</span><span>Finished</span><span>Spent</span><span>Priority</span>
+                  </div>
+                  {doneMains.map((m) => (
+                    <div key={m.ref} className="tp-done-row" role="row" onClick={() => setOpenRef(m.ref)}>
+                      <span className="tp-done-t">
+                        <i className="rt-dot" style={{ background: projectColor(m.project_slug) }} />
+                        <span className="tp-done-name">{m.name}</span>
+                        {m.tags.length > 0 && <span className="tp-done-tags muted">{m.tags.map((id) => tags.find((t) => t.id === id)?.name).filter(Boolean).join(", ")}</span>}
+                      </span>
+                      <span className="mono">{fmtDay(m.start || m.created_at)}</span>
+                      <span className="mono">{fmtDay(m.completed_at)}</span>
+                      <span className="mono">{formatMinutes(Math.round((m.tracked_sec || 0) / 60)) || "—"}</span>
+                      <span className="mono">{priName(m.priority_id) || "—"}</span>
+                    </div>
+                  ))}
+                  <div className="tp-done-foot mono muted">Total time spent {formatMinutes(totalSpentMin) || "—"}</div>
+                </div>
+              )
+            )}
+                    </div>
+                    <div className="tp-foot mono muted">
+                      <span>{openMains.length} open</span>
+                      {overdueCount > 0 && <span className="tp-over">{overdueCount} overdue</span>}
+                    </div>
+                  </>
+                )}
+              </section>
+
+              {!hidden && (
+                <button
+                  type="button"
+                  className="tp-grip"
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label="Resize list and calendar. Drag, or use the left and right arrow keys. Double-click to reset."
+                  title="Drag to resize · double-click to reset"
+                  onMouseDown={startDrag}
+                  onDoubleClick={() => saveSplit(SPLIT_DEFAULT)}
+                  onKeyDown={keySplit}
+                >
+                  <span />
+                </button>
+              )}
+              {hidden && <span className="tp-gap" />}
+
+              <section className={`tp-panel tp-cal${hidden === "cal" ? " collapsed" : ""}`} style={{ flex: hidden === "cal" ? "0 0 44px" : "1 1 0" }} aria-label="Calendar">
+                {hidden === "cal" ? (
+                  <button type="button" className="tp-rail" onClick={() => toggleHide("cal")} aria-label="Show calendar" title="Show calendar">
+                    <span aria-hidden="true">‹</span>
+                    <span className="tp-rail-t">Calendar</span>
+                  </button>
+                ) : (
+                  <>
+                    <div className="tp-cal-body">
+                      <CalendarView
+                        compact
+                        refreshKey={calKey}
+                        projects={calProjects}
+                        onCreateTask={createFromCalendar}
+                        onOpenTask={(slug, id) => setOpenRef(`${slug}/${id}`)}
+                      />
+                    </div>
+                    <div className="tp-foot mono muted">
+                      <span>Click a day to add a task or event</span>
+                      <span style={{ flex: 1 }} />
+                      <button type="button" className="tp-sq" onClick={() => toggleHide("cal")} aria-label="Hide calendar" title="Hide calendar">›</button>
+                    </div>
+                  </>
+                )}
+              </section>
+            </div>
+          )}
+
+          {layout === "schedule" && !data.loading && (
+            <ScheduleView
+              data={data}
+              mains={mains}
+              effDue={effDue}
+              isDone={(m) => isDone(m, statuses)}
+              projectColor={projectColor}
+              onOpen={(r) => setOpenRef(r)}
+              onChanged={() => setCalKey((k) => k + 1)}
+              height={fillH}
+            />
+          )}
+        </div>
+      )}
+
+      {layout === "board" && !data.loading && <BoardView {...viewProps} />}
+      {layout === "gantt" && !data.loading && <GanttView {...viewProps} />}
+
       {openRef && (
-        <TaskPanel key={openRef} itemRef={openRef} data={data} now={now} onClose={() => setOpenRef(null)} onOpenOther={(r) => setOpenRef(r)} />
+        <TaskPanel key={openRef} itemRef={openRef} data={data} now={now} onClose={() => { setOpenRef(null); setCalKey((k) => k + 1); }} onOpenOther={(r) => setOpenRef(r)} />
       )}
       <LatexPromptModal
         open={projectModal}

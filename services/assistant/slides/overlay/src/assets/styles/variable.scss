@@ -1,16 +1,17 @@
-// Yggdrasil overlay: purple accent instead of PPTist's orange.
-$themeColor: #8b5cf6;
-$themeHoverColor: lighten($themeColor, 8%);
-$textColor: #cdd9e5;
-$borderColor: #2a3447;
-$lightGray: #1c2333;
+// Yggdrasil overlay: light, flat, ink-black accent, matching the app's light theme.
+// Runtime colours (dark app themes, per-page themes) come from the app through CSS variables, see yggdrasil.scss.
+$themeColor: #141414;
+$themeHoverColor: lighten($themeColor, 18%);
+$textColor: #141414;
+$borderColor: #d9d9d4;
+$lightGray: #f1f1ee;
 
-$boxShadow: 0 4px 6px -1px rgba(0, 0, 0, .4), 0 2px 4px -2px rgba(0, 0, 0, .4);
+$boxShadow: 0 1px 0 rgba(20, 20, 20, .12);
 
 $transitionDelay: .2s;
 $transitionDelayFast: .1s;
 $transitionDelaySlow: .3s;
 
-$borderRadius: 4px;
+$borderRadius: 0;
 
 $textElementFont: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, "PingFang SC", "Microsoft YaHei", Arial, sans-serif;

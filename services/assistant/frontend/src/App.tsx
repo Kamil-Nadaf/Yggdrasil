@@ -38,7 +38,7 @@ const paneCount = (l: SplitLayout) => { const [r, c] = layoutDims(l); return r *
 /** Fill `extras` (panes after the first) up to `n - 1` entries with sections not already open. */
 function fitExtras(first: View, extras: View[], n: number): View[] {
   const out: View[] = [];
-  for (const v of extras) if (v !== first && !out.includes(v) && ALL_VIEWS.includes(v)) out.push(v);
+  for (const v of extras) if (ALL_VIEWS.includes(v)) out.push(v); // the same section may be open in several panes
   out.length = Math.min(out.length, n - 1);
   for (const v of ALL_VIEWS) {
     if (out.length >= n - 1) break;
@@ -86,6 +86,8 @@ export default function App() {
   const extras = splitState?.extras ?? [];
   /** Which pane has focus (0 = the first pane, which is also what the sidebar highlights). */
   const [focusIdx, setFocusIdx] = useState(0);
+  /** A pane that is currently enlarged to fill the whole split area (null = normal grid). */
+  const [maxIdx, setMaxIdx] = useState<number | null>(null);
   const [splitRatio, setSplitRatio] = useState<number>(() => loadRatio());
   const splitRef = useRef<HTMLDivElement>(null);
   const [splitW, setSplitW] = useState(0);
@@ -151,13 +153,11 @@ export default function App() {
     } catch { /* ignore */ }
   }
 
-  /** Show `v` in pane `i`; if another pane already shows it the two panes swap. */
+  /** Show `v` in pane `i`. Any section can be open in any pane, also in several panes at once. */
   function assign(i: number, v: View) {
     if (!layout) { setView(v); return; }
     const all = [...panes];
-    const j = all.indexOf(v);
-    if (j === i) return;
-    if (j >= 0) all[j] = all[i];
+    if (all[i] === v) return;
     all[i] = v;
     if (v === "settings" && i === 0 && view !== "settings") setPrevView(view as Exclude<View, "settings">);
     setView(all[0]);
@@ -173,6 +173,23 @@ export default function App() {
   function changeLayout(l: SplitLayout) {
     persistSplit({ layout: l, extras: fitExtras(view, extras, paneCount(l)) });
     setFocusIdx(0);
+    setMaxIdx(null);
+  }
+
+  /** Remove pane `i`; the layout shrinks to fit the panes that are left (one pane left = leave split view). */
+  function closePane(i: number) {
+    if (!layout || panes.length <= 1) return;
+    const rest = panes.filter((_, k) => k !== i);
+    setMaxIdx(null);
+    setFocusIdx(0);
+    if (rest.length === 1) {
+      setView(rest[0]);
+      persistSplit(null);
+      return;
+    }
+    const next: SplitLayout = rest.length === 2 ? "1x2" : rest.length === 3 ? "1x3" : rest.length === 4 ? "2x2" : "2x3";
+    setView(rest[0]);
+    persistSplit({ layout: next, extras: fitExtras(rest[0], rest.slice(1), paneCount(next)) });
   }
 
   function goView(v: View, opts?: { side?: boolean }) {
@@ -180,7 +197,7 @@ export default function App() {
     if (layout) {
       if (v === "settings") { assign(Math.min(focusIdx, panes.length - 1), "settings"); return; } // gear: Settings opens in the focused pane
       if (opts?.side) { assign(1, v); return; } // Shift-click: open in the second pane
-      assign(0, v);
+      assign(Math.min(focusIdx, panes.length - 1), v); // sidebar opens the section in the pane you last clicked
       return;
     }
     if (opts?.side && v !== view && v !== "settings") {
@@ -318,29 +335,31 @@ export default function App() {
             className={`app-split${layout === "1x2" ? "" : " is-grid"}`}
             ref={splitRef}
             style={{
-              gridTemplateColumns: layout === "1x2" ? `${splitRatio}fr 6px ${1 - splitRatio}fr` : `repeat(${cols}, minmax(0, 1fr))`,
-              gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
+              gridTemplateColumns: maxIdx !== null ? "minmax(0, 1fr)" : layout === "1x2" ? `${splitRatio}fr 6px ${1 - splitRatio}fr` : `repeat(${cols}, minmax(0, 1fr))`,
+              gridTemplateRows: maxIdx !== null ? "minmax(0, 1fr)" : `repeat(${rows}, minmax(0, 1fr))`,
               gap: layout === "1x2" ? 0 : 6,
             }}
           >
             {panes.map((pv, i) => (
               <Fragment key={i}>
-                {layout === "1x2" && i === 1 && (
+                {layout === "1x2" && i === 1 && maxIdx === null && (
                   <div className="split-divider" onPointerDown={startDivider} role="separator" aria-orientation="vertical" title="Drag to resize · double-click to reset" onDoubleClick={() => { setSplitRatio(0.5); try { localStorage.setItem(SPLIT_RATIO_KEY, "0.5"); } catch { /* ignore */ } }} />
                 )}
                 <div
-                  className={`split-pane${focusIdx === i ? " is-focus" : ""}`}
-                  style={{ ["--split-zoom" as string]: paneZoom(layout === "1x2" ? (i === 0 ? splitRatio : 1 - splitRatio) : 1 / cols) } as React.CSSProperties}
+                  className={`split-pane${focusIdx === i ? " is-focus" : ""}${maxIdx === i ? " is-max" : ""}${maxIdx !== null && maxIdx !== i ? " is-hidden" : ""}`}
+                  style={{ ["--split-zoom" as string]: paneZoom(maxIdx === i ? 1 : layout === "1x2" ? (i === 0 ? splitRatio : 1 - splitRatio) : 1 / cols) } as React.CSSProperties}
                   onPointerDownCapture={() => setFocusIdx(i)}
                 >
                   <PaneHeader
                     view={pv}
-                    taken={panes.filter((_, k) => k !== i)}
+                    n={i + 1}
                     sub={subOf(pv)}
                     onSub={setSub}
                     onView={(v) => assign(i, v)}
-                    onSwap={panes.length === 2 ? () => assign(0, panes[1]) : undefined}
-                    onClose={panes.length === 2 && i === 1 ? () => persistSplit(null) : undefined}
+                    onSwap={panes.length === 2 && maxIdx === null ? () => assign(0, panes[1]) : undefined}
+                    maximized={maxIdx === i}
+                    onMax={() => setMaxIdx(maxIdx === i ? null : i)}
+                    onClose={() => closePane(i)}
                   />
                   <main className={`app-content${flushView(pv) ? " app-content--flush" : ""}`}>
                     {pv === "settings" ? settingsPage(i) : renderView(pv)}

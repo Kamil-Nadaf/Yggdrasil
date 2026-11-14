@@ -344,6 +344,8 @@ export interface MainTask extends TaskExtras {
   is_active: boolean;
   status_id: string;
   created_at: string;
+  /** Stamped when the task is moved to done; null for older tasks. */
+  completed_at: string | null;
   subtask_done: number;
   subtask_total: number;
 }

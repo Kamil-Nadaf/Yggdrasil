@@ -143,6 +143,16 @@ class TasksApiTests(unittest.TestCase):
         remaining_files = list((self.vault / "80-Tasks" / "fermi-analysis").glob("st-*.md"))
         self.assertEqual(remaining_files, [])
 
+    def test_main_task_completed_at_is_stamped_and_cleared(self) -> None:
+        self.client.post("/api/task-projects", json={"name": "Fermi Analysis"})
+        mt = self.client.post("/api/task-projects/fermi-analysis/main-tasks", json={"name": "Paper"}).json()["main_task"]
+        self.assertIsNone(mt["completed_at"])
+        url = f"/api/task-projects/fermi-analysis/main-tasks/{mt['id']}"
+        r = self.client.put(url, json={"status_id": "done"})
+        self.assertTrue(r.json()["main_task"]["completed_at"])
+        r = self.client.put(url, json={"status_id": "in_progress"})
+        self.assertIsNone(r.json()["main_task"]["completed_at"])
+
     def test_status_defaults_and_rejects_unknown_values(self) -> None:
         self.client.post("/api/task-projects", json={"name": "Status Test"})
         mt = self.client.post(

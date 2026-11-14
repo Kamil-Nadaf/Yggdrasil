@@ -3182,6 +3182,7 @@ def _main_task_from_post(d: Path, task_id: str, post, counts: Optional[tuple[int
         "is_active": bool(fm.get("is_active")),
         "status_id": _normalize_status_id(_status_id_of(fm)),
         "created_at": fm.get("created_at") or "",
+        "completed_at": fm.get("completed_at") or None,
         "subtask_done": done,
         "subtask_total": total,
         **_task_extras(d, task_id, post),
@@ -3549,6 +3550,12 @@ async def update_main_task(slug: str, task_id: str, payload: MainTaskUpdate):
     extras = {k: data.pop(k) for k in EXTRA_KEYS if k in data}
     if "status_id" in data:
         data["status_id"] = _normalize_status_id(data["status_id"])
+        was_done = _status_id_of(post.metadata) == "done"
+        now_done = data["status_id"] == "done"
+        if now_done and not was_done:
+            post.metadata["completed_at"] = _now_iso()
+        elif not now_done and was_done:
+            post.metadata["completed_at"] = None
     if "name" in data and not str(data["name"] or "").strip():
         raise HTTPException(status_code=400, detail="Name is required")
     for k, v in data.items():
@@ -5601,8 +5608,21 @@ async def delete_slide_deck(slug: str, name: str):
 
 
 SLIDES_DIST = Path(os.environ.get("SLIDES_DIST", str(Path(__file__).resolve().parent / "slides" / "dist")))
-if SLIDES_DIST.exists():
+if (SLIDES_DIST / "index.html").exists():
     app.mount("/slides", StaticFiles(directory=str(SLIDES_DIST), html=True), name="slides-module")
+else:
+    _SLIDES_MISSING = (
+        "<!doctype html><meta charset=utf-8><body style=\"font-family:system-ui;background:#0d1117;color:#cdd9e5;padding:32px;line-height:1.5\">"
+        "<h3>The Slides editor is not part of this install</h3>"
+        "<p>Expected the built module at:<br><code>" + str(SLIDES_DIST) + "</code></p>"
+        "<p>Docker: rebuild the image (it has a slides stage). Desktop app or running from source: run "
+        "<code>bash services/assistant/slides/build.sh</code> once (needs git and npm), then restart.</p></body>"
+    )
+
+    @app.get("/slides", include_in_schema=False)
+    @app.get("/slides/{rest:path}", include_in_schema=False)
+    async def slides_module_missing(rest: str = ""):
+        return Response(content=_SLIDES_MISSING, media_type="text/html", status_code=503)
 
 FRONTEND_DIST = Path(os.environ.get("FRONTEND_DIST", "/app/frontend/dist"))
 if FRONTEND_DIST.exists():

@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 export type SplitLayout = "1x2" | "2x1" | "2x2" | "1x3" | "3x1" | "2x3" | "3x2" | "1x4";
 /** Rows × columns, in the order shown in the picker. */
 export const SPLIT_LAYOUTS: SplitLayout[] = ["1x2", "2x1", "2x2", "1x3", "3x1", "2x3", "3x2", "1x4"];
@@ -9,6 +11,22 @@ export function layoutDims(l: SplitLayout): [rows: number, cols: number] {
 
 /** Layout picker at the top of the split workspace: one button per rows × columns grid, plus "1×1" to leave split view. */
 export default function SplitLayoutBar({ layout, onPick, onClose }: { layout: SplitLayout; onPick: (l: SplitLayout) => void; onClose: () => void }) {
+  const [min, setMin] = useState(() => {
+    try { return localStorage.getItem("yggdrasil:split-bar-min") === "1"; } catch { return false; }
+  });
+  const toggle = () => {
+    const v = !min;
+    setMin(v);
+    try { localStorage.setItem("yggdrasil:split-bar-min", v ? "1" : "0"); } catch { /* optional */ }
+  };
+  if (min) {
+    return (
+      <div className="split-bar split-bar-min" role="toolbar" aria-label="Split layout">
+        <span className="split-bar-title">Split view</span>
+        <button type="button" className="split-bar-toggle" aria-label="Show layout bar" title="Show layout bar" onClick={toggle}>▾ Layout</button>
+      </div>
+    );
+  }
   return (
     <div className="split-bar" role="toolbar" aria-label="Split layout">
       <span className="split-bar-title">Split view</span>
@@ -31,6 +49,7 @@ export default function SplitLayoutBar({ layout, onPick, onClose }: { layout: Sp
         </button>
       </div>
       <span className="split-bar-hint">rows × columns · up to 6 panes on this screen</span>
+      <button type="button" className="split-bar-toggle" aria-label="Minimize layout bar" title="Minimize layout bar" onClick={toggle}>▴</button>
     </div>
   );
 }

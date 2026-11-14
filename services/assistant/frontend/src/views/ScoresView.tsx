@@ -4,7 +4,7 @@ import FitContent from "../components/FitContent";
 import ReadingGoalsCard from "../components/ReadingGoalsCard";
 import { api, type ActiveMainTask, type Goal, type Subtask, type TaskPriorityDef, type TaskStatusDef } from "../api/client";
 import StatusPill from "../components/StatusPill";
-import { PriorityPill, TimerButton } from "./tasks/TaskBits";
+import { PriorityPill, TimerButton, doneStatusId } from "./tasks/TaskBits";
 import { useNow } from "./tasks/useTaskData";
 import { ensureTaskStatuses, getCachedTaskStatuses, TASK_STATUSES_EVENT } from "../lib/taskStatuses";
 import { ensureTaskOptions, getCachedPriorities, TASK_OPTIONS_EVENT } from "../lib/taskOptions";
@@ -26,6 +26,7 @@ function mentalHealthLabel(v: MentalHealthValue | null | undefined): string {
 
 type RangeMode = "week" | "month" | "year";
 const DASH_HEIGHTS_KEY = "yggdrasil:dash-heights";
+const TASK_FILTER_KEY = "yggdrasil:dash-task-filter";
 
 type DashWidget = "active" | "today" | "activity";
 
@@ -669,6 +670,13 @@ export default function ScoresView({
   const [addingHabit, setAddingHabit] = useState(false);
   const [editingHabits, setEditingHabits] = useState(false);
   const [allTasks, setAllTasks] = useState<(ActiveMainTask & { active: boolean })[]>([]);
+  const [taskFilter, setTaskFilterState] = useState<string>(() => {
+    try { return localStorage.getItem(TASK_FILTER_KEY) || "starred"; } catch { return "starred"; }
+  });
+  const setTaskFilter = (v: string) => {
+    setTaskFilterState(v);
+    try { localStorage.setItem(TASK_FILTER_KEY, v); } catch { /* optional */ }
+  };
   const [taskStatuses, setTaskStatuses] = useState<TaskStatusDef[]>(() => getCachedTaskStatuses());
   const [taskPriorities, setTaskPriorities] = useState<TaskPriorityDef[]>(() => getCachedPriorities());
   const timerNow = useNow(allTasks.some((t) => t.active && t.timer_started_at));
@@ -1189,6 +1197,27 @@ export default function ScoresView({
   ];
   const pinnedItems = pins.map((k) => pinCatalog.find((c) => c.key === k)).filter((x): x is (typeof pinCatalog)[number] => !!x);
   const pinOptions = pinCatalog.filter((c) => !pins.includes(c.key));
+  const todayStr = isoLocal(new Date());
+  const weekEndStr = isoLocal(new Date(Date.now() + 6 * 86400000));
+  const doneId = doneStatusId(taskStatuses);
+  const shownTasks = allTasks.filter((t) => {
+    if (taskFilter === "starred") return t.active;
+    if (taskFilter === "all") return t.status_id !== doneId;
+    if (t.status_id === doneId) return false;
+    if (taskFilter === "today") return !!t.deadline && t.deadline <= todayStr;
+    if (taskFilter === "overdue") return !!t.deadline && t.deadline < todayStr;
+    if (taskFilter === "week") return !!t.deadline && t.deadline <= weekEndStr;
+    if (taskFilter === "nodate") return !t.deadline;
+    if (taskFilter.startsWith("prio:")) return t.priority_id === taskFilter.slice(5);
+    return t.active;
+  });
+  const filterLabel = taskFilter === "starred" ? "Active Tasks" : "Tasks";
+  const emptyText =
+    taskFilter === "starred"
+      ? "No starred tasks — star a main task in the Tasks section to show it here."
+      : taskFilter === "today"
+        ? "Nothing due today."
+        : "No tasks match this filter.";
   const widgets: Record<SlotId, ReactNode> = {
     active: (
       <div
@@ -1196,14 +1225,36 @@ export default function ScoresView({
         style={widgetStyle("active")}
         onMouseUp={(e) => customizing && persistWidgetHeight("active", e.currentTarget)}
       >
-        <h2 style={{ margin: "0 0 10px" }}>Active Tasks</h2>
-        {allTasks.filter((t) => t.active).length === 0 ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "0 0 10px", flexWrap: "wrap" }}>
+          <h2 style={{ margin: 0, flex: "1 1 auto" }}>{filterLabel}</h2>
+          <select
+            className="dash-task-filter"
+            aria-label="Filter tasks"
+            value={taskFilter}
+            onChange={(e) => setTaskFilter(e.target.value)}
+          >
+            <option value="starred">Starred</option>
+            <option value="today">Today &amp; overdue</option>
+            <option value="overdue">Overdue</option>
+            <option value="week">Next 7 days</option>
+            <option value="nodate">No due date</option>
+            <option value="all">All open</option>
+            {taskPriorities.length > 0 && (
+              <optgroup label="By priority">
+                {taskPriorities.map((pr) => (
+                  <option key={pr.id} value={`prio:${pr.id}`}>{pr.name}</option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+        </div>
+        {shownTasks.length === 0 ? (
           <div className="muted" style={{ fontSize: 13 }}>
-            No starred tasks — star a main task in the Tasks section to show it here.
+            {emptyText}
           </div>
         ) : (
           <div className="dash-task-list">
-            {allTasks.filter((t) => t.active).map((t) => {
+            {shownTasks.map((t) => {
               const key = `${t.project_slug}:${t.main_task_id}`;
               const subs = subtasksByMain[key] || [];
               const open = !collapsed.has(key);
@@ -1212,7 +1263,7 @@ export default function ScoresView({
                   <div className="dash-task-bar-label">
                     <StatusPill statuses={taskStatuses} statusId={t.status_id} onChange={(sid) => void quickPatch(t, { status_id: sid })} />
                     <button type="button" className="dash-task-toggle" onClick={() => toggleCollapsed(key)} aria-expanded={open}>
-                      {open ? "▾" : "▸"} ★ {t.project_name} › {t.main_task_name}
+                      {open ? "▾" : "▸"} {t.active ? "★ " : ""}{t.project_name} › {t.main_task_name}
                     </button>
                     <span className="muted mono">
                       {subs.length ? subs.filter(isSubDone).length : t.subtask_done}/{subs.length || t.subtask_total}{t.deadline ? ` · due ${t.deadline}` : ""}

@@ -14,6 +14,11 @@ git -C "$WORK/pptist" checkout --quiet "$REF"
 cp -R "$HERE/overlay/." "$WORK/pptist/"
 cp "$WORK/pptist/LICENSE" "$HERE/LICENSE" 2>/dev/null || true
 
+# The speaker-notes placeholder is set inside the editor (ProseMirror resets any runtime translation), so patch the source.
+for f in src/views/Editor/Remark/Editor.vue src/views/Mobile/MobileEditor/SlideToolbar.vue; do
+  sed -i.bak "s/点击输入演讲者备注/Click to add speaker notes/" "$WORK/pptist/$f" && rm -f "$WORK/pptist/$f.bak"
+done
+
 cd "$WORK/pptist"
 npm ci --no-audit --no-fund
 npm install --no-save --no-audit --no-fund @fontsource/ibm-plex-sans @fontsource/ibm-plex-serif @fontsource/ibm-plex-mono

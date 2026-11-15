@@ -26,6 +26,7 @@ import os
 import re
 import shutil
 import tempfile
+import time
 import uuid
 import zipfile
 from datetime import datetime, timezone
@@ -208,9 +209,23 @@ def tectonic_binary() -> str | None:
     return os.environ.get("YGG_TECTONIC") or shutil.which("tectonic")
 
 
+TECTONIC_TIMEOUT = int(os.environ.get("YGG_TECTONIC_TIMEOUT", "45"))  # seconds; cold runs download packages
+_TECTONIC_BACKOFF_S = 1800
+_tectonic_disabled_until = 0.0
+_NETWORK_FAIL_RE = re.compile(r"download|network|connect|resolve|timed out|dns|certificate", re.IGNORECASE)
+
+
+def _tectonic_backoff() -> None:
+    """Tectonic can't reach its package bundle (offline / blocked): skip it for a while."""
+    global _tectonic_disabled_until
+    _tectonic_disabled_until = time.monotonic() + _TECTONIC_BACKOFF_S
+
+
 def should_try_tectonic(source: str, engine_flag: str) -> bool:
     mode = os.environ.get("YGG_LATEX_ENGINE", "auto").lower()
     if mode == "latexmk" or not tectonic_binary():
+        return False
+    if mode == "auto" and time.monotonic() < _tectonic_disabled_until:
         return False
     if mode == "tectonic":
         return True
@@ -228,12 +243,15 @@ async def run_tectonic(build_dir: Path, source_name: str) -> tuple[int, str]:
         stderr=asyncio.subprocess.STDOUT,
     )
     try:
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=COMPILE_TIMEOUT)
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=TECTONIC_TIMEOUT)
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
+        _tectonic_backoff()  # most likely stuck downloading its bundle
         return 124, "Tectonic exceeded the time limit and was killed."
     out = stdout.decode(errors="replace")
+    if (proc.returncode or 0) != 0 and _NETWORK_FAIL_RE.search(out[-2000:]):
+        _tectonic_backoff()
     # --keep-logs writes a normal TeX log; prefer it so error parsing is unchanged.
     log_file = (build_dir / source_name).with_suffix(".log")
     if log_file.exists():

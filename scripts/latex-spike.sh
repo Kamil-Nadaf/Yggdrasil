@@ -7,9 +7,9 @@ HERE="$(cd "$(dirname "$0")" && pwd)"; SRC="$HERE/latex-spike"; OUT="$HERE/../do
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 now() { python3 -c 'import time;print(time.time())'; }
 run() { # name cmd... -> sets RES_OK RES_T
-  local s e; s=$(now); "$@" >"$WORK/last.log" 2>&1; local rc=$?; e=$(now)
+  local s e; s=$(now); perl -e 'alarm shift; exec @ARGV' "${SPIKE_TIMEOUT:-90}" "$@" >"$WORK/last.log" 2>&1; local rc=$?; e=$(now)
   RES_T=$(python3 -c "print(round($e-$s,1))"); [ $rc -eq 0 ] && RES_OK=OK || RES_OK=FAIL
-  RES_ERR=""; [ $rc -ne 0 ] && RES_ERR=$(grep -m1 -iE "^!|error|not found" "$WORK/last.log" | tr -d '|' | cut -c1-70)
+  RES_ERR=""; [ $rc -ne 0 ] && RES_ERR=$(grep -m1 -iE "^!|error|not found|download" "$WORK/last.log" | tr -d '|' | cut -c1-70); [ $rc -eq 142 ] && RES_ERR="timeout ${SPIKE_TIMEOUT:-90}s"
 }
 {
 echo "# LaTeX engine spike ($(date +%F), $(uname -sm))"; echo

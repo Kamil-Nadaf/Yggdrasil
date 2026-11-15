@@ -54,6 +54,35 @@ class EngineSelectionTests(unittest.TestCase):
             self.assertTrue(ls.should_try_tectonic(r"\usepackage{biblatex}", "-pdf"))
 
 
+class BackoffTests(unittest.TestCase):
+    def tearDown(self):
+        ls._tectonic_disabled_until = 0.0
+
+    def test_network_failure_disables_tectonic_for_a_while(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            p = tmp / "tectonic"
+            p.write_text("#!/bin/sh\necho 'error: failed to download bundle (connection timed out)'; exit 1\n")
+            p.chmod(p.stat().st_mode | stat.S_IEXEC)
+            with patch.dict(os.environ, {"YGG_TECTONIC": str(p), "YGG_LATEX_ENGINE": "auto"}):
+                self.assertTrue(ls.should_try_tectonic(r"\documentclass{article}", "-pdf"))
+                asyncio.run(ls.run_tectonic(tmp, "main.tex"))
+                self.assertFalse(ls.should_try_tectonic(r"\documentclass{article}", "-pdf"))
+            with patch.dict(os.environ, {"YGG_TECTONIC": str(p), "YGG_LATEX_ENGINE": "tectonic"}):
+                self.assertTrue(ls.should_try_tectonic(r"\documentclass{article}", "-pdf"))
+
+    def test_timeout_disables_tectonic(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            p = tmp / "tectonic"
+            p.write_text("#!/bin/sh\nsleep 5\n")
+            p.chmod(p.stat().st_mode | stat.S_IEXEC)
+            with patch.dict(os.environ, {"YGG_TECTONIC": str(p), "YGG_LATEX_ENGINE": "auto"}), patch.object(ls, "TECTONIC_TIMEOUT", 1):
+                code, _ = asyncio.run(ls.run_tectonic(tmp, "main.tex"))
+                self.assertEqual(code, 124)
+                self.assertFalse(ls.should_try_tectonic("x", "-pdf"))
+
+
 class RunTectonicTests(unittest.TestCase):
     def _fake(self, tmp: Path, body: str) -> str:
         p = tmp / "tectonic"

@@ -37,3 +37,16 @@ Cold start to first paint, idle RAM, search latency, PDF import time, LaTeX comp
 1. lancedb + pyarrow + numpy: 267 MB and loaded at startup.
 2. Transitive HF stack (~26 MB) plus junk (~32 MB).
 3. Slides (48 MB) and the Docker dependency for LaTeX.
+
+## Phase 1 result (macOS arm64, measured 2026-11-15, same machine)
+| | Before (20261114) | After (20261115) |
+|---|---|---|
+| Yggdrasil.app | 525 MB | 247 MB |
+| .dmg | 304.5 MB | 170 MB |
+| .pkg | 206.6 MB | 105 MB |
+
+Changes: lancedb + pyarrow replaced by `vecstore.py` (SQLite + numpy); PyObjCTest, pip, setuptools pruned; lancedb no longer imported at startup.
+Tests (Python 3.12): 232 pass; 2 fail for reasons unrelated to these changes (`test_books` graph test fails on the original code too; `test_output_compiles` needs `cm-super` in TinyTeX).
+
+## LaTeX spike (macOS arm64)
+See `docs/latex-spike-results.md`. Warm Tectonic 0.2-0.8 s (same as latexmk); cold 4-80 s, so the app warms the package cache in the background.

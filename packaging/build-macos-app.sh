@@ -157,7 +157,7 @@ echo "→ Installing Python dependencies..."
 # ── Prune dead weight from the bundled Python (not used at runtime) ─────────
 SP="${PYDIR}/lib/python3.12/site-packages"
 rm -rf "${SP}/PyObjCTest" "${SP}/pip" "${SP}"/pip-*.dist-info \
-       "${SP}/setuptools" "${SP}"/setuptools-*.dist-info "${SP}/pkg_resources" "${SP}/_distutils_hack"
+       "${SP}/setuptools" "${SP}"/setuptools-*.dist-info "${SP}/pkg_resources" "${SP}/_distutils_hack" "${SP}/distutils-precedence.pth"
 "${PYDIR}/bin/python3" -c "import fastapi, uvicorn, webview, numpy, sqlite3; print('→ prune OK')"
 PYTHONPATH="${APPDIR}" "${PYDIR}/bin/python3" -c "import vecstore; print('→ vecstore OK')"
 

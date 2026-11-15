@@ -79,12 +79,15 @@ if code != 200:
     sys.exit(f"openapi.json returned {code}")
 
 # 1. Every GET endpoint with no path parameters ---------------------------------------
+EXTERNAL = {"/api/graph/citations"}
 SKIP = ("/openapi", "/docs", "/redoc", "/api/updates/apply", "/api/export", "/download", "/api/open", "/api/reveal")
 gets = [p for p, ops in spec["paths"].items() if "get" in ops and "{" not in p and not p.startswith(SKIP)]
 print(f"--- {len(gets)} read-only GET endpoints ---")
 for path in sorted(gets):
     code, data = call(base, "GET", path, timeout=30)
-    if code is None:
+    if code is None and path in EXTERNAL:
+        say("WARN", f"GET {path}", "slow: calls an external service once per paper (Semantic Scholar); not a bug in the app")
+    elif code is None:
         say("FAIL", f"GET {path}", f"no response: {data}")
     elif code in (502, 504) and "update" in path:
         say("WARN", f"GET {path}", "external service unreachable (offline or rate-limited)")
@@ -127,12 +130,17 @@ code, r = call(base, "POST", "/api/latex/compile", {"source": simple, "filename"
 if code == 200 and isinstance(r, dict) and r.get("pdf_b64"):
     pdf = base64.b64decode(r["pdf_b64"])[:4]
     say("PASS" if pdf == b"%PDF" else "FAIL", "compile simple document", f"engine={r.get('engine', '?')}")
+    if "engine" not in r:
+        say("WARN", "engine not reported", "an OLDER build is probably running; quit it and open release/Yggdrasil.app")
 else:
     say("FAIL", "compile simple document", f"HTTP {code}: {str(r)[:150]}")
 code, r = call(base, "POST", "/api/latex/compile", {"source": bib, "filename": "smoke-biblatex"}, timeout=140)
 if code == 200 and isinstance(r, dict):
-    eng = r.get("engine", "?")
-    say("PASS" if eng != "tectonic" else "FAIL", "biblatex document uses full TeX (not Tectonic)", f"engine={eng}")
+    eng = r.get("engine")
+    if eng is None:
+        say("WARN", "biblatex engine check", "no engine reported (older build)")
+    else:
+        say("PASS" if eng == "latexmk" else "FAIL", "biblatex document uses full TeX (not Tectonic)", f"engine={eng}")
 else:
     say("WARN", "biblatex document", f"HTTP {code} (biber/biblatex may be missing in TinyTeX)")
 code, r = call(base, "POST", "/api/latex/compile", {"source": bad, "filename": "smoke-error"}, timeout=140)

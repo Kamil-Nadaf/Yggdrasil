@@ -159,6 +159,28 @@ def packages_from_log(log: str) -> list[str]:
 TLMGR_NOTES: list[str] = []  # tlmgr output of the current request, appended to the compile log on failure
 
 
+_BIBLATEX_USE_RE = re.compile(r"\\usepackage\s*(?:\[([^\]]*)\])?\s*\{biblatex\}")
+
+
+def force_bibtex_backend(source: str) -> str | None:
+    """Rewrite \\usepackage[...]{biblatex} to use backend=bibtex (for machines without biber).
+
+    Returns None when the source has no biblatex or already uses the bibtex backend.
+    """
+    def repl(m: re.Match) -> str:
+        opts = m.group(1)
+        if opts is None:
+            opts = "backend=bibtex"
+        elif re.search(r"backend\s*=", opts):
+            opts = re.sub(r"backend\s*=\s*\w+", "backend=bibtex", opts)
+        else:
+            opts = opts.rstrip() + ",backend=bibtex" if opts.strip() else "backend=bibtex"
+        return "\\usepackage[" + opts + "]{biblatex}"
+
+    new = _BIBLATEX_USE_RE.sub(repl, source, count=1)
+    return None if new == source else new
+
+
 async def tlmgr_install(packages: list[str]) -> list[str]:
     tlmgr = shutil.which("tlmgr")
     if not tlmgr:
@@ -444,6 +466,16 @@ async def compile_latex(payload: CompileRequest):
             if returncode == 0:
                 break
 
+        notice = None
+        if returncode != 0 and engine_used == "latexmk" and _MISSING_PROGRAM_RE.search(log) and "biber" in log:
+            # biber cannot be installed (e.g. a root-owned system TeX Live): use biblatex's bibtex backend instead.
+            alt = force_bibtex_backend(source_path.read_text(encoding="utf-8", errors="replace"))
+            if alt is not None:
+                source_path.write_text(alt, encoding="utf-8")
+                returncode, log = await run_latexmk(build_dir, source_path.name, engine_flag, force=True)
+                if returncode == 0:
+                    notice = "biber is not installed; compiled with biblatex backend=bibtex instead (some biblatex features may differ)."
+
         pdf_path = source_path.with_suffix(".pdf")
         if returncode != 0 or not pdf_path.exists():
             errors = extract_errors(log) or ["Compilation failed — see log for details"]
@@ -452,7 +484,10 @@ async def compile_latex(payload: CompileRequest):
             return JSONResponse(status_code=422, content={"log": log, "errors": errors, "engine": engine_used})
 
         pdf_b64 = base64.b64encode(pdf_path.read_bytes()).decode("ascii")
-        return {"pdf_b64": pdf_b64, "log": log, "errors": [], "engine": engine_used}
+        result = {"pdf_b64": pdf_b64, "log": log, "errors": [], "engine": engine_used}
+        if notice:
+            result["notice"] = notice
+        return result
     finally:
         shutil.rmtree(job, ignore_errors=True)
 

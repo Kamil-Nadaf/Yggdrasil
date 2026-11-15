@@ -73,6 +73,21 @@ class MissingProgramTests(unittest.TestCase):
         self.assertEqual(ls.packages_from_log("Using biber to make bibliography file(s)."), [])
 
 
+class BibtexBackendTests(unittest.TestCase):
+    def test_adds_backend_to_bare_and_optioned_usepackage(self):
+        self.assertIn("[backend=bibtex]{biblatex}", ls.force_bibtex_backend(r"\usepackage{biblatex}"))
+        self.assertIn("[style=numeric,backend=bibtex]{biblatex}", ls.force_bibtex_backend(r"\usepackage[style=numeric]{biblatex}"))
+
+    def test_replaces_existing_backend(self):
+        out = ls.force_bibtex_backend(r"\usepackage[backend=biber, style=apa]{biblatex}")
+        self.assertIn("backend=bibtex", out)
+        self.assertNotIn("biber", out)
+
+    def test_none_when_not_applicable(self):
+        self.assertIsNone(ls.force_bibtex_backend(r"\usepackage{amsmath}"))
+        self.assertIsNone(ls.force_bibtex_backend(r"\usepackage[backend=bibtex]{biblatex}"))
+
+
 class BackoffTests(unittest.TestCase):
     def tearDown(self):
         ls._tectonic_disabled_until = 0.0

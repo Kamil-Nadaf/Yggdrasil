@@ -5697,3 +5697,129 @@ h2 { font-size: 15px; color: var(--accent); }
 
 .dash-task-filter { height: 28px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; font-size: 12.5px; padding: 0 8px; border-radius: 0; cursor: pointer; max-width: 100%; }
 .dash-task-filter:hover { border-color: var(--text); }
+
+/* ── LaTeX right sidebar: problems / history / log ── */
+.latex-side { display: flex; flex-direction: column; height: 100%; min-width: 0; background: var(--bg); border-left: 1px solid var(--border); }
+.latex-side-tabs { display: flex; align-items: center; gap: 2px; padding: 4px 6px; border-bottom: 1px solid var(--border); }
+.latex-side-tabs button { background: none; border: 0; color: var(--text-dim, inherit); padding: 5px 9px; border-radius: 4px; font-size: 12px; cursor: pointer; display: flex; gap: 5px; align-items: center; }
+.latex-side-tabs button.on { background: var(--bg-elev, rgba(127,127,127,.15)); color: var(--text, inherit); font-weight: 600; }
+.latex-side-tabs .latex-side-close { margin-left: auto; }
+.latex-side .badge { font-size: 10px; border-radius: 8px; padding: 0 6px; color: #fff; }
+.latex-side .badge.err { background: var(--crit, #e5484d); }
+.latex-side .badge.warn { background: #d49b1f; }
+.latex-side-body { flex: 1; overflow: auto; min-height: 0; }
+.latex-side-empty { padding: 16px 14px; font-size: 12px; opacity: .7; line-height: 1.5; }
+.latex-side-empty.ok { color: #3fa56b; opacity: 1; }
+.latex-side-sec { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 8px 12px 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; opacity: .75; }
+.latex-side-sec.toggle { cursor: pointer; }
+.latex-diag { display: block; width: calc(100% - 12px); margin: 4px 6px; text-align: left; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border); border-left-width: 3px; background: var(--bg-elev, transparent); color: inherit; cursor: pointer; }
+.latex-diag:hover { border-color: var(--accent); }
+.latex-diag.error { border-left-color: var(--crit, #e5484d); }
+.latex-diag.warning { border-left-color: #d49b1f; }
+.latex-diag.typesetting { border-left-color: #6b7a90; }
+.latex-diag-head { display: flex; justify-content: space-between; gap: 8px; font-size: 10.5px; opacity: .75; font-family: var(--font-mono); }
+.latex-diag-kind { text-transform: uppercase; font-weight: 600; }
+.latex-diag-msg { font-size: 12.5px; margin-top: 3px; line-height: 1.4; word-break: break-word; }
+.latex-diag-ctx { margin: 6px 0 0; padding: 5px 7px; font-size: 11px; font-family: var(--font-mono); background: rgba(127,127,127,.12); border-radius: 4px; white-space: pre-wrap; word-break: break-all; }
+.latex-diag-hint { margin-top: 6px; font-size: 11.5px; line-height: 1.4; color: var(--accent); }
+.latex-side-log { margin: 0; padding: 10px 12px; font-size: 10.5px; font-family: var(--font-mono); white-space: pre-wrap; word-break: break-all; }
+.latex-hist-bar { display: flex; align-items: center; gap: 8px; padding: 8px; }
+.latex-hist-msg { font-size: 11px; opacity: .7; }
+.latex-hist-list { padding: 0 6px; }
+.latex-hist-item { display: flex; border-radius: 5px; }
+.latex-hist-item.on { background: var(--bg-elev, rgba(127,127,127,.15)); }
+.latex-hist-main { flex: 1; background: none; border: 0; color: inherit; text-align: left; padding: 6px 8px; cursor: pointer; font-size: 12px; display: flex; flex-direction: column; gap: 2px; }
+.latex-hist-label { font-size: 11px; color: var(--accent); }
+.latex-hist-del { background: none; border: 0; cursor: pointer; opacity: 0; color: inherit; }
+.latex-hist-item:hover .latex-hist-del { opacity: .7; }
+.latex-hist-diff { border-top: 1px solid var(--border); margin-top: 8px; }
+.latex-hist-diffbar { display: flex; align-items: center; gap: 8px; padding: 8px; font-size: 12px; }
+.latex-hist-diffbar select { flex: 1; min-width: 0; }
+.latex-hist-diffbar .plus { color: #3fa56b; } .latex-hist-diffbar .minus { color: var(--crit, #e5484d); }
+.latex-hunk { margin: 0 0 8px; font-size: 11px; font-family: var(--font-mono); overflow-x: auto; }
+.latex-hunk-head { padding: 2px 8px; opacity: .6; background: rgba(127,127,127,.12); }
+.latex-hunk .dl { padding: 0 8px; white-space: pre; }
+.latex-hunk .dl.add { background: rgba(63,165,107,.18); }
+.latex-hunk .dl.del { background: rgba(229,72,77,.18); }
+/* editor line markers */
+.cm-diag-error { background: rgba(229,72,77,.16); }
+.cm-diag-warning { background: rgba(212,155,31,.14); }
+.cm-diag-gutter { width: 14px; }
+.cm-diag-mark { font-size: 11px; line-height: 1.4; cursor: pointer; }
+.cm-diag-mark.error { color: var(--crit, #e5484d); }
+.cm-diag-mark.warning { color: #d49b1f; }
+.latex-side-toggle-on { background: var(--bg-elev, rgba(127,127,127,.2)); }
+
+/* ── Navigation bar: fixed (any edge) / floating dock / auto-hide ─────────── */
+.navset-row { display: flex; align-items: center; gap: 12px; margin: 8px 0; flex-wrap: wrap; }
+.navset-k { width: 70px; font-size: 13px; color: var(--muted); }
+.navset-check { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; }
+
+/* fixed bar on another edge */
+.app-shell[data-nav-mode="fixed"][data-nav-edge="right"] { flex-direction: row-reverse; }
+.app-shell[data-nav-mode="fixed"][data-nav-edge="right"] .app-nav.side { border-right: 0; border-left: 1px solid var(--border); }
+.app-shell[data-nav-mode="fixed"][data-nav-edge="top"] { flex-direction: column; }
+.app-shell[data-nav-mode="fixed"][data-nav-edge="bottom"] { flex-direction: column-reverse; }
+.app-shell[data-nav-mode="fixed"] .app-nav.side.horiz { width: 100%; height: auto; flex-direction: row; align-items: center; padding: 6px 12px; gap: 8px; overflow: visible; border-right: 0; }
+.app-shell[data-nav-mode="fixed"][data-nav-edge="top"] .app-nav.side.horiz { border-bottom: 1px solid var(--border); }
+.app-shell[data-nav-mode="fixed"][data-nav-edge="bottom"] .app-nav.side.horiz { border-top: 1px solid var(--border); }
+.app-nav.side.horiz .side-top { flex-direction: row; padding: 0 8px 0 0; }
+.app-nav.side.horiz .side-items { flex-direction: row; flex: 1 1 auto; width: auto; justify-content: center; gap: 4px; }
+.app-nav.side.horiz .side-bottom { flex-direction: row; width: auto; border-top: 0; border-left: 1px solid var(--border); padding: 0 0 0 8px; margin: 0; }
+.app-nav.side.horiz .side-group { width: auto; }
+.app-nav.side.horiz .side-item { margin: 0; }
+.app-nav.side.edge-top .side-fly, .app-nav.side.edge-bottom .side-fly { left: 0; }
+.app-nav.side.edge-top .side-fly { top: 48px; }
+.app-nav.side.edge-bottom .side-fly { top: auto; bottom: 48px; }
+.app-nav.side.edge-right .side-fly { left: auto; right: 52px; }
+
+/* floating dock (and the revealed state of an auto-hidden bar) */
+.app-nav.side.floating, .app-shell[data-nav-auto] .app-nav.side {
+  position: fixed; z-index: 900; overflow: visible; height: fit-content; width: fit-content;
+  background: var(--surface); border: 1px solid var(--border); box-shadow: 0 10px 40px rgba(0,0,0,.35);
+  transition: opacity .15s, translate .18s;
+}
+.app-nav.side.floating { border-radius: 18px; padding: 8px 6px; }
+.app-nav.side.floating.edge-left { left: 12px; top: 0; bottom: 0; margin: auto 0; max-height: calc(100vh - 24px); }
+.app-nav.side.floating.edge-right { right: 12px; top: 0; bottom: 0; margin: auto 0; max-height: calc(100vh - 24px); }
+.app-nav.side.floating.edge-top { top: 12px; left: 0; right: 0; margin: 0 auto; }
+.app-nav.side.floating.edge-bottom { bottom: 12px; left: 0; right: 0; margin: 0 auto; }
+.app-nav.side.floating.horiz { flex-direction: row; align-items: center; padding: 6px 12px; gap: 8px; }
+.app-nav.side.floating.horiz .side-top { flex-direction: row; padding: 0 8px 0 0; }
+.app-nav.side.floating.horiz .side-items { flex-direction: row; width: auto; gap: 4px; }
+.app-nav.side.floating.horiz .side-bottom { flex-direction: row; width: auto; border-top: 0; border-left: 1px solid var(--border); padding: 0 0 0 8px; margin: 0; }
+.app-nav.side.floating.horiz .side-group { width: auto; }
+.app-nav.side.floating .side-item { margin: 0; }
+/* fixed bar that auto-hides: slides over the page instead of pushing it */
+.app-shell[data-nav-mode="fixed"][data-nav-auto] .app-nav.side:not(.horiz) { top: 0; bottom: 0; height: auto; border-radius: 0; }
+.app-shell[data-nav-mode="fixed"][data-nav-auto] .app-nav.side.edge-left { left: 0; }
+.app-shell[data-nav-mode="fixed"][data-nav-auto] .app-nav.side.edge-right { right: 0; }
+.app-shell[data-nav-mode="fixed"][data-nav-auto] .app-nav.side.horiz { left: 0; right: 0; width: 100%; border-radius: 0; }
+.app-shell[data-nav-mode="fixed"][data-nav-auto] .app-nav.side.edge-top { top: 0; }
+.app-shell[data-nav-mode="fixed"][data-nav-auto] .app-nav.side.edge-bottom { bottom: 0; }
+
+/* auto-hide: off-screen until revealed */
+.app-nav.side.auto { opacity: 0; pointer-events: none; }
+.app-nav.side.auto.revealed { opacity: 1; pointer-events: auto; translate: 0 0; }
+.app-nav.side.auto.edge-left:not(.revealed) { translate: -110% 0; }
+.app-nav.side.auto.edge-right:not(.revealed) { translate: 110% 0; }
+.app-nav.side.auto.edge-top:not(.revealed) { translate: 0 -120%; }
+.app-nav.side.auto.edge-bottom:not(.revealed) { translate: 0 120%; }
+.nav-hotzone { position: fixed; z-index: 899; }
+.nav-hotzone.edge-left { left: 0; top: 0; bottom: 0; width: 10px; }
+.nav-hotzone.edge-right { right: 0; top: 0; bottom: 0; width: 10px; }
+.nav-hotzone.edge-top { top: 0; left: 0; right: 0; height: 10px; }
+.nav-hotzone.edge-bottom { bottom: 0; left: 0; right: 0; height: 10px; }
+
+/* page content keeps clear of a floating dock that is always visible */
+.app-shell[data-nav-mode="floating"]:not([data-nav-auto]) { flex-direction: row; }
+.app-shell[data-nav-mode="floating"]:not([data-nav-auto]) .app-body { box-sizing: border-box; }
+.app-shell[data-nav-mode="floating"][data-nav-edge="left"]:not([data-nav-auto]) .app-body { padding-left: 84px; }
+.app-shell[data-nav-mode="floating"][data-nav-edge="right"]:not([data-nav-auto]) .app-body { padding-right: 84px; }
+.app-shell[data-nav-mode="floating"][data-nav-edge="top"]:not([data-nav-auto]) .app-body { padding-top: 72px; }
+.app-shell[data-nav-mode="floating"][data-nav-edge="bottom"]:not([data-nav-auto]) .app-body { padding-bottom: 72px; }
+.app-shell[data-nav-mode="hidden"], .app-shell[data-nav-auto] { flex-direction: row; }
+
+/* PDF reader "File" menu */
+.pdfv-filemenu { display: inline-flex; flex: 0 0 auto; }
+.pdfv-filemenu .latex-menu-trigger { height: 30px; padding: 0 10px; font-size: 13px; border-radius: 6px; }

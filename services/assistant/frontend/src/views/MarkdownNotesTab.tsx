@@ -718,6 +718,22 @@ export default function MarkdownNotesTab({
     input.click();
   }
 
+  // Cmd/Ctrl+S anywhere on the page (title field, preview, toolbar…) saves the note being edited
+  // and stops the browser's own "Save page" dialog. The textarea has its own handler, which runs first.
+  const quickSaveRef = useRef<() => void>(() => {});
+  quickSaveRef.current = () => { if (editing && !saving) void save(source, { close: false }); };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        quickSaveRef.current();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   function onEditorKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     const mod = e.metaKey || e.ctrlKey;
     const key = e.key.toLowerCase();

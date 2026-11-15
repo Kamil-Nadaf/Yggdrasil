@@ -2680,7 +2680,72 @@ async def _latex_json(method: str, path: str, json: Optional[dict] = None, timeo
 
 @app.post("/api/latex/compile")
 async def latex_compile(payload: LatexCompileRequest):
-    return await _proxy_latex("POST", "/compile", json=payload.model_dump(), timeout=130.0)
+    status, data = await _latex_json("POST", "/compile", json=payload.model_dump(), timeout=130.0)
+    # Structured diagnostics (file, line, context, hint) for the editor's Problems sidebar. Parsed here, not in the
+    # latex container, so it also works for in-app updates and older latex images.
+    try:
+        import latex_tools  # noqa: PLC0415 - local module
+
+        stem = re.sub(r"\.tex$", "", payload.filename.strip().strip("/")) or "draft"
+        main_file = stem.split("/")[-1] + ".tex"
+        diags = latex_tools.diagnostics(str(data.get("log") or ""), payload.source, main_file)
+        data["diagnostics"] = diags
+        data["main_file"] = main_file
+        if status >= 400 and not any(d["kind"] == "error" for d in diags) and data.get("errors"):
+            data["diagnostics"] = [{"kind": "error", "message": str(e), "file": main_file, "line": None, "context": "", "source": "log", "hint": ""} for e in data["errors"]] + diags
+    except Exception as exc:  # never let diagnostics break a compile
+        data.setdefault("diagnostics", [])
+        data["diagnostics_error"] = str(exc)
+    return JSONResponse(status_code=status, content=data)
+
+
+# ── LaTeX version history (snapshots, shown in the editor's History sidebar) ───
+class LatexVersionPayload(BaseModel):
+    filename: str
+    source: str
+    label: str = ""
+
+
+def _latex_versions():
+    import latex_tools  # noqa: PLC0415 - local module
+
+    return latex_tools.VersionStore(VAULT)
+
+
+@app.post("/api/latex/versions")
+async def latex_version_save(payload: LatexVersionPayload):
+    try:
+        return _latex_versions().save(payload.filename, payload.source, payload.label, force=True)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.get("/api/latex/versions")
+async def latex_version_list(filename: str):
+    try:
+        return {"versions": _latex_versions().list(filename)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.get("/api/latex/versions/{vid}")
+async def latex_version_get(vid: str, filename: str):
+    try:
+        v = _latex_versions().get(filename, vid)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if v is None:
+        raise HTTPException(status_code=404, detail="Version not found")
+    return {"id": v["id"], "ts": v.get("ts", 0), "label": v.get("label", ""), "source": v.get("source", "")}
+
+
+@app.delete("/api/latex/versions/{vid}")
+async def latex_version_delete(vid: str, filename: str):
+    try:
+        ok = _latex_versions().delete(filename, vid)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"ok": ok}
 
 
 @app.post("/api/latex/save")

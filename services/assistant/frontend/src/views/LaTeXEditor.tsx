@@ -11,7 +11,9 @@ import {
   Panel,
   Separator as PanelResizeHandle,
 } from "react-resizable-panels";
-import { api, type LatexFile } from "../api/client";
+import { api, type LatexFile, type LatexDiagnostic } from "../api/client";
+import LatexSidePanel, { type SideTab } from "../components/LatexSidePanel";
+import { latexDiagnosticsExt, setLineMarks } from "../lib/latexDiagnosticsExt";
 import { LATEX_TEMPLATES, type LatexTemplate } from "../lib/latexTemplates";
 import {
   LatexMenuBar,
@@ -260,14 +262,12 @@ function EditorPane({
 function PreviewPane({
   pdfUrl,
   pdfName,
-  errors,
   compiling,
   pdfOnly,
   onShowEditor,
 }: {
   pdfUrl: string | null;
   pdfName: string;
-  errors: string[];
   compiling: boolean;
   pdfOnly?: boolean;
   onShowEditor?: () => void;
@@ -375,16 +375,6 @@ function PreviewPane({
           {compiling ? "Compiling…" : "No preview — click Recompile"}
         </div>
       )}
-      {errors.length > 0 && (
-        <div className="latex-error-log">
-          <div className="latex-error-header">Errors</div>
-          <div className="latex-error-list">
-            {errors.map((e, i) => (
-              <div key={i} className="latex-error-item">{e}</div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -411,7 +401,66 @@ export default function LaTeXEditor() {
   const [compiling, setCompiling] = useState(false);
   const [saveMsg, setSaveMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
-  const [errors, setErrors] = useState<string[]>([]);
+  const [diagnostics, setDiagnostics] = useState<LatexDiagnostic[]>([]);
+  const [compileLog, setCompileLog] = useState("");
+  const [compiled, setCompiled] = useState(false);
+  const [mainFile, setMainFile] = useState("");
+  const [sideOpen, setSideOpen] = useState(() => localStorage.getItem("yggdrasil:latex-side") === "open");
+  const [sideTab, setSideTab] = useState<SideTab>("problems");
+  const [historyTick, setHistoryTick] = useState(0);
+  const pendingJumpRef = useRef<number | null>(null);
+  const saveCompileRef = useRef<() => void>(() => {});
+  function clearDiags() {
+    setDiagnostics([]);
+    setCompileLog("");
+    setCompiled(false);
+    applyMarks([]);
+  }
+  function applyMarks(list: LatexDiagnostic[], main = mainFile) {
+    const view = viewRef.current;
+    if (!view) return;
+    const cur = filename.trim().split("/").pop() || "";
+    const marks = list
+      .filter((d) => d.line && d.kind !== "typesetting")
+      .filter((d) => {
+        const f = (d.file || "").split("/").pop()?.replace(/\.tex$/i, "") ?? "";
+        return !d.file || f === cur || f === (main || "").replace(/\.tex$/i, "");
+      })
+      .map((d) => ({ line: d.line as number, kind: d.kind as "error" | "warning", message: d.message }));
+    view.dispatch({ effects: setLineMarks.of(marks) });
+  }
+  function jumpToLine(line: number | null) {
+    const view = viewRef.current;
+    if (!view || !line) return;
+    const n = Math.min(Math.max(1, line), view.state.doc.lines);
+    const ln = view.state.doc.line(n);
+    view.dispatch({
+      selection: { anchor: ln.from, head: ln.to },
+      effects: EditorView.scrollIntoView(ln.from, { y: "center" }),
+    });
+    view.focus();
+  }
+  function jumpTo(file: string, line: number | null) {
+    if (viewMode === "pdf") changeViewMode("split");
+    const norm = (file || "").replace(/^\.\//, "");
+    const stem = norm.replace(/\.tex$/i, "");
+    const cur = filename.trim();
+    const dir = cur.includes("/") ? cur.slice(0, cur.lastIndexOf("/")) : "";
+    const full = dir && !stem.startsWith(dir + "/") ? `${dir}/${stem}` : stem;
+    const isCurrent = !stem || full === cur || stem === cur || stem === cur.split("/").pop() || stem === (mainFile || "").replace(/\.tex$/i, "");
+    if (isCurrent) {
+      window.setTimeout(() => jumpToLine(line), 60);
+      return;
+    }
+    const hit = files.find((f) => f.name === `${full}.tex` || f.name === `${stem}.tex`);
+    if (hit) {
+      pendingJumpRef.current = line;
+      void handleSelectFile(hit.name);
+    } else {
+      setSaveMsg({ text: `Cannot open ${norm} (not a .tex file in the vault)`, ok: false });
+    }
+  }
+  const problemCount = diagnostics.filter((d) => d.kind === "error").length;
   const [lineCol, setLineCol] = useState("Line 1, Col 1");
   const [filesCollapsed, setFilesCollapsed] = useState(() => {
     const next = localStorage.getItem("yggdrasil:latex-sidebar");
@@ -859,6 +908,7 @@ export default function LaTeXEditor() {
               ])
             ),
             LATEX_LANG,
+            latexDiagnosticsExt,
             EditorView.domEventHandlers({
               paste(event) {
                 const images = imageFilesFrom(event.clipboardData);
@@ -962,7 +1012,7 @@ export default function LaTeXEditor() {
     setSelected(name);
     setSaveMsg(null);
     clearPdfUrl();
-    setErrors([]);
+    clearDiags();
     if (!name) {
       setFilename(todayFilename());
       setSource(defaultTemplate.source, { recordHistory: false });
@@ -975,6 +1025,13 @@ export default function LaTeXEditor() {
       const r = await api.latex.getFile(stem);
       setSource(r.source, { recordHistory: false });
       setDirty(false);
+      api.latex.saveVersion(stem, r.source).catch(() => {});
+      setHistoryTick((n) => n + 1);
+      if (pendingJumpRef.current) {
+        const ln = pendingJumpRef.current;
+        pendingJumpRef.current = null;
+        window.setTimeout(() => jumpToLine(ln), 120);
+      }
     } catch {
       setSaveMsg({ text: "Failed to load file", ok: false });
     }
@@ -986,7 +1043,9 @@ export default function LaTeXEditor() {
     setSaving(true);
     setSaveMsg(null);
     try {
-      await api.latex.save(stem, getSource());
+      const text = getSource();
+      await api.latex.save(stem, text);
+      api.latex.saveVersion(stem, text).then(() => setHistoryTick((n) => n + 1)).catch(() => {});
       setDirty(false);
       setSaveMsg({ text: "Saved", ok: true });
       setSelected(`${stem}.tex`);
@@ -998,18 +1057,68 @@ export default function LaTeXEditor() {
     }
   }
 
+  function openSide(tab?: SideTab) {
+    if (tab) setSideTab(tab);
+    setSideOpen(true);
+    localStorage.setItem("yggdrasil:latex-side", "open");
+  }
+  function closeSide() {
+    setSideOpen(false);
+    localStorage.setItem("yggdrasil:latex-side", "closed");
+  }
+  function toggleSide() {
+    if (sideOpen) closeSide();
+    else openSide();
+  }
+
+  async function saveAndCompile() {
+    if (compiling || saving) return;
+    if (filename.trim()) await handleSave();
+    await handleCompile();
+    setHistoryTick((n) => n + 1);
+  }
+  saveCompileRef.current = () => void saveAndCompile();
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        e.stopPropagation();
+        saveCompileRef.current();
+      }
+    }
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
+
   async function handleCompile() {
     setViewAsset(null);
     setCompiling(true);
-    setErrors([]);
+    clearDiags();
     try {
       const r = await api.latex.compile(getSource(), filename.trim() || "draft");
       setPdfFromBase64(r.pdf_b64);
+      const ds = r.diagnostics ?? [];
+      setDiagnostics(ds);
+      setCompileLog(r.log || "");
+      setMainFile(r.main_file || "");
+      setCompiled(true);
+      applyMarks(ds, r.main_file || "");
       if (viewMode === "editor") changeViewMode("split");
     } catch (e: unknown) {
-      const err = e as Error & { data?: { log?: string; errors?: string[] } };
+      const err = e as Error & { data?: { log?: string; errors?: string[]; diagnostics?: LatexDiagnostic[]; main_file?: string } };
       clearPdfUrl();
-      setErrors(err.data?.errors?.length ? err.data.errors : [err.message || "Compile failed"]);
+      let ds = err.data?.diagnostics ?? [];
+      if (!ds.length) {
+        const msgs = err.data?.errors?.length ? err.data.errors : [err.message || "Compile failed"];
+        ds = msgs.map((m) => ({ kind: "error" as const, message: m, file: "", line: null }));
+      }
+      setDiagnostics(ds);
+      setCompileLog(err.data?.log || "");
+      setMainFile(err.data?.main_file || "");
+      setCompiled(true);
+      applyMarks(ds, err.data?.main_file || "");
+      openSide("problems");
       if (viewMode === "editor") changeViewMode("split");
     } finally {
       setCompiling(false);
@@ -1267,7 +1376,7 @@ export default function LaTeXEditor() {
     setSelected("");
     setSaveMsg(null);
     clearPdfUrl();
-    setErrors([]);
+    clearDiags();
   }
 
   function handleNewFile() {
@@ -1297,7 +1406,7 @@ export default function LaTeXEditor() {
       setDirty(false);
       setSaveMsg({ text: `Created ${destName}`, ok: true });
       clearPdfUrl();
-      setErrors([]);
+      clearDiags();
       refreshFiles();
       setTimeout(() => setSaveMsg(null), 2500);
     } catch (e: unknown) {
@@ -1329,7 +1438,7 @@ export default function LaTeXEditor() {
         setSource(f.source, { recordHistory: false });
         setDirty(false);
         clearPdfUrl();
-        setErrors([]);
+        clearDiags();
       }
       const notes = [
         r.renamed.length ? `${r.renamed.length} renamed` : "",
@@ -1502,8 +1611,8 @@ export default function LaTeXEditor() {
         canDownloadPdf={Boolean(pdfUrl)}
         canDownloadSource={Boolean(filename.trim() || selected)}
         templates={availableTemplates.map((t) => ({ id: t.id, label: t.label }))}
-        onCompile={handleCompile}
-        onSave={handleSave}
+        onCompile={saveAndCompile}
+        onSave={saveAndCompile}
         onNewFile={handleNewFile}
         onNewFolder={handleNewFolder}
         onUploadFiles={() => fileInputRef.current?.click()}
@@ -1530,6 +1639,9 @@ export default function LaTeXEditor() {
         historyBusy={historyBusy}
         historyMsg={historyMsg}
         onShare={() => setShareOpen(true)}
+        sideOpen={sideOpen}
+        problemCount={problemCount}
+        onToggleSide={toggleSide}
       />
   );
 
@@ -1765,13 +1877,38 @@ export default function LaTeXEditor() {
             <PreviewPane
               pdfUrl={pdfUrl}
               pdfName={filename.trim() || selected || "document"}
-              errors={errors}
               compiling={compiling}
               pdfOnly={viewMode === "pdf"}
               onShowEditor={() => changeViewMode("split")}
             />
             )}
           </Panel>
+        )}
+
+        {sideOpen && (
+          <>
+            <PanelResizeHandle className="latex-resize-handle" />
+            <Panel id="latex-side" defaultSize="24" minSize="16" className="latex-panel">
+              <LatexSidePanel
+                tab={sideTab}
+                onTab={setSideTab}
+                onCollapse={closeSide}
+                diagnostics={diagnostics}
+                log={compileLog}
+                compiling={compiling}
+                compiled={compiled}
+                mainFile={mainFile}
+                onJump={jumpTo}
+                filename={filename}
+                getSource={getSource}
+                onRestore={(text) => {
+                  setSource(text);
+                  setDirty(true);
+                }}
+                historyTick={historyTick}
+              />
+            </Panel>
+          </>
         )}
       </WorkspaceLayout>
     </>

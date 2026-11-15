@@ -2,8 +2,9 @@
 // slide content, text being edited and anything the user typed are left exactly as they are.
 import { A } from './zh-en-a'
 import { B } from './zh-en-b'
+import { C } from './zh-en-c'
 
-const DICT: Record<string, string> = { ...B, ...A }
+const DICT: Record<string, string> = { ...B, ...A, ...C }
 const HAN = /[一-鿿]/
 // Substring replacement only uses keys of 2+ characters, longest first, so short words never corrupt other text.
 const KEYS = Object.keys(DICT).filter(k => k.length >= 2).sort((a, b) => b.length - a.length)

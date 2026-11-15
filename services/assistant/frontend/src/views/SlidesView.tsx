@@ -154,6 +154,19 @@ export default function SlidesView({ lockedProject }: { lockedProject?: string }
     return () => window.removeEventListener("keydown", k);
   }, [full]);
 
+  // Cmd/Ctrl+S while a deck is open (even with focus outside the editor frame) saves it at once.
+  useEffect(() => {
+    if (!open) return;
+    const k = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        frameRef.current?.contentWindow?.postMessage({ source: "yggdrasil-host", type: "save" }, "*");
+      }
+    };
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [open]);
+
   if (open && src) {
     return (
       <div className={`sl-wrap${full ? " sl-full" : ""}`}>

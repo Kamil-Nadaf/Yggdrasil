@@ -143,10 +143,30 @@ export interface LatexFile {
   size: number;
 }
 
+export interface LatexDiagnostic {
+  kind: "error" | "warning" | "typesetting";
+  message: string;
+  file: string;
+  line: number | null;
+  context?: string;
+  hint?: string;
+  source?: string;
+}
+
 export interface LatexCompileResult {
   pdf_b64: string;
   log: string;
   errors: string[];
+  diagnostics?: LatexDiagnostic[];
+  main_file?: string;
+}
+
+export interface LatexVersionMeta {
+  id: string;
+  ts: number;
+  label: string;
+  size?: number;
+  lines?: number;
 }
 
 export interface LatexListResponse {
@@ -852,6 +872,15 @@ export const api = {
       req<LatexCompileResult>("POST", "/api/latex/compile", assets ? { source, filename, assets } : { source, filename }),
     save: (filename: string, source: string) =>
       req<{ path: string }>("POST", "/api/latex/save", { filename, source }),
+    versions: (filename: string) =>
+      req<{ versions: LatexVersionMeta[] }>("GET", `/api/latex/versions?filename=${encodeURIComponent(filename)}`),
+    getVersion: (id: string, filename: string) =>
+      req<{ id: string; ts: number; label: string; source: string }>(
+        "GET", `/api/latex/versions/${encodeURIComponent(id)}?filename=${encodeURIComponent(filename)}`),
+    saveVersion: (filename: string, source: string, label = "") =>
+      req<{ id?: string }>("POST", "/api/latex/versions", { filename, source, label }),
+    deleteVersion: (id: string, filename: string) =>
+      req<{ ok: boolean }>("DELETE", `/api/latex/versions/${encodeURIComponent(id)}?filename=${encodeURIComponent(filename)}`),
     createFolder: (path: string) =>
       req<{ path: string }>("POST", "/api/latex/folders", { path }),
     deleteFolder: (path: string) =>

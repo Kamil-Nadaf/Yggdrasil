@@ -96,6 +96,23 @@ onMounted(async () => {
   tell('ready')
 })
 
+// Cmd/Ctrl+S: save the deck right now (it also autosaves 1.5 s after every change).
+function saveNow() {
+  if (!loaded) return
+  save()
+  save.flush()
+}
+window.addEventListener('keydown', (e: KeyboardEvent) => {
+  if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's') {
+    e.preventDefault()
+    saveNow()
+  }
+}, true)
+window.addEventListener('message', (e: MessageEvent) => {
+  const d = e.data
+  if (d && d.source === 'yggdrasil-host' && d.type === 'save') saveNow()
+})
+
 window.addEventListener('beforeunload', () => {
   save.flush()
   const discardedDB = localStorage.getItem(LOCALSTORAGE_KEY_DISCARDED_DB)

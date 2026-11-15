@@ -19,6 +19,9 @@ for f in src/views/Editor/Remark/Editor.vue src/views/Mobile/MobileEditor/SlideT
   sed -i.bak "s/点击输入演讲者备注/Click to add speaker notes/" "$WORK/pptist/$f" && rm -f "$WORK/pptist/$f.bak"
 done
 
+# English pass over data the runtime translator cannot reach (chart defaults, template slide text).
+node "$HERE/translate-source.mjs" "$WORK/pptist"
+
 cd "$WORK/pptist"
 npm ci --no-audit --no-fund
 npm install --no-save --no-audit --no-fund @fontsource/ibm-plex-sans @fontsource/ibm-plex-serif @fontsource/ibm-plex-mono

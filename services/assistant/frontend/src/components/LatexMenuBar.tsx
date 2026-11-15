@@ -54,6 +54,9 @@ export function LatexMenuBar({
   historyBusy,
   historyMsg,
   onShare,
+  sideOpen,
+  problemCount,
+  onToggleSide,
 }: {
   filename: string;
   renaming: boolean;
@@ -102,6 +105,9 @@ export function LatexMenuBar({
   historyBusy: boolean;
   historyMsg: string | null;
   onShare: () => void;
+  sideOpen: boolean;
+  problemCount: number;
+  onToggleSide: () => void;
 }) {
   const renameInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -332,6 +338,14 @@ export function LatexMenuBar({
         active={viewMode}
         onChange={onViewMode}
       />
+      <button
+        type="button"
+        className={`btn ${sideOpen ? "latex-side-toggle-on" : ""}`}
+        title="Errors, warnings and version history"
+        onClick={onToggleSide}
+      >
+        Problems{problemCount > 0 ? ` (${problemCount})` : ""} / History
+      </button>
       <button type="button" className="btn" onClick={onShare}>
         Share
       </button>
@@ -342,7 +356,7 @@ export function LatexMenuBar({
         type="button"
         className="btn"
         disabled={saving || !filename.trim()}
-        title={!filename.trim() ? "Name the file first" : "Save to vault"}
+        title={!filename.trim() ? "Name the file first" : "Save and compile (Cmd/Ctrl+S)"}
         onClick={onSave}
       >
         {saving ? "Saving…" : "Save"}

@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { useNavPrefs } from "./lib/navPrefs";
 import Nav, { type NotesTab, type TasksTab, type CollectionSection, type PapersSection } from "./components/Nav";
 import SettingsPage from "./components/SettingsPage";
 import UpdatePrompt from "./components/UpdatePrompt";
@@ -72,6 +73,7 @@ function defaultPartner(v: View): View {
 
 export default function App() {
   const [view, setView] = useState<View>("scores");
+  const navPrefs = useNavPrefs();
   const [editorCitekey, setEditorCitekey] = useState<string | null>(null);
   const [prevView, setPrevView] = useState<Exclude<View, "settings">>("scores");
   const [notesTab, setNotesTab] = useState<NotesTab>("collection");
@@ -305,7 +307,12 @@ export default function App() {
   );
 
   return (
-    <div className="app-shell">
+    <div
+      className="app-shell"
+      data-nav-mode={navPrefs.mode}
+      data-nav-edge={navPrefs.edge}
+      data-nav-auto={navPrefs.mode === "hidden" || navPrefs.autoHide ? "1" : undefined}
+    >
       <ManualTimerRunner />
       <UpdatePrompt />
       <Nav

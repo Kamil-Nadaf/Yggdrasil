@@ -12,6 +12,7 @@ import PdfSelectionPopup, { type Markup } from "./PdfSelectionPopup";
 import { colorCss, slotColor, useHighlightPrefs } from "../lib/highlightPrefs";
 import "./pdfAnnotate.css";
 import ReaderNotes from "./ReaderNotes";
+import { MenuDropdown, type MenuId, type MenuItem } from "./WorkspaceMenuBar";
 
 export interface PdfDoc {
   url: string;
@@ -251,6 +252,24 @@ function PdfPage({
 }
 
 /** Right-hand reader: pdf.js pages with selectable text, highlights/notes saved in the vault, and “add to CERIC”. */
+/** "File" menu for the reader: save, save as, export and print. */
+function PdfFileMenu({ items }: { items: MenuItem[] }) {
+  const [open, setOpen] = useState<MenuId>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: PointerEvent) => {
+      const t = e.target as Element | null;
+      if (t?.closest?.(".latex-menu") || t?.closest?.(".latex-menu-dropdown")) return;
+      setOpen(null);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(null); };
+    document.addEventListener("pointerdown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("pointerdown", onDoc); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+  return <span className="pdfv-filemenu"><MenuDropdown id="file" label="File" open={open} onOpen={setOpen} items={items} /></span>;
+}
+
 export default function PdfViewer({ doc, onClose, lead, trail }: {
   doc: PdfDoc; onClose: () => void;
   /** Embedded (Collection) reader: buttons placed at the start / end of the thin top bar. */
@@ -610,6 +629,97 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
     }
   }
 
+  const fileBase = () => (doc.title || key).replace(/[^\w .-]+/g, "").slice(0, 80) || "paper";
+
+  function saveNow() {
+    api.pdf.saveAnnotations(key, doc.url, doc.title, anns)
+      .then((r) => { setSavedCopy(r.saved_copy); showToast("Highlights and notes saved", true); })
+      .catch(() => showToast("Couldn’t save notes", false));
+  }
+
+  async function saveAs() {
+    const name = `${fileBase()}.pdf`;
+    const w = window as unknown as { showSaveFilePicker?: (o: unknown) => Promise<{ createWritable: () => Promise<{ write: (b: Blob) => Promise<void>; close: () => Promise<void> }> }> };
+    if (!w.showSaveFilePicker) { download(); return; }
+    try {
+      const blob = await (await fetch(fileUrl)).blob();
+      const h = await w.showSaveFilePicker({ suggestedName: name, types: [{ description: "PDF", accept: { "application/pdf": [".pdf"] } }] });
+      const wr = await h.createWritable();
+      await wr.write(blob);
+      await wr.close();
+      showToast("PDF saved", true);
+    } catch (e) {
+      if ((e as Error)?.name !== "AbortError") showToast("Couldn’t save the PDF", false);
+    }
+  }
+
+  function saveText(text: string, name: string, type: string) {
+    const url = URL.createObjectURL(new Blob([text], { type }));
+    const a = document.createElement("a");
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
+  function annotationsMarkdown() {
+    const body = [...anns]
+      .sort((a, b) => a.page - b.page)
+      .map((a) => `> ${a.text.replace(/\s+/g, " ")}  \n> — p. ${a.page}${a.note ? `\n\n${a.note}` : ""}`)
+      .join("\n\n");
+    return `# ${doc.title || key}\n\n${body}\n`;
+  }
+
+  async function printPdf() {
+    try {
+      const blob = await (await fetch(fileUrl)).blob();
+      const url = URL.createObjectURL(blob);
+      const f = document.createElement("iframe");
+      f.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0";
+      f.src = url;
+      f.onload = () => {
+        window.setTimeout(() => {
+          try { f.contentWindow?.focus(); f.contentWindow?.print(); }
+          catch { window.open(url, "_blank"); }
+        }, 300);
+      };
+      document.body.appendChild(f);
+      window.setTimeout(() => { f.remove(); URL.revokeObjectURL(url); }, 120000);
+    } catch { showToast("Couldn’t open the PDF for printing", false); }
+  }
+
+  const fileItems: MenuItem[] = [
+    { type: "item", label: "Save highlights & notes", shortcut: "Ctrl/⌘+S", onClick: saveNow },
+    { type: "item", label: savedCopy ? "PDF copy kept in vault ✓" : "Keep a copy in vault", disabled: savedCopy, hint: "Already saved", onClick: () => void keepCopy() },
+    { type: "item", label: "Save PDF as…", onClick: () => void saveAs() },
+    { type: "sep" },
+    { type: "item", label: "Download PDF", onClick: download },
+    { type: "item", label: "Export highlights (Markdown)", disabled: anns.length === 0, hint: "No highlights yet", onClick: () => saveText(annotationsMarkdown(), `${fileBase()}-highlights.md`, "text/markdown") },
+    { type: "item", label: "Export highlights (JSON)", disabled: anns.length === 0, hint: "No highlights yet", onClick: () => saveText(JSON.stringify(anns, null, 2), `${fileBase()}-highlights.json`, "application/json") },
+    { type: "item", label: "Copy highlights as Markdown", disabled: anns.length === 0, hint: "No highlights yet", onClick: copyMarkdown },
+    { type: "sep" },
+    { type: "item", label: "Print…", shortcut: "Ctrl/⌘+P", onClick: () => void printPdf() },
+    { type: "item", label: "Open in browser", onClick: () => { window.open(doc.url, "_blank", "noopener,noreferrer"); } },
+    { type: "sep" },
+    { type: "item", label: "Close", onClick: onClose },
+  ];
+  const fileMenu = <PdfFileMenu items={fileItems} />;
+
+  // Ctrl/⌘+S saves highlights now; Ctrl/⌘+P prints the PDF rather than the whole app page.
+  const keysRef = useRef({ save: () => {}, print: () => {} });
+  keysRef.current = { save: saveNow, print: () => void printPdf() };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && /^(INPUT|TEXTAREA)$/.test(t.tagName) && e.key.toLowerCase() === "p") return;
+      const k = e.key.toLowerCase();
+      if (k === "s") { e.preventDefault(); keysRef.current.save(); }
+      else if (k === "p") { e.preventDefault(); keysRef.current.print(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   function jumpTo(page: number) {
     rootEl?.querySelector(`.pdfv-page[data-page="${page}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" });
   }
@@ -789,6 +899,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
     return (
       <div className={`pdf-viewer pdfv-books${fullscreen ? " is-full" : ""}`}>
         <div className="pdfv-topbar" role="toolbar" aria-label="Reader toolbar">
+          {fileMenu}
           <button type="button" className={ib(sbOpen)} onClick={toggleSb} aria-pressed={sbOpen} title={sbOpen ? "Hide sidebar" : "Show sidebar (contents, pages, search, notes)"}><BookIcon name="sidebar" size={17} /></button>
           {lead}
           <span className="pdfv-tb-title" title={doc.title}>{doc.title}</span>
@@ -864,6 +975,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
     <div className={`pdf-viewer${fullscreen ? " is-full" : ""}`}>
       {!doc.embedded && <ActivityTimer category="papers" />}
       <div className="pdf-viewer-bar">
+        {fileMenu}
         <button type="button" className="btn pdfv-collapse" onClick={() => { toggleSlim(); setTool("select"); }} aria-expanded={!slim} title={slim ? "Show zoom and annotation tools" : "Hide zoom and annotation tools"}>
           {slim ? "▾ Tools" : "▴ Tools"}
         </button>

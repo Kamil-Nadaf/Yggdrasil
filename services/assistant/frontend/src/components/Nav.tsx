@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { View } from "../App";
 import YggdrasilLogo from "./YggdrasilLogo";
+import { toggleNavHidden, useNavPrefs } from "../lib/navPrefs";
 import { dismissDriveToast, requestSettingsSection, runDriveSync, startDrivePolling, useDriveSync } from "../lib/driveSync";
 
 export type NotesTab = "editor" | "collection" | "quick-notes" | "documentation" | "meeting-minutes";
@@ -80,14 +81,34 @@ export default function Nav({ current, onNavigate, split, onSplitToggle, subs, o
   }
   const gear = svg(<><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></>);
 
+  const prefs = useNavPrefs();
+  const horizontal = prefs.edge === "top" || prefs.edge === "bottom";
+  const floating = prefs.mode !== "fixed";
+  const auto = prefs.mode === "hidden" || prefs.autoHide;
+  const iconOnly = collapsed || floating || horizontal;
+  const [revealed, setRevealed] = useState(false);
+  const hideTimer = useRef<number | undefined>(undefined);
+  const reveal = () => { window.clearTimeout(hideTimer.current); setRevealed(true); };
+  const unreveal = () => { window.clearTimeout(hideTimer.current); hideTimer.current = window.setTimeout(() => setRevealed(false), 350); };
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === "\\") { e.preventDefault(); toggleNavHidden(); setRevealed(false); }
+    };
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, []);
+  const navClass = `app-nav side edge-${prefs.edge}${iconOnly ? " collapsed" : ""}${horizontal ? " horiz" : ""}${floating ? " floating" : ""}${auto ? " auto" : ""}${auto && revealed ? " revealed" : ""}`;
+
   return (
-    <nav className={`app-nav side${collapsed ? " collapsed" : ""}`} aria-label="Main">
+    <>
+    {auto && <div className={`nav-hotzone edge-${prefs.edge}`} onMouseEnter={reveal} aria-hidden="true" />}
+    <nav className={navClass} aria-label="Main" onMouseEnter={auto ? reveal : undefined} onMouseLeave={auto ? unreveal : undefined}>
       <div className="side-top">
         <YggdrasilLogo size={28} className="nav-logo-img" />
-        {!collapsed && <span className="side-name">YGGDRASIL</span>}
-        <button type="button" className="side-toggle" onClick={toggle} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} aria-expanded={!collapsed} title={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
+        {!iconOnly && <span className="side-name">YGGDRASIL</span>}
+        {!floating && !horizontal && <button type="button" className="side-toggle" onClick={toggle} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} aria-expanded={!collapsed} title={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
           {svg(<><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /><path d={collapsed ? "M14 10l2 2-2 2" : "M16 10l-2 2 2 2"} /></>)}
-        </button>
+        </button>}
       </div>
       <div className="side-items">
         {ITEMS.map((item) => {
@@ -99,16 +120,16 @@ export default function Nav({ current, onNavigate, split, onSplitToggle, subs, o
                 type="button"
                 className={`nav-item side-item${active ? " active" : ""}`}
                 onClick={(e) => onNavigate(item.id, { side: e.shiftKey })}
-                title={collapsed ? item.label : `${item.label} (Shift-click: open beside current page)`}
+                title={iconOnly ? item.label : `${item.label} (Shift-click: open beside current page)`}
                 aria-label={item.label}
               >
                 {item.icon}
-                {!collapsed && <span>{item.label}</span>}
-                {!collapsed && sub && <span className="side-caret" aria-hidden="true">{active ? "▾" : "▸"}</span>}
+                {!iconOnly && <span>{item.label}</span>}
+                {!iconOnly && sub && <span className="side-caret" aria-hidden="true">{active ? "▾" : "▸"}</span>}
               </button>
-              {sub && (active || collapsed) && (
-                <div className={collapsed ? "side-fly" : "side-sub"}>
-                  {collapsed && <div className="side-fly-h">{item.label}</div>}
+              {sub && (active || iconOnly) && (
+                <div className={iconOnly ? "side-fly" : "side-sub"}>
+                  {iconOnly && <div className="side-fly-h">{item.label}</div>}
                   {sub.items.map((t) => (
                     <button
                       key={t.id}
@@ -128,18 +149,19 @@ export default function Nav({ current, onNavigate, split, onSplitToggle, subs, o
       <div className="side-bottom">
         <button type="button" className={`nav-item side-item${split ? " active" : ""}`} onClick={onSplitToggle} title={split ? "Close split view" : "Split view — open several sections side by side"} aria-label="Split view" aria-pressed={!!split}>
           {svg(<><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M12 4v16" /></>)}
-          {!collapsed && <span>{split ? "Close split" : "Split view"}</span>}
+          {!iconOnly && <span>{split ? "Close split" : "Split view"}</span>}
         </button>
         <button type="button" className={`nav-item side-item side-sync${drive.running ? " running" : ""}${driveBad ? " bad" : ""}`} onClick={onSync} disabled={drive.running} title={driveTitle} aria-label="Sync with Google Drive">
           {svg(<><path d="M21 12a9 9 0 0 0-15-6.7L3 8" /><path d="M3 3v5h5" /><path d="M3 12a9 9 0 0 0 15 6.7L21 16" /><path d="M21 21v-5h-5" /></>)}
-          {!collapsed && <span>{drive.running ? "Syncing…" : "Sync"}</span>}
+          {!iconOnly && <span>{drive.running ? "Syncing…" : "Sync"}</span>}
           {driveBad && <span className="side-sync-dot" aria-hidden="true" />}
         </button>
-        <button type="button" className={`nav-item side-item${current === "settings" ? " active" : ""}`} onClick={onSettingsOpen} title={collapsed ? "Settings" : undefined} aria-label="Settings">
+        <button type="button" className={`nav-item side-item${current === "settings" ? " active" : ""}`} onClick={onSettingsOpen} title={iconOnly ? "Settings" : undefined} aria-label="Settings">
           {gear}
-          {!collapsed && <span>Settings</span>}
+          {!iconOnly && <span>Settings</span>}
         </button>
       </div>
+    </nav>
       {drive.toast && (
         <div className={`sync-toast ${drive.toast.kind}`} role="status">
           <div>{drive.toast.text}</div>
@@ -150,6 +172,6 @@ export default function Nav({ current, onNavigate, split, onSplitToggle, subs, o
           </div>
         </div>
       )}
-    </nav>
+    </>
   );
 }

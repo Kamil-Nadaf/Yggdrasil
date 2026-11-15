@@ -62,6 +62,7 @@ import TaskOptionsSettings from "./TaskOptionsSettings";
 import TaskSyncSettings from "./TaskSyncSettings";
 import StorageBars from "./StorageBars";
 import DriveSyncSettings from "./DriveSyncSettings";
+import NavSettings from "./NavSettings";
 import { consumePendingSettingsSection } from "../lib/driveSync";
 import { flushSettingsNow } from "../lib/settingsSync";
 
@@ -871,6 +872,7 @@ export default function SettingsPage({ open = true, onClose, firstRun, onDataPat
         <div className="settings-page-pane">
         <div className="settings-body">
         <CollapsibleSection id="appearance" title="Appearance" open={!!openSections.appearance} onToggle={() => toggle("appearance")}>
+          <NavSettings />
           <div className="settings-item">
             <label>Theme</label>
             <div className="theme-picker">

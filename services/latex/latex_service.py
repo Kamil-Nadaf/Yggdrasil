@@ -184,6 +184,7 @@ async def run_latexmk(build_dir: Path, source_name: str, engine_flag: str) -> tu
         "latexmk",
         engine_flag,
         "-interaction=nonstopmode",
+        "-shell-escape",  # minted / svg / pythontex / gnuplot call external programs
         f"-output-directory={build_dir}",
         source_name,
         cwd=str(build_dir),

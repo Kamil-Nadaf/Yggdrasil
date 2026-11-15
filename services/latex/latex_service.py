@@ -143,8 +143,12 @@ _STY_TO_PKG = {
 }
 
 
+# Helper programs (not .sty files) that latexmk calls; "sh: biber: command not found" -> install the TeX Live package.
+_MISSING_PROGRAM_RE = re.compile(r"(?:^|\s)(biber|makeindex|bibtex8|upmendex)\s*:\s*(?:command )?not found", re.MULTILINE)
+
+
 def packages_from_log(log: str) -> list[str]:
-    names = []
+    names = list(dict.fromkeys(_MISSING_PROGRAM_RE.findall(log)))
     missing = _MISSING_TEX_RE.findall(log) + _MISSING_FONT_RE.findall(log)
     for fname in missing:
         key = Path(fname).stem.lower()
@@ -435,7 +439,7 @@ async def compile_latex(payload: CompileRequest):
         pdf_path = source_path.with_suffix(".pdf")
         if returncode != 0 or not pdf_path.exists():
             errors = extract_errors(log) or ["Compilation failed — see log for details"]
-            return JSONResponse(status_code=422, content={"log": log, "errors": errors})
+            return JSONResponse(status_code=422, content={"log": log, "errors": errors, "engine": engine_used})
 
         pdf_b64 = base64.b64encode(pdf_path.read_bytes()).decode("ascii")
         return {"pdf_b64": pdf_b64, "log": log, "errors": [], "engine": engine_used}

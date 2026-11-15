@@ -64,6 +64,15 @@ class CompanionPackageTests(unittest.TestCase):
         self.assertEqual(ls.packages_from_log("! LaTeX Error: File `biblatex.sty' not found."), ["biblatex"])
 
 
+class MissingProgramTests(unittest.TestCase):
+    def test_biber_command_not_found(self):
+        log = "Running 'biber  \"x.bcf\"'\nsh: biber: command not found\nLatexmk: Error return"
+        self.assertEqual(ls.packages_from_log(log), ["biber"])
+
+    def test_no_false_positive(self):
+        self.assertEqual(ls.packages_from_log("Using biber to make bibliography file(s)."), [])
+
+
 class BackoffTests(unittest.TestCase):
     def tearDown(self):
         ls._tectonic_disabled_until = 0.0

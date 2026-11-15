@@ -472,6 +472,10 @@ async def compile_latex(payload: CompileRequest):
             alt = force_bibtex_backend(source_path.read_text(encoding="utf-8", errors="replace"))
             if alt is not None:
                 source_path.write_text(alt, encoding="utf-8")
+                # Drop everything from the biber run (.bcf, .aux, latexmk's .fdb_latexmk, ...) or latexmk keeps using biber.
+                for stale in build_dir.glob(f"{source_path.stem}.*"):
+                    if stale != source_path:
+                        stale.unlink(missing_ok=True)
                 returncode, log = await run_latexmk(build_dir, source_path.name, engine_flag, force=True)
                 if returncode == 0:
                     notice = "biber is not installed; compiled with biblatex backend=bibtex instead (some biblatex features may differ)."

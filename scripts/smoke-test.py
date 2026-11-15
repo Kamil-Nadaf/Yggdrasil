@@ -64,7 +64,7 @@ def find_base():
                     ports.append(int(m.group(1)))
     except Exception:
         pass
-    ports += [8000, 8765, 8080]
+    ports = [47285] + ports + [8000]  # 47285 = desktop app default; 8000 = docker
     for p in dict.fromkeys(ports):
         code, data = call(f"http://127.0.0.1:{p}", "GET", "/openapi.json", timeout=3)
         if code == 200 and isinstance(data, dict) and "paths" in data:

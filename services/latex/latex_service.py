@@ -209,7 +209,7 @@ def tectonic_binary() -> str | None:
     return os.environ.get("YGG_TECTONIC") or shutil.which("tectonic")
 
 
-TECTONIC_TIMEOUT = int(os.environ.get("YGG_TECTONIC_TIMEOUT", "45"))  # seconds; cold runs download packages
+TECTONIC_TIMEOUT = int(os.environ.get("YGG_TECTONIC_TIMEOUT", "75"))  # seconds; cold runs download packages
 _TECTONIC_BACKOFF_S = 1800
 _tectonic_disabled_until = 0.0
 _NETWORK_FAIL_RE = re.compile(r"download|network|connect|resolve|timed out|dns|certificate", re.IGNORECASE)

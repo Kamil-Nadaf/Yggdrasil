@@ -195,6 +195,59 @@ def ensure_tectonic(progress: Progress) -> Path | None:
         return None
 
 
+_WARMUP_DOCS = {
+    "base": r"\documentclass{article}\usepackage{amsmath,amssymb,graphicx,hyperref,booktabs,geometry,xcolor,natbib}\begin{document}x\end{document}",
+    "beamer": r"\documentclass{beamer}\begin{document}\begin{frame}x\end{frame}\end{document}",
+    "tikz": r"\documentclass{article}\usepackage{tikz,pgfplots}\pgfplotsset{compat=1.17}\begin{document}\begin{tikzpicture}\begin{axis}\addplot{x};\end{axis}\end{tikzpicture}\end{document}",
+    "poster": r"\documentclass[25pt,a0paper,portrait]{tikzposter}\title{P}\author{A}\begin{document}\maketitle\block{B}{x}\end{document}",
+    "tcolorbox": r"\documentclass{article}\usepackage{tcolorbox}\begin{document}\begin{tcolorbox}x\end{tcolorbox}\end{document}",
+    "siunitx": r"\documentclass{article}\usepackage{siunitx}\begin{document}\SI{1}{\joule}\end{document}",
+    "listings": r"\documentclass{article}\usepackage{listings}\begin{document}\lstinline|x|\end{document}",
+    "fontspec": r"\documentclass{article}\usepackage{fontspec}\begin{document}x\end{document}",
+    "book": r"\documentclass{book}\begin{document}\chapter{A}x\end{document}",
+}
+
+
+def warm_tectonic_cache(tectonic: Path) -> int:
+    """Pre-download the packages most documents need so the first real compile is fast.
+
+    Tectonic fetches each package on first use (28-80 s cold for beamer/tikz documents,
+    ~0.5 s once cached). Runs in the background; a marker is written only when every
+    warm-up document built, otherwise it retries (cheaply) on the next launch.
+    """
+    marker = tectonic.parent / ".warmed"
+    if marker.exists():
+        return len(_WARMUP_DOCS)
+    import tempfile
+
+    ok = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, source in _WARMUP_DOCS.items():
+            work = Path(tmp) / name
+            work.mkdir()
+            (work / "w.tex").write_text(source)
+            try:
+                run = subprocess.run(
+                    [str(tectonic), "-X", "compile", "w.tex", "--outdir", str(work)],
+                    cwd=work, capture_output=True, timeout=300,
+                )
+                ok += run.returncode == 0
+            except Exception:  # noqa: BLE001 - best effort
+                pass
+    if ok == len(_WARMUP_DOCS):
+        try:
+            marker.write_text(str(ok))
+        except OSError:
+            pass
+    return ok
+
+
+def start_tectonic_warmup(tectonic: Path) -> None:
+    import threading
+
+    threading.Thread(target=warm_tectonic_cache, args=(tectonic,), daemon=True, name="tectonic-warmup").start()
+
+
 def ensure_tinytex(progress: Progress) -> Path:
     existing = tex_bin_dir()
     if existing:
@@ -428,6 +481,7 @@ def load_or_ensure(bundle: Path, progress: Progress) -> dict[str, str]:
     tectonic = ensure_tectonic(progress)  # optional; put on PATH so the LaTeX service can find it
     if tectonic:
         prepend_path(tectonic.parent)
+        start_tectonic_warmup(tectonic)
     if marker_path().exists() and tex_bin_dir():
         progress("Using tools installed on the first launch.")
         tex = tex_bin_dir()

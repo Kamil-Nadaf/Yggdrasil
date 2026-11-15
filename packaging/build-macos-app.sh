@@ -153,6 +153,12 @@ echo "→ Installing Python dependencies..."
 # Sanity: the bundled interpreter runs and has its dependencies.
 "${PYDIR}/bin/python3" -c "import platform, fastapi, uvicorn, webview; print('→ bundled Python OK:', platform.machine())"
 
+# ── Prune dead weight from the bundled Python (not used at runtime) ─────────
+SP="${PYDIR}/lib/python3.12/site-packages"
+rm -rf "${SP}/PyObjCTest" "${SP}/pip" "${SP}"/pip-*.dist-info \
+       "${SP}/setuptools" "${SP}"/setuptools-*.dist-info "${SP}/pkg_resources" "${SP}/_distutils_hack"
+"${PYDIR}/bin/python3" -c "import fastapi, uvicorn, webview, lancedb; print('→ prune OK')"
+
 # ── Ad-hoc sign ─────────────────────────────────────────────────────────────
 if command -v codesign >/dev/null 2>&1; then
   echo "→ Ad-hoc signing..."

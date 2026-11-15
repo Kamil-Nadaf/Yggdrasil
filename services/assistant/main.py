@@ -78,8 +78,6 @@ from typing import Optional, Any
 
 import frontmatter
 import httpx
-import lancedb
-import pyarrow as pa
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -256,6 +254,8 @@ app.add_middleware(
 # ── LanceDB helpers ───────────────────────────────────────────────────────────
 
 def get_table():
+    import lancedb  # lazy: keeps lancedb/pyarrow/numpy (~270 MB) out of startup
+
     db = lancedb.connect(LANCEDB_PATH)
     try:
         return db.open_table("notes")

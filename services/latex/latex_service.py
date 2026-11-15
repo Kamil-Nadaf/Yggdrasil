@@ -156,16 +156,23 @@ def packages_from_log(log: str) -> list[str]:
     return list(dict.fromkeys(names))
 
 
+TLMGR_NOTES: list[str] = []  # tlmgr output of the current request, appended to the compile log on failure
+
+
 async def tlmgr_install(packages: list[str]) -> list[str]:
     tlmgr = shutil.which("tlmgr")
+    if not tlmgr:
+        TLMGR_NOTES.append("tlmgr not found on PATH; cannot install missing packages automatically")
     if not tlmgr or not packages:
         return []
     installed: list[str] = []
     for pkg in packages:
         proc = await asyncio.create_subprocess_exec(tlmgr, "install", pkg, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
         try:
-            _, _ = await asyncio.wait_for(proc.communicate(), timeout=180)
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=180)
+            TLMGR_NOTES.append(f"$ tlmgr install {pkg}  (exit {proc.returncode})\n" + out.decode(errors="replace")[-600:])
         except asyncio.TimeoutError:
+            TLMGR_NOTES.append(f"$ tlmgr install {pkg}  timed out after 180s")
             proc.kill()
             await proc.wait()
             continue
@@ -424,6 +431,7 @@ async def compile_latex(payload: CompileRequest):
         # TinyTeX is minimal. If a paper needs epsf.sty (or similar), install
         # the TeX Live package and retry instead of leaving a dead compile.
         attempted: set[str] = set()
+        TLMGR_NOTES.clear()
         for _ in range(3 if engine_used == "latexmk" else 0):
             missing = [p for p in with_companion_packages(packages_from_log(log)) if p not in attempted]
             if not missing:
@@ -439,6 +447,8 @@ async def compile_latex(payload: CompileRequest):
         pdf_path = source_path.with_suffix(".pdf")
         if returncode != 0 or not pdf_path.exists():
             errors = extract_errors(log) or ["Compilation failed — see log for details"]
+            if TLMGR_NOTES:
+                log += "\n\n--- automatic package install (tlmgr) ---\n" + "\n".join(TLMGR_NOTES)
             return JSONResponse(status_code=422, content={"log": log, "errors": errors, "engine": engine_used})
 
         pdf_b64 = base64.b64encode(pdf_path.read_bytes()).decode("ascii")

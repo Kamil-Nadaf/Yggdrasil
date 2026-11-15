@@ -54,6 +54,16 @@ class EngineSelectionTests(unittest.TestCase):
             self.assertTrue(ls.should_try_tectonic(r"\usepackage{biblatex}", "-pdf"))
 
 
+class CompanionPackageTests(unittest.TestCase):
+    def test_biblatex_pulls_in_biber(self):
+        self.assertEqual(ls.with_companion_packages(["biblatex"]), ["biblatex", "biber"])
+        self.assertEqual(ls.with_companion_packages(["biblatex", "biber"]), ["biblatex", "biber"])
+        self.assertEqual(ls.with_companion_packages(["tikz"]), ["tikz"])
+
+    def test_missing_biblatex_is_detected_from_log(self):
+        self.assertEqual(ls.packages_from_log("! LaTeX Error: File `biblatex.sty' not found."), ["biblatex"])
+
+
 class BackoffTests(unittest.TestCase):
     def tearDown(self):
         ls._tectonic_disabled_until = 0.0

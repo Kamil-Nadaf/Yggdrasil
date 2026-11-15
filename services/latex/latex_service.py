@@ -259,10 +259,19 @@ async def run_tectonic(build_dir: Path, source_name: str) -> tuple[int, str]:
     return proc.returncode or 0, out
 
 
-async def run_latexmk(build_dir: Path, source_name: str, engine_flag: str) -> tuple[int, str]:
+def with_companion_packages(missing: list[str]) -> list[str]:
+    """biblatex needs the biber program as well; install both in one go."""
+    out = list(missing)
+    if "biblatex" in out and "biber" not in out:
+        out.append("biber")
+    return out
+
+
+async def run_latexmk(build_dir: Path, source_name: str, engine_flag: str, force: bool = False) -> tuple[int, str]:
     proc = await asyncio.create_subprocess_exec(
         "latexmk",
         engine_flag,
+        *(["-g"] if force else []),  # -g: rerun even though latexmk remembers an earlier failure
         "-interaction=nonstopmode",
         "-shell-escape",  # minted / svg / pythontex / gnuplot call external programs
         f"-output-directory={build_dir}",
@@ -412,14 +421,14 @@ async def compile_latex(payload: CompileRequest):
         # the TeX Live package and retry instead of leaving a dead compile.
         attempted: set[str] = set()
         for _ in range(3 if engine_used == "latexmk" else 0):
-            missing = [p for p in packages_from_log(log) if p not in attempted]
+            missing = [p for p in with_companion_packages(packages_from_log(log)) if p not in attempted]
             if not missing:
                 break
             attempted.update(missing)
             installed = await tlmgr_install(missing)
             if not installed:
                 break
-            returncode, log = await run_latexmk(build_dir, source_path.name, engine_flag)
+            returncode, log = await run_latexmk(build_dir, source_path.name, engine_flag, force=True)
             if returncode == 0:
                 break
 

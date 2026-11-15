@@ -13,6 +13,7 @@ from pathlib import Path
 NODE_VERSION = "v22.22.2"
 FEYNMAN_PKG = "@advaitpaliwal/feynman@0.3.48"
 TINYTEX_INSTALL = "https://yihui.org/tinytex/install-bin-unix.sh"
+TECTONIC_RELEASES_API = "https://api.github.com/repos/tectonic-typesetting/tectonic/releases?per_page=30"
 
 Progress = Callable[[str], None]
 
@@ -118,6 +119,80 @@ def _run(cmd: list[str], progress: Progress, env: dict[str, str] | None = None) 
     if env:
         merged.update(env)
     subprocess.run(cmd, check=True, env=merged, capture_output=True, text=True)
+
+
+def _tectonic_triple() -> str | None:
+    system, machine = platform.system(), platform.machine().lower()
+    arm = machine in ("arm64", "aarch64")
+    if system == "Darwin":
+        return "aarch64-apple-darwin" if arm else "x86_64-apple-darwin"
+    if system == "Windows":
+        return "x86_64-pc-windows-msvc"
+    if system == "Linux":
+        return "aarch64-unknown-linux-musl" if arm else "x86_64-unknown-linux-musl"
+    return None
+
+
+def tectonic_bin() -> Path | None:
+    name = "tectonic.exe" if platform.system() == "Windows" else "tectonic"
+    local = runtime_dir() / "tectonic" / name
+    if local.exists():
+        return local
+    found = shutil.which("tectonic")
+    return Path(found) if found else None
+
+
+def ensure_tectonic(progress: Progress) -> Path | None:
+    """Fast, small LaTeX engine (one ~15 MB binary). Best effort: never raises."""
+    existing = tectonic_bin()
+    if existing:
+        return existing
+    triple = _tectonic_triple()
+    if not triple:
+        return None
+    try:
+        import json
+        import zipfile
+
+        progress("Installing the fast LaTeX engine (one-time, small download)…")
+        req = urllib.request.Request(TECTONIC_RELEASES_API, headers={"User-Agent": "Yggdrasil-desktop"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            releases = json.load(resp)
+        asset_url = asset_name = None
+        for rel in releases:
+            if rel.get("draft") or rel.get("prerelease") or not str(rel.get("tag_name", "")).startswith("tectonic@"):
+                continue
+            for asset in rel.get("assets", []):
+                name = asset.get("name", "")
+                if triple in name and name.endswith((".tar.gz", ".zip")):
+                    asset_url, asset_name = asset["browser_download_url"], name
+                    break
+            if asset_url:
+                break
+        if not asset_url:
+            raise RuntimeError("no release asset for " + triple)
+
+        exe_name = "tectonic.exe" if platform.system() == "Windows" else "tectonic"
+        dest_dir = runtime_dir() / "tectonic"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        archive = dest_dir / asset_name
+        _download(asset_url, archive, progress, "Tectonic")
+        target = dest_dir / exe_name
+        if asset_name.endswith(".zip"):
+            with zipfile.ZipFile(archive) as zf:
+                member = next(n for n in zf.namelist() if Path(n).name == exe_name)
+                target.write_bytes(zf.read(member))
+        else:
+            with tarfile.open(archive) as tf:
+                member = next(m for m in tf.getmembers() if m.isfile() and Path(m.name).name == exe_name)
+                target.write_bytes(tf.extractfile(member).read())
+        archive.unlink(missing_ok=True)
+        target.chmod(0o755)
+        subprocess.run([str(target), "--version"], check=True, capture_output=True, text=True, timeout=30)
+        return target
+    except Exception as exc:  # noqa: BLE001 - optional component; the TeX Live path still works
+        progress(f"Fast LaTeX engine unavailable ({str(exc)[:80]}). Using standard LaTeX.")
+        return None
 
 
 def ensure_tinytex(progress: Progress) -> Path:
@@ -350,6 +425,9 @@ def ensure_all(bundle: Path, progress: Progress) -> dict[str, str]:
 
 
 def load_or_ensure(bundle: Path, progress: Progress) -> dict[str, str]:
+    tectonic = ensure_tectonic(progress)  # optional; put on PATH so the LaTeX service can find it
+    if tectonic:
+        prepend_path(tectonic.parent)
     if marker_path().exists() and tex_bin_dir():
         progress("Using tools installed on the first launch.")
         tex = tex_bin_dir()

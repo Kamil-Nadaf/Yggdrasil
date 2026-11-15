@@ -179,6 +179,68 @@ async def tlmgr_install(packages: list[str]) -> list[str]:
     return installed
 
 
+# ── Fast engine: Tectonic (single binary, no TeX Live needed) ────────────────
+# Used first for ordinary documents; anything that needs a full TeX distribution
+# (biber, shell-escape tools, LuaTeX) or that Tectonic fails to build is retried
+# with latexmk exactly as before. YGG_LATEX_ENGINE = auto (default) | tectonic | latexmk.
+_FULL_TEX_PACKAGES = {
+    "minted", "pythontex", "gnuplottex", "svg", "luacode", "shellesc", "asymptote", "sagetex",
+}
+_WRITE18_RE = re.compile(r"\\(?:immediate\s*)?write18|\\directlua|\\luaexec")
+_USEPKG_RE = re.compile(r"\\(?:usepackage|RequirePackage)\s*(?:\[([^\]]*)\])?\s*\{([^}]*)\}")
+
+
+def needs_full_tex(source: str) -> bool:
+    """True when the document relies on tools Tectonic does not provide."""
+    if _WRITE18_RE.search(source):
+        return True
+    for m in _USEPKG_RE.finditer(source):
+        opts = m.group(1) or ""
+        pkgs = [p.strip() for p in m.group(2).split(",")]
+        if any(p in _FULL_TEX_PACKAGES for p in pkgs):
+            return True
+        if "biblatex" in pkgs and not re.search(r"backend\s*=\s*bibtex", opts):
+            return True  # biblatex defaults to biber, which Tectonic cannot run
+    return False
+
+
+def tectonic_binary() -> str | None:
+    return os.environ.get("YGG_TECTONIC") or shutil.which("tectonic")
+
+
+def should_try_tectonic(source: str, engine_flag: str) -> bool:
+    mode = os.environ.get("YGG_LATEX_ENGINE", "auto").lower()
+    if mode == "latexmk" or not tectonic_binary():
+        return False
+    if mode == "tectonic":
+        return True
+    return engine_flag in ("-pdf", "-pdfxe") and not needs_full_tex(source)
+
+
+async def run_tectonic(build_dir: Path, source_name: str) -> tuple[int, str]:
+    proc = await asyncio.create_subprocess_exec(
+        tectonic_binary(),
+        "-X", "compile", source_name,
+        "--outdir", str(build_dir),
+        "--keep-logs", "--keep-intermediates",
+        cwd=str(build_dir),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    try:
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=COMPILE_TIMEOUT)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        return 124, "Tectonic exceeded the time limit and was killed."
+    out = stdout.decode(errors="replace")
+    # --keep-logs writes a normal TeX log; prefer it so error parsing is unchanged.
+    log_file = (build_dir / source_name).with_suffix(".log")
+    if log_file.exists():
+        out = log_file.read_text(errors="replace") + "\n" + out
+    return proc.returncode or 0, out
+
+
 async def run_latexmk(build_dir: Path, source_name: str, engine_flag: str) -> tuple[int, str]:
     proc = await asyncio.create_subprocess_exec(
         "latexmk",
@@ -305,7 +367,20 @@ async def compile_latex(payload: CompileRequest):
                 continue
 
         engine_flag = latexmk_engine_flag(payload.source)
-        returncode, log = await run_latexmk(build_dir, source_path.name, engine_flag)
+        engine_used = "latexmk"
+        returncode: int | None = None
+        log = ""
+        if should_try_tectonic(payload.source, engine_flag):
+            t_code, t_log = await run_tectonic(build_dir, source_path.name)
+            if t_code == 0 and source_path.with_suffix(".pdf").exists():
+                returncode, log, engine_used = t_code, t_log, "tectonic"
+            else:
+                # Fall back to the full TeX toolchain (biber, extra packages, offline use).
+                for stale in build_dir.glob(f"{source_path.stem}.*"):
+                    if stale != source_path:
+                        stale.unlink(missing_ok=True)
+        if returncode is None:
+            returncode, log = await run_latexmk(build_dir, source_path.name, engine_flag)
         if returncode == 124:
             return JSONResponse(
                 status_code=422,
@@ -318,7 +393,7 @@ async def compile_latex(payload: CompileRequest):
         # TinyTeX is minimal. If a paper needs epsf.sty (or similar), install
         # the TeX Live package and retry instead of leaving a dead compile.
         attempted: set[str] = set()
-        for _ in range(3):
+        for _ in range(3 if engine_used == "latexmk" else 0):
             missing = [p for p in packages_from_log(log) if p not in attempted]
             if not missing:
                 break
@@ -336,7 +411,7 @@ async def compile_latex(payload: CompileRequest):
             return JSONResponse(status_code=422, content={"log": log, "errors": errors})
 
         pdf_b64 = base64.b64encode(pdf_path.read_bytes()).decode("ascii")
-        return {"pdf_b64": pdf_b64, "log": log, "errors": []}
+        return {"pdf_b64": pdf_b64, "log": log, "errors": [], "engine": engine_used}
     finally:
         shutil.rmtree(job, ignore_errors=True)
 

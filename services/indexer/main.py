@@ -2,11 +2,11 @@
 indexer/main.py
 
 Watches the vault for .md file changes, chunks the content,
-embeds via Ollama, and upserts into LanceDB.
+embeds via Ollama, and upserts into the local vecstore (SQLite + numpy).
 
-Vault is mounted READ-ONLY. LanceDB volume is read-write.
+Vault is mounted READ-ONLY. The index volume is read-write.
 
-Schema: { id: str, citekey: str, chunk: str, embedding: vector(768), note_path: str }
+Schema: { id: str, citekey: str, chunk: str, embedding: float32 vector, note_path: str } (see vecstore.py)
 """
 
 import os
@@ -16,8 +16,7 @@ import logging
 from pathlib import Path
 
 import httpx
-import lancedb
-import pyarrow as pa
+import vecstore
 import frontmatter
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileModifiedEvent, FileCreatedEvent
@@ -45,21 +44,12 @@ LANCEDB_PATH = "/data/lancedb"
 CHUNK_SIZE = 400   # tokens-ish (characters)
 CHUNK_OVERLAP = 80
 
-SCHEMA = pa.schema([
-    pa.field("id",        pa.utf8()),
-    pa.field("citekey",   pa.utf8()),
-    pa.field("chunk",     pa.utf8()),
-    pa.field("embedding", pa.list_(pa.float32(), 768)),
-    pa.field("note_path", pa.utf8()),
-])
-
-
 def get_or_create_table(db):
     try:
         return db.open_table("notes")
     except Exception:
-        log.info("Creating LanceDB table 'notes'")
-        return db.create_table("notes", schema=SCHEMA)
+        log.info("Creating table 'notes'")
+        return db.create_table("notes")
 
 
 def embed(text: str) -> list[float]:
@@ -291,7 +281,7 @@ def main():
     log.info(f"Indexer starting. Vault: {VAULT}")
     wait_for_ollama()
 
-    db = lancedb.connect(LANCEDB_PATH)
+    db = vecstore.connect(LANCEDB_PATH)
     table = get_or_create_table(db)
 
     initial_index(table)

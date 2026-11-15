@@ -32,24 +32,6 @@ ARXIV_RE = re.compile(
 GRB_RE = re.compile(r"\bGRB[\s-]?\d{6}[A-Z]?\b", re.IGNORECASE)
 WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]")
 
-EDGE_SCHEMA = None  # built lazily with pyarrow when opening the table
-
-
-def _edge_schema():
-    import pyarrow as pa
-
-    return pa.schema(
-        [
-            pa.field("id", pa.utf8()),
-            pa.field("source_note", pa.utf8()),
-            pa.field("target_note", pa.utf8()),
-            pa.field("type", pa.utf8()),
-            pa.field("reason_text", pa.utf8()),
-            pa.field("confidence_score", pa.float32()),
-            pa.field("created_at", pa.utf8()),
-        ]
-    )
-
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -210,13 +192,13 @@ def cosine(a: list[float], b: list[float]) -> float:
 
 
 def get_edges_table(db_path: str):
-    import lancedb
+    import vecstore
 
-    db = lancedb.connect(db_path)
+    db = vecstore.connect(db_path)
     try:
         return db.open_table("graph_edges")
     except Exception:
-        return db.create_table("graph_edges", schema=_edge_schema())
+        return db.create_table("graph_edges")
 
 
 def delete_auto_edges_for(table, citekey: str) -> None:

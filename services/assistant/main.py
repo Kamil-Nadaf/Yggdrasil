@@ -254,9 +254,9 @@ app.add_middleware(
 # ── LanceDB helpers ───────────────────────────────────────────────────────────
 
 def get_table():
-    import lancedb  # lazy: keeps lancedb/pyarrow/numpy (~270 MB) out of startup
+    import vecstore  # SQLite + numpy; replaces lancedb/pyarrow (~230 MB smaller)
 
-    db = lancedb.connect(LANCEDB_PATH)
+    db = vecstore.connect(LANCEDB_PATH)
     try:
         return db.open_table("notes")
     except Exception:
@@ -1455,10 +1455,10 @@ async def graph():
                         "confidence_score": 1.0,
                     })
 
-    # Persisted typed edges from LanceDB, kept only between note nodes
+    # Persisted typed edges from the local store, kept only between note nodes
     try:
         et = get_edges_table(LANCEDB_PATH)
-        rows = et.to_pandas().to_dict(orient="records") if et is not None else []
+        rows = et.to_list() if et is not None else []
     except Exception:
         rows = []
     for row in rows:
@@ -1497,7 +1497,7 @@ async def graph_neighbors(payload: GraphNeighborsPayload):
         return {"neighbors": [], "note": note}
     try:
         et = get_edges_table(LANCEDB_PATH)
-        rows = et.to_pandas().to_dict(orient="records")
+        rows = et.to_list()
     except Exception:
         rows = []
     # Also include live wikilink scan for the note if edges table is empty
@@ -1549,7 +1549,7 @@ async def graph_rebuild():
     try:
         et = get_edges_table(LANCEDB_PATH)
     except Exception as exc:
-        return {"ok": False, "message": f"LanceDB unavailable: {exc}", "count": 0}
+        return {"ok": False, "message": f"Local graph store unavailable: {exc}", "count": 0}
     count = 0
     citekeys = list(features.keys())
     for i, ck in enumerate(citekeys):
@@ -5533,16 +5533,15 @@ async def graph_suggested(limit_per_paper: int = 3):
     if table is None:
         return {"edges": [], "warning": "Index not ready yet"}
     try:
-        rows = table.to_pandas()
+        reps = table.first_rows("citekey")
     except Exception:
         return {"edges": [], "warning": "Index not ready yet"}
-    if rows.empty:
+    if not reps:
         return {"edges": []}
 
-    reps = rows.drop_duplicates(subset="citekey", keep="first")
     edges = []
     seen_pairs = set()
-    for _, row in reps.iterrows():
+    for row in reps:
         citekey = row["citekey"]
         try:
             neighbors = (

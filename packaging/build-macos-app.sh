@@ -108,6 +108,7 @@ cp "${ROOT}/services/assistant/gate.py"          "${APPDIR}/gate.py"
 cp "${ROOT}/services/assistant/zotero.py"        "${APPDIR}/zotero.py"
 cp "${ROOT}/services/assistant/data_manifest.py" "${APPDIR}/data_manifest.py"
 cp "${ROOT}/services/assistant/graph_links.py"   "${APPDIR}/graph_links.py"
+cp "${ROOT}/services/assistant/vecstore.py"      "${APPDIR}/vecstore.py"
 cp "${ROOT}/services/assistant/graph_keywords.py" "${APPDIR}/graph_keywords.py"
 cp "${ROOT}/services/assistant/reading.py" "${APPDIR}/reading.py"
 cp "${ROOT}/services/assistant/citations.py" "${APPDIR}/citations.py"
@@ -157,7 +158,8 @@ echo "→ Installing Python dependencies..."
 SP="${PYDIR}/lib/python3.12/site-packages"
 rm -rf "${SP}/PyObjCTest" "${SP}/pip" "${SP}"/pip-*.dist-info \
        "${SP}/setuptools" "${SP}"/setuptools-*.dist-info "${SP}/pkg_resources" "${SP}/_distutils_hack"
-"${PYDIR}/bin/python3" -c "import fastapi, uvicorn, webview, lancedb; print('→ prune OK')"
+"${PYDIR}/bin/python3" -c "import fastapi, uvicorn, webview, numpy, sqlite3; print('→ prune OK')"
+PYTHONPATH="${APPDIR}" "${PYDIR}/bin/python3" -c "import vecstore; print('→ vecstore OK')"
 
 # ── Ad-hoc sign ─────────────────────────────────────────────────────────────
 if command -v codesign >/dev/null 2>&1; then

@@ -20,7 +20,7 @@ export const THEMES: ThemeDef[] = [
 export const DEFAULT_THEME = "paper";
 export const BUILTIN_THEMES = new Set(["dark", "paper", "tactile", "observatory", "manuscript", "notebook"]);
 
-export type PageId = "scores" | "papers" | "books" | "editor" | "tasks" | "calendar" | "graph" | "ask" | "latex" | "projects" | "slides";
+export type PageId = "scores" | "papers" | "books" | "editor" | "tasks" | "calendar" | "graph" | "ask" | "latex" | "canvas" | "projects" | "slides";
 
 export const PAGE_LABELS: Record<PageId, string> = {
   scores: "Dashboard",
@@ -33,6 +33,7 @@ export const PAGE_LABELS: Record<PageId, string> = {
   graph: "Graph",
   ask: "Ask",
   latex: "LaTeX",
+  canvas: "Canvas",
   slides: "Slides",
 };
 

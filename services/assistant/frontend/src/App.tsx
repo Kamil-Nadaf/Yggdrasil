@@ -12,6 +12,7 @@ import GraphView from "./views/GraphView";
 import AskView from "./views/AskView";
 import ScoresView from "./views/ScoresView";
 import LaTeXEditor from "./views/LaTeXEditor";
+import CanvasView from "./views/CanvasView";
 import PapersView from "./views/PapersView";
 import BooksView from "./views/BooksView";
 import "./subnav-center.css";
@@ -25,14 +26,14 @@ import { applyTheme } from "./lib/theme";
 import { APP_WATERMARK } from "./lib/copyright";
 import { startSettingsSync } from "./lib/settingsSync";
 
-export type View = "editor" | "graph" | "ask" | "scores" | "latex" | "papers" | "books" | "tasks" | "projects" | "calendar" | "slides" | "settings";
+export type View = "editor" | "graph" | "ask" | "scores" | "latex" | "canvas" | "papers" | "books" | "tasks" | "projects" | "calendar" | "slides" | "settings";
 
 const SPLIT_KEY = "yggdrasil:split-view"; // older single-partner key, still read once
 const LAYOUT_KEY = "yggdrasil:split-layout";
 const PANES_KEY = "yggdrasil:split-panes";
 const SPLIT_RATIO_KEY = "yggdrasil:split-ratio";
 /** Every section a pane can show, Settings included, in the order new panes pick their defaults. */
-const ALL_VIEWS: View[] = ["editor", "scores", "tasks", "papers", "books", "latex", "calendar", "projects", "slides", "graph", "ask", "settings"];
+const ALL_VIEWS: View[] = ["editor", "scores", "tasks", "papers", "books", "latex", "canvas", "calendar", "projects", "slides", "graph", "ask", "settings"];
 const LAYOUT_IDS: SplitLayout[] = ["1x2", "2x1", "2x2", "1x3", "3x1", "2x3", "3x2", "1x4"];
 const paneCount = (l: SplitLayout) => { const [r, c] = layoutDims(l); return r * c; };
 
@@ -289,12 +290,13 @@ export default function App() {
             <LaTeXEditor />
           </>
         )}
+        {v === "canvas" && <CanvasView onOpenLatex={() => goView("latex")} />}
         {v === "papers" && <PapersView requestSection={papersSection} />}
         {v === "books" && <BooksView requestSection={colSection} />}
       </>
     );
   }
-  const flushView = (v: View) => v === "latex" || v === "ask" || v === "settings" || v === "slides";
+  const flushView = (v: View) => v === "latex" || v === "canvas" || v === "ask" || v === "settings" || v === "slides";
   const settingsPage = (i: number) => (
     <SettingsPage
       firstRun={firstRunData}

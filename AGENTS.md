@@ -53,6 +53,7 @@ A browser-based reading tool with **eight views**, navigated via a horizontal to
 | **Graph** | `graph` | D3 force-directed graph of [[wikilink]] connections between notes |
 | **Ask** | `ask` | Search own notes via `/locate` and `/ask`; optional `/examine` after CERIC complete |
 | **LaTeX** | `latex` | Overleaf-style LaTeX editor: write → live PDF preview → save to vault, 3-pane resizable (file tree / editor / preview) |
+| **Canvas** | `canvas` | Handwriting → LaTeX: pen/Pencil ink on a dotted page, lasso (or auto / whole page) → vision engine (LM Studio, Gemini, OpenRouter, any OpenAI-compatible endpoint, tried in order) → rendered + editable LaTeX → Save as `.tex` into the LaTeX files. Pages live in vault `90-Canvas/{name}.ink.json`; engine settings (incl. keys) stay in browser localStorage and are sent per request (`services/assistant/canvas.py`, `frontend/src/views/CanvasView.tsx`) |
 
 A gear icon in the top nav opens a **Settings drawer** (theme, editor prefs, data path,
 system info — see Settings section below).

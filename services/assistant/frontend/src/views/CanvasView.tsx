@@ -44,9 +44,17 @@ function renderMath(src: string): { html: string } | { error: string } {
 
 interface Props {
   onOpenLatex?: () => void;
+  /** Used inside the LaTeX / Slides dialogs: hides "Open LaTeX" and swaps the actions for an insert button. */
+  embedded?: boolean;
+  /** Called with display-ready LaTeX for one block, or all blocks joined. */
+  onInsert?: (latex: string, which: "block" | "all") => void;
+  insertLabel?: string;
+  insertAllLabel?: string;
+  onClose?: () => void;
+  title?: string;
 }
 
-export default function CanvasView({ onOpenLatex }: Props) {
+export default function CanvasView({ onOpenLatex, embedded, onInsert, insertLabel = "Insert", insertAllLabel = "Insert all", onClose, title }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [pageName, setPageName] = useState(() => localStorage.getItem(PAGE_KEY) || "untitled");
   const [pageList, setPageList] = useState<string[]>([]);
@@ -280,12 +288,21 @@ export default function CanvasView({ onOpenLatex }: Props) {
   };
 
   // ── pages ─────────────────────────────────────────────────────────────────
-  const newPage = () => {
-    const name = window.prompt("Name for the new page (letters, numbers, space . _ -)", "");
-    if (name === null) return;
-    const n = name.trim();
+  const [naming, setNaming] = useState(false);
+  const [newName, setNewName] = useState("");
+  const createPage = () => {
+    const n = newName.trim();
+    if (!n) { setNaming(false); return; }
     if (!PAGE_NAME_RE.test(n)) { setError("That name is not allowed. Use letters, numbers, spaces, . _ - (up to 80)."); return; }
+    setNaming(false);
+    setNewName("");
     void switchPage(n);
+  };
+
+  const insertCurrent = () => { if (current && onInsert) onInsert(asDisplayLatex(current.latex), "block"); };
+  const insertAll = () => {
+    const parts = blocks.map((b) => asDisplayLatex(b.latex)).filter(Boolean);
+    if (parts.length && onInsert) onInsert(parts.join("\n\n"), "all");
   };
 
   const pending = useMemo(() => {
@@ -307,18 +324,27 @@ export default function CanvasView({ onOpenLatex }: Props) {
   return (
     <div className="cv-shell">
       <div className="cv-bar">
+        {embedded && title && <div className="cv-embed-title">{title}</div>}
         <div className="cv-bar-title">
           <select className="cv-input cv-page-select" value={pageName} aria-label="Page" onChange={(e) => void switchPage(e.target.value)}>
             {[...new Set([pageName, ...pageList])].map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
-          <button type="button" className="btn cv-touch" onClick={newPage}>New page</button>
+          {naming ? (
+            <form className="cv-newpage" onSubmit={(e) => { e.preventDefault(); createPage(); }}>
+              <input className="cv-input" autoFocus value={newName} placeholder="Page name" aria-label="New page name" onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { setNaming(false); setNewName(""); } }} />
+              <button type="submit" className="btn btn-primary cv-touch">Create</button>
+              <button type="button" className="btn cv-touch" onClick={() => { setNaming(false); setNewName(""); }}>Cancel</button>
+            </form>
+          ) : (
+            <button type="button" className="btn cv-touch" onClick={() => setNaming(true)}>New page</button>
+          )}
           <span className={`cv-save cv-save-${saveState}`} role="status">
             {saveState === "saving" ? "Saving…" : saveState === "error" ? "Not saved. Retrying on the next change" : "Saved"}
           </span>
         </div>
         <div className="cv-seg" role="group" aria-label="Convert mode">
           {(["lasso", "auto", "page"] as Mode[]).map((m) => (
-            <button key={m} type="button" className={`cv-seg-btn${mode === m ? " active" : ""}`} aria-pressed={mode === m} onClick={() => setMode(m)}>
+            <button key={m} type="button" title={MODE_HINT[m]} className={`cv-seg-btn${mode === m ? " active" : ""}`} aria-pressed={mode === m} onClick={() => setMode(m)}>
               {m === "lasso" ? "Lasso" : m === "auto" ? "Auto" : "Whole page"}
             </button>
           ))}
@@ -326,6 +352,7 @@ export default function CanvasView({ onOpenLatex }: Props) {
         <button type="button" className="btn cv-touch" onClick={() => setShowEngines(true)}>
           Engines · {enabledCount} on
         </button>
+        {onClose && <button type="button" className="btn cv-touch" onClick={onClose} aria-label="Close">Close</button>}
       </div>
 
       <div className="cv-body">
@@ -378,7 +405,6 @@ export default function CanvasView({ onOpenLatex }: Props) {
             )}
           </div>
           <div className="cv-status">
-            <span className="cv-chip">{MODE_HINT[mode]}</span>
             <label className="cv-chip cv-chip-check">
               <input type="checkbox" checked={fingerDraws} onChange={(e) => setFinger(e.target.checked)} />
               Finger draws (no Pencil)
@@ -435,15 +461,17 @@ export default function CanvasView({ onOpenLatex }: Props) {
                 <textarea className="cv-source" value={current.latex} onChange={(e) => editBlock(e.target.value)} spellCheck={false} autoCapitalize="off" rows={8} />
               </label>
               <div className="cv-actions">
-                <button type="button" className="btn btn-primary cv-touch" onClick={saveTex}>Save .tex</button>
+                {onInsert && <button type="button" className="btn btn-primary cv-touch" onClick={insertCurrent}>{insertLabel}</button>}
+                {onInsert && blocks.length > 1 && <button type="button" className="btn cv-touch" onClick={insertAll}>{insertAllLabel}</button>}
+                {!embedded && <button type="button" className={`btn cv-touch${onInsert ? "" : " btn-primary"}`} onClick={saveTex}>Save .tex</button>}
                 <button type="button" className="btn cv-touch" onClick={copyTex}>Copy</button>
-                {onOpenLatex && <button type="button" className="btn cv-touch" onClick={onOpenLatex}>Open LaTeX</button>}
+                {!embedded && onOpenLatex && <button type="button" className="btn cv-touch" onClick={onOpenLatex}>Open LaTeX</button>}
                 <button type="button" className="btn cv-touch" onClick={() => removeBlock(current.id)}>Discard</button>
               </div>
             </>
           ) : (
             <div className="cv-empty">
-              Write on the page, select it with the lasso and convert it. The result appears here as rendered maths and editable LaTeX.
+              {MODE_HINT[mode]} The result appears here as rendered maths and editable LaTeX.
             </div>
           )}
         </aside>

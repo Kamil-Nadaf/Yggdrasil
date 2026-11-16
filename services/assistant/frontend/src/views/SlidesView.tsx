@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { ProjectStats } from "../api/client";
+import InkDialog from "./canvas/InkDialog";
 import "./slides.css";
 
 type Deck = { name: string; size: number; updated_at: string };
@@ -46,6 +47,20 @@ export default function SlidesView({ lockedProject }: { lockedProject?: string }
   const [naming, setNaming] = useState(false);
   const [newName, setNewName] = useState("");
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
+  const [inkOpen, setInkOpen] = useState(false);
+  const [inkMsg, setInkMsg] = useState("");
+  // The slide editor is a separate module, so the converted LaTeX goes to the clipboard for its Formula dialog.
+  const copyInk = async (latex: string) => {
+    const plain = latex.trim().replace(/^\\\[\s*|\s*\\\]$/g, "").trim();
+    setInkOpen(false);
+    try {
+      await navigator.clipboard.writeText(plain);
+      setInkMsg("Copied. In the editor choose Insert → Formula (Σ) and paste.");
+    } catch {
+      setInkMsg("Copy was blocked by the browser. Reopen Draw and use Copy on the source box.");
+    }
+    window.setTimeout(() => setInkMsg(""), 9000);
+  };
   const phone = isPhone();
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const sendTheme = useCallback(() => {
@@ -176,9 +191,14 @@ export default function SlidesView({ lockedProject }: { lockedProject?: string }
           {phone && <span className="sl-hint">View only on phone</span>}
           {!phone && <button className="btn" onClick={() => pickFile("append")} title="Add slides from a .pptx (PowerPoint / Google Slides download), .pptist or .json file">Import slides…</button>}
           {importInput}
+          {!phone && <button className="btn" onClick={() => setInkOpen(true)} title="Write a formula by hand, convert it to LaTeX, then paste it into the Formula dialog">✎ Draw formula</button>}
+          {inkMsg && <span className="sl-hint" role="status">{inkMsg}</span>}
           <button className="btn sl-fs" onClick={() => setFull((v) => !v)} title={full ? "Exit full window (Esc)" : "Full window"}>{full ? "Exit full window" : "Full window"}</button>
         </div>
         <iframe ref={frameRef} key={src} className="sl-frame" src={src} title={`Deck ${open}`} allow="fullscreen" onLoad={sendTheme} />
+        {inkOpen && (
+          <InkDialog title="Draw a formula" insertLabel="Copy LaTeX" insertAllLabel="Copy all blocks" onInsert={(latex) => void copyInk(latex)} onClose={() => setInkOpen(false)} />
+        )}
       </div>
     );
   }

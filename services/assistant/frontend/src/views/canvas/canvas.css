@@ -113,7 +113,7 @@
   cursor: crosshair;
 }
 
-.cv-float { position: absolute; left: 16px; right: 16px; bottom: 56px; display: flex; pointer-events: none; }
+.cv-float { position: absolute; left: 16px; right: 16px; top: 12px; display: flex; justify-content: center; pointer-events: none; }
 .cv-selbar {
   pointer-events: auto;
   display: flex;
@@ -145,6 +145,8 @@
 .cv-chip-check { cursor: pointer; }
 .cv-chip-check input { width: 18px; height: 18px; accent-color: var(--page-accent); }
 .cv-zoom { margin-left: auto; gap: 4px; }
+.cv-newpage { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.cv-embed-title { font-family: var(--font-title); font-size: 16px; font-weight: 600; }
 .cv-zoom button { width: 32px; height: 32px; border: 0; background: transparent; color: var(--text); font-size: 18px; cursor: pointer; border-radius: 16px; }
 
 /* result panel */
@@ -231,7 +233,12 @@
   .cv-body { flex-wrap: wrap; overflow-y: auto; align-content: flex-start; }
   .cv-rail { width: 100%; flex-direction: row; justify-content: flex-start; padding: 8px 12px; border-right: 0; border-bottom: 1px solid var(--border); overflow-x: auto; overflow-y: hidden; }
   .cv-rail-sep { width: 1px; height: 36px; margin: 0 6px; }
-  .cv-page { flex: 1 1 100%; height: 62vh; min-height: 360px; }
+  .cv-page { flex: 1 1 100%; height: calc(62vh / var(--zt, 1)); min-height: 360px; }
   .cv-result { width: 100%; border-left: 0; border-top: 1px solid var(--border); overflow-y: visible; }
   .cv-engine-fields { grid-template-columns: 1fr; }
 }
+
+/* embedded in the LaTeX / Slides dialogs */
+.cv-dialog-backdrop { position: fixed; inset: 0; z-index: 6500; background: rgba(0, 0, 0, 0.6); display: flex; align-items: stretch; justify-content: center; padding: 12px; box-sizing: border-box; }
+.cv-dialog { flex: 1; min-width: 0; max-width: 1500px; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg); }
+.cv-dialog .cv-shell { height: 100%; }

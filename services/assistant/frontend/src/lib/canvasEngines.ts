@@ -26,7 +26,7 @@ export const PRESETS: Record<EnginePreset, { label: string; base_url: string; mo
   gemini: {
     label: "Gemini",
     base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
-    model: "gemini-2.5-flash",
+    model: "gemini-flash-latest",
     needsKey: true,
     note: "Free-tier API key. The cropped image is sent to Google.",
   },

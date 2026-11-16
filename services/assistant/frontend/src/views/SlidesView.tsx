@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { ProjectStats } from "../api/client";
-import InkBox from "./canvas/InkBox";
+import SlideInk, { type PlaceRect } from "./canvas/InkBox";
 import "./slides.css";
 
 type Deck = { name: string; size: number; updated_at: string };
@@ -49,10 +49,9 @@ export default function SlidesView({ lockedProject }: { lockedProject?: string }
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
   const [inkOpen, setInkOpen] = useState(false);
   const [inkMsg, setInkMsg] = useState("");
-  // Rendered handwriting goes to the slide editor, which places it on the current slide.
-  const placeInk = (kind: "formula" | "text", value: string) => {
-    if (!value.trim()) { setInkMsg("Nothing was recognised."); return; }
-    try { frameRef.current?.contentWindow?.postMessage({ source: "yggdrasil-host", type: "place", kind, latex: value, text: value }, "*"); } catch { /* ignore */ }
+  // Handwriting written on the slide is recognised here and placed by the editor where it was written.
+  const placeInk = (kind: "formula" | "text", value: string, rect: PlaceRect) => {
+    try { frameRef.current?.contentWindow?.postMessage({ source: "yggdrasil-host", type: "place", kind, latex: value, text: value, rect }, "*"); } catch { /* ignore */ }
   };
   const phone = isPhone();
   const frameRef = useRef<HTMLIFrameElement | null>(null);
@@ -184,12 +183,14 @@ export default function SlidesView({ lockedProject }: { lockedProject?: string }
           {phone && <span className="sl-hint">View only on phone</span>}
           {!phone && <button className="btn" onClick={() => pickFile("append")} title="Add slides from a .pptx (PowerPoint / Google Slides download), .pptist or .json file">Import slides…</button>}
           {importInput}
-          {!phone && <button className="btn" onClick={() => setInkOpen((v) => !v)} aria-pressed={inkOpen} title="Add an ink box: write by hand, press Render, and it is placed on the slide">✎ Ink box</button>}
+          {!phone && <button className="btn" onClick={() => setInkOpen((v) => !v)} aria-pressed={inkOpen} title="Write by hand straight onto the slide. It is converted and placed where you wrote it">✎ Write on slide</button>}
           {inkMsg && <span className="sl-hint" role="status">{inkMsg}</span>}
           <button className="btn sl-fs" onClick={() => setFull((v) => !v)} title={full ? "Exit full window (Esc)" : "Full window"}>{full ? "Exit full window" : "Full window"}</button>
         </div>
-        <iframe ref={frameRef} key={src} className="sl-frame" src={src} title={`Deck ${open}`} allow="fullscreen" onLoad={sendTheme} />
-        {inkOpen && <InkBox onPlace={placeInk} onClose={() => setInkOpen(false)} />}
+        <div className="sl-stage">
+          <iframe ref={frameRef} key={src} className="sl-frame" src={src} title={`Deck ${open}`} allow="fullscreen" onLoad={sendTheme} />
+          {inkOpen && <SlideInk onPlace={placeInk} onClose={() => setInkOpen(false)} />}
+        </div>
       </div>
     );
   }

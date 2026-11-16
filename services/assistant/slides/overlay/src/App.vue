@@ -19,7 +19,6 @@ import { isPC } from '@/utils/common'
 import api from '@/services'
 import { loadDeck, saveDeck, tell, hasDeck, viewOnly, autoPresent } from '@/yggdrasil/bridge'
 import useImport from '@/hooks/useImport'
-import useCreateElement from '@/hooks/useCreateElement'
 import { hfmath } from '@/components/LaTeXEditor/hfmath'
 
 import Editor from './views/Editor/index.vue'
@@ -29,7 +28,6 @@ import FullscreenSpin from '@/components/FullscreenSpin.vue'
 
 const _isPC = isPC()
 const { importPPTXFile, importSpecificFile, importJSON } = useImport()
-const { createLatexElement, createTextElement } = useCreateElement()
 
 
 const mainStore = useMainStore()
@@ -92,21 +90,50 @@ onMounted(async () => {
     else if (name.endsWith('.json')) importJSON([file], cover)
   })
 
-  // Handwriting rendered by the host's ink box: drop it on the current slide as a formula or a text box.
+  // Handwriting written on the slide by the host: recognised there, placed here where it was written.
+  // d.rect is the written area in this frame's client pixels; it is mapped through the slide's on-screen box.
   window.addEventListener('message', (e: MessageEvent) => {
     const d = e.data
     if (!d || d.source !== 'yggdrasil-host' || d.type !== 'place') return
     try {
+      const vp = document.querySelector('.viewport') as HTMLElement | null
+      const r = vp?.getBoundingClientRect()
+      const k = r && viewportSize.value ? r.width / viewportSize.value : 0
+      const rect = d.rect && k ? {
+        left: (d.rect.x - r!.left) / k,
+        top: (d.rect.y - r!.top) / k,
+        width: d.rect.w / k,
+        height: d.rect.h / k,
+      } : null
+      const id = nanoid(10)
       if (d.kind === 'formula' && typeof d.latex === 'string' && d.latex.trim()) {
         const eq = new hfmath(d.latex)
         const box = eq.box({})
-        createLatexElement({ latex: d.latex, path: eq.pathd({}), w: box.w + 32, h: box.h + 32 })
+        const w = box.w + 32, h = box.h + 32
+        let f = 1
+        if (rect) f = Math.min(3, Math.max(0.3, rect.width / w))
+        const left = rect ? rect.left : (viewportSize.value - w) / 2
+        const top = rect ? rect.top : (viewportSize.value * viewportRatio.value - h) / 2
+        slidesStore.addElement({
+          type: 'latex', id, width: w * f, height: h * f, rotate: 0, left, top,
+          path: eq.pathd({}), latex: d.latex, color: theme.value.fontColor, strokeWidth: 2,
+          viewBox: [w, h], fixedRatio: true,
+        } as any)
       }
       else if (d.kind === 'text' && typeof d.text === 'string' && d.text.trim()) {
         const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        const html = d.text.split('\n').map((l: string) => `<p>${esc(l)}</p>`).join('')
-        createTextElement({ left: 120, top: 120, width: 560, height: 60 + 30 * d.text.split('\n').length }, { content: html })
+        const lines: string[] = d.text.split('\n')
+        const html = lines.map((l) => `<p>${esc(l)}</p>`).join('')
+        slidesStore.addElement({
+          type: 'text', id, rotate: 0,
+          left: rect ? rect.left : 120, top: rect ? rect.top : 120,
+          width: rect ? Math.max(rect.width + 40, 240) : 560,
+          height: rect ? Math.max(rect.height, 40 * lines.length) : 40 * lines.length + 20,
+          content: html, defaultFontName: theme.value.fontName, defaultColor: theme.value.fontColor,
+        } as any)
       }
+      else return
+      mainStore.setActiveElementIdList([id])
       tell('placed', { kind: d.kind })
     }
     catch (err) { tell('error', { message: String(err) }) }

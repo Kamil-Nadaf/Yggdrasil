@@ -13,3 +13,5 @@
 .sl-new input { min-width: 200px; }
 .sl-fs { margin-left: auto; }
 .sl-wrap.sl-full { position: fixed; inset: 0; z-index: 3000; height: calc(100vh / var(--zt, 1)); background: var(--bg); padding: 8px; box-sizing: border-box; }
+
+.sl-stage { position: relative; flex: 1; min-height: 0; display: flex; min-width: 0; }

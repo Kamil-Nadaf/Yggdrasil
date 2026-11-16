@@ -748,7 +748,7 @@ export default function ArxivSearch() {
   ];
 
   return (
-    <div className="arxiv-view" style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 48px)" }}>
+    <div className="arxiv-view" style={{ display: "flex", flexDirection: "column", height: "calc((100vh - 48px) / var(--zt, 1))" }}>
       <div className="arxiv-viewbar">
         {viewMode === "pages" && (
           <div className="arxiv-pagetabs" role="tablist" aria-label="Sections">

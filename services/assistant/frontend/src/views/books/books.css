@@ -143,8 +143,8 @@
 .bk-cover { container-type: inline-size; }
 
 /* ── Apple Books layout ─────────────────────────────────────────────────── */
-.books-view.ab-shell { display: grid; grid-template-columns: 236px minmax(0, 1fr); height: auto; min-height: calc(100vh - 100px); }
-.ab-side { position: sticky; top: 0; align-self: start; max-height: calc(100vh - 80px); overflow: auto; padding: 4px 12px 24px 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
+.books-view.ab-shell { display: grid; grid-template-columns: 236px minmax(0, 1fr); height: auto; min-height: calc((100vh - 100px) / var(--zt, 1)); }
+.ab-side { position: sticky; top: 0; align-self: start; max-height: calc((100vh - 80px) / var(--zt, 1)); overflow: auto; padding: 4px 12px 24px 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
 .ab-search { display: flex; align-items: center; gap: 8px; padding: 6px 10px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--muted); }
 .ab-search input { border: 0; background: none; outline: none; flex: 1; min-width: 0; color: var(--text); font: inherit; padding: 0; box-shadow: none; }
 .ab-nav { display: flex; flex-direction: column; gap: 1px; }
@@ -250,7 +250,7 @@
 
 /* Collection: item info pane, add-reference dialog */
 .books-view.ab-shell.has-info { grid-template-columns: 220px minmax(0, 1fr) 360px; column-gap: 20px; }
-.ii-pane { position: sticky; top: 0; align-self: start; max-height: calc(100vh - 72px); overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.ii-pane { position: sticky; top: 0; align-self: start; max-height: calc((100vh - 72px) / var(--zt, 1)); overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
 .ii-head { display: flex; align-items: center; gap: 8px; }
 .ii-star { background: none; border: 0; font-size: 20px; cursor: pointer; color: var(--muted); line-height: 1; }
 .ii-star.on { color: #f5b301; }

@@ -1067,8 +1067,11 @@ h2 { font-size: 15px; color: var(--accent); }
 .latex-toolbar-right {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
-  flex-shrink: 0;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .latex-menubar-wrap .btn:disabled {
@@ -1600,8 +1603,8 @@ h2 { font-size: 15px; color: var(--accent); }
   position: fixed;
   inset: 0;
   z-index: 7000;
-  width: 100vw;
-  height: 100vh;
+  width: calc(100vw / var(--zt, 1));
+  height: calc(100vh / var(--zt, 1));
   background: var(--bg);
 }
 
@@ -2368,7 +2371,7 @@ h2 { font-size: 15px; color: var(--accent); }
 }
 
 .arxiv-panel-group {
-  height: calc(100vh - 48px);
+  height: calc((100vh - 48px) / var(--zt, 1));
   min-height: 0;
 }
 
@@ -3061,7 +3064,7 @@ h2 { font-size: 15px; color: var(--accent); }
 /* ── Graph canvas ─────────────────────────────────────────────────────────── */
 .graph-container {
   width: 100%;
-  height: calc(100vh - 80px);
+  height: calc((100vh - 80px) / var(--zt, 1));
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -4117,7 +4120,7 @@ h2 { font-size: 15px; color: var(--accent); }
 .notes-embedded-shell {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 170px);
+  height: calc((100vh - 170px) / var(--zt, 1));
   border: 1px solid var(--border);
   background: var(--surface);
 }
@@ -4282,7 +4285,7 @@ h2 { font-size: 15px; color: var(--accent); }
   display: flex;
   flex-direction: column;
   min-height: 0;
-  height: calc(100vh - 100px);
+  height: calc((100vh - 100px) / var(--zt, 1));
 }
 
 .books-tab {
@@ -4782,7 +4785,7 @@ h2 { font-size: 15px; color: var(--accent); }
 :root[data-theme="notebook"] .nav-tabs { min-width: 0; flex: 1 1 auto; overflow-x: auto; }
 
 /* Text size (Settings → Appearance): body text scales the content area, titles scale on top. */
-.app-content { zoom: var(--text-scale, 1); }
+.app-content { zoom: var(--text-scale, 1); --zt: var(--text-scale, 1); }
 .app-content h1, .app-content h2, .app-content h3 { zoom: var(--title-scale, 1); }
 
 /* ── Dashboard grid + layout editor ───────────────────────────────────────── */
@@ -4890,7 +4893,7 @@ h2 { font-size: 15px; color: var(--accent); }
 .browser-category select { max-width: 320px; }
 
 /* ── Papers: sub-tabs + resizable PDF reader ──────────────────────────────── */
-.papers-view { height: calc(100vh - 100px); display: flex; flex-direction: column; min-height: 0; }
+.papers-view { height: calc((100vh - 100px) / var(--zt, 1)); display: flex; flex-direction: column; min-height: 0; }
 .papers-body { flex: 1; min-height: 0; }
 .papers-split { height: 100%; }
 .papers-main { height: 100%; overflow: auto; min-width: 0; }

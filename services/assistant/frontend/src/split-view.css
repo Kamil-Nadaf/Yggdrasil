@@ -22,7 +22,7 @@
 .split-pane .books-view.ab-shell { min-height: 0; }
 
 /* Scale page content to the pane width (set per pane from App) */
-.split-pane > .app-content { zoom: calc(var(--text-scale, 1) * var(--split-zoom, 0.8)); }
+.split-pane > .app-content { zoom: calc(var(--text-scale, 1) * var(--split-zoom, 0.8)); --zt: calc(var(--text-scale, 1) * var(--split-zoom, 0.8)); }
 .split-pane > .app-content h1, .split-pane > .app-content h2, .split-pane > .app-content h3 { zoom: var(--title-scale, 1); }
 
 /* Window-height sizing → pane sizing (zoom + vh don't mix) */

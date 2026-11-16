@@ -18,8 +18,8 @@
 .pj-tabs em { font-style: normal; opacity: .6; margin-left: 5px; font-size: 11px; }
 .pj-sub { margin-bottom: 10px; }
 .pj-body { min-height: 0; }
-.pj-notes { height: calc(100vh - 230px); min-height: 420px; }
-.pj-reader { height: calc(100vh - 230px); min-height: 420px; overflow: auto; }
+.pj-notes { height: calc((100vh - 230px) / var(--zt, 1)); min-height: 420px; }
+.pj-reader { height: calc((100vh - 230px) / var(--zt, 1)); min-height: 420px; overflow: auto; }
 .pj-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; margin-bottom: 16px; }
 .pj-stats > div, .pj-stats > button { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; color: var(--text); font: inherit; text-align: left; }
 .pj-stats > button { cursor: pointer; }
@@ -38,9 +38,9 @@
 .pj-star.on { color: #e0b030; }
 .pj-bar-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
 .pj-add { border: 1px dashed var(--border); border-radius: 8px; padding: 10px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 6px; max-height: 340px; overflow: auto; }
-@media (max-width: 700px) { .pj-bar-lg { width: 90px; } .pj-notes, .pj-reader { height: calc(100vh - 260px); } }
-.pj-slides { height: calc(100vh - 200px); min-height: 420px; margin-right: calc(-1 * var(--page-gutter, 0px)); }
-@media (max-width: 700px) { .pj-slides { height: calc(100vh - 240px); margin-right: 0; } }
+@media (max-width: 700px) { .pj-bar-lg { width: 90px; } .pj-notes, .pj-reader { height: calc((100vh - 260px) / var(--zt, 1)); } }
+.pj-slides { height: calc((100vh - 200px) / var(--zt, 1)); min-height: 420px; margin-right: calc(-1 * var(--page-gutter, 0px)); }
+@media (max-width: 700px) { .pj-slides { height: calc((100vh - 240px) / var(--zt, 1)); margin-right: 0; } }
 
 .pj-sort { display: flex; align-items: center; gap: 6px; font-size: 12px; }
 .pj-sort select { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 3px 6px; font: inherit; }

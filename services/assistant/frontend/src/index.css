@@ -914,15 +914,16 @@ h2 { font-size: 15px; color: var(--accent); }
   justify-content: space-between;
   gap: 12px;
   flex-shrink: 0;
-  height: 40px;
-  padding: 0 10px 0 4px;
+  min-height: 40px;
+  padding: 4px 10px 4px 4px;
   margin: 0;
   border: none;
   border-bottom: 1px solid var(--border);
   border-radius: 0;
   background: var(--surface);
   z-index: 40;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
+  row-gap: 4px;
 }
 
 .latex-menubar-wrap .btn {
@@ -934,8 +935,10 @@ h2 { font-size: 15px; color: var(--accent); }
 .latex-menubar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0;
   flex-shrink: 0;
+  max-width: 100%;
 }
 
 .latex-menu {

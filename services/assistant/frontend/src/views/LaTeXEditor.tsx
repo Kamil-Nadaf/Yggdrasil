@@ -630,12 +630,19 @@ export default function LaTeXEditor() {
     const text = `\n${latex.trim()}\n`;
     const doc = view.state.doc.toString();
     let note = "Inserted handwriting";
-    const changes: { from: number; to?: number; insert: string }[] = [{ from: sel.from, to: sel.to, insert: text }];
+    // A cursor in the preamble (or at the very top) would put the equation before \begin{document}: place it just inside the body instead.
+    const bodyAt = doc.indexOf("\\begin{document}");
+    const bodyEnd = bodyAt >= 0 ? bodyAt + "\\begin{document}".length : -1;
+    const inPreamble = bodyEnd >= 0 && sel.from < bodyEnd;
+    const changes: { from: number; to?: number; insert: string }[] = inPreamble
+      ? [{ from: bodyEnd, insert: `\n${text}` }]
+      : [{ from: sel.from, to: sel.to, insert: text }];
+    if (inPreamble) note += " at the start of the document";
     if (/\\begin\{align\*?\}/.test(latex) && !/\\usepackage(\[[^\]]*\])?\{[^}]*amsmath/.test(doc)) {
       const at = doc.indexOf("\\begin{document}");
       if (at >= 0) { changes.push({ from: at, insert: "\\usepackage{amsmath}\n" }); note += "; added \\usepackage{amsmath}"; }
     }
-    view.dispatch({ changes, selection: { anchor: sel.from + text.length } });
+    view.dispatch({ changes, selection: { anchor: (inPreamble ? bodyEnd + 1 : sel.from) + text.length } });
     view.focus();
     setDirty(true);
     setSaveMsg({ text: note, ok: true });

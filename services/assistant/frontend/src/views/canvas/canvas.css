@@ -1,6 +1,7 @@
 /* Canvas view: handwriting to LaTeX. Colours come from the app theme variables. */
 
 .cv-shell {
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -229,7 +230,7 @@
 .cv-switch input:focus-visible + span { outline: 2px solid var(--text); outline-offset: 2px; }
 
 /* narrow screens (iPad portrait): rail on top, result below */
-@media (max-width: 960px) {
+@container (max-width: 960px) {
   .cv-body { flex-wrap: wrap; overflow-y: auto; align-content: flex-start; }
   .cv-rail { width: 100%; flex-direction: row; justify-content: flex-start; padding: 8px 12px; border-right: 0; border-bottom: 1px solid var(--border); overflow-x: auto; overflow-y: hidden; }
   .cv-rail-sep { width: 1px; height: 36px; margin: 0 6px; }

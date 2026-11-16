@@ -113,7 +113,7 @@ jobs:
             cp -R release/Yggdrasil-windows "$RUNNER_TEMP/moved"
             PY="$RUNNER_TEMP/moved/python/python.exe"
           fi
-          "$PY" -c "import fastapi, uvicorn, lancedb, pyarrow; print('relocated bundle OK')"
+          "$PY" -c "import fastapi, uvicorn, numpy, sqlite3; print('relocated bundle OK')"
 
       - uses: actions/upload-artifact@v4
         with:

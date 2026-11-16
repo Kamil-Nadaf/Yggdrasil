@@ -56,6 +56,7 @@ export default function SlidesView({ lockedProject }: { lockedProject?: string }
   const phone = isPhone();
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const [inkSlot, setInkSlot] = useState<HTMLElement | null>(null);
   const sendTheme = useCallback(() => {
     try { frameRef.current?.contentWindow?.postMessage({ source: "yggdrasil-host", type: "theme", vars: themeVars() }, "*"); } catch { /* ignore */ }
   }, []);
@@ -185,12 +186,13 @@ export default function SlidesView({ lockedProject }: { lockedProject?: string }
           {!phone && <button className="btn" onClick={() => pickFile("append")} title="Add slides from a .pptx (PowerPoint / Google Slides download), .pptist or .json file">Import slides…</button>}
           {importInput}
           {!phone && <button className="btn" onClick={() => setInkOpen((v) => !v)} aria-pressed={inkOpen} title="Write by hand straight onto the slide. It is converted and placed where you wrote it">✎ Write on slide</button>}
+          <span ref={setInkSlot} className="sl-ink-slot" />
           {inkMsg && <span className="sl-hint" role="status">{inkMsg}</span>}
           <button className="btn sl-fs" onClick={() => setFull((v) => !v)} title={full ? "Exit full window (Esc)" : "Full window"}>{full ? "Exit full window" : "Full window"}</button>
         </div>
         <div className="sl-stage" ref={stageRef}>
           <iframe ref={frameRef} key={src} className="sl-frame" src={src} title={`Deck ${open}`} allow="fullscreen" onLoad={sendTheme} />
-          {inkOpen && <SlideInk onPlace={placeInk} onClose={() => setInkOpen(false)} />}
+          {inkOpen && <SlideInk slot={inkSlot} onPlace={placeInk} onClose={() => setInkOpen(false)} />}
         </div>
       </div>
     );

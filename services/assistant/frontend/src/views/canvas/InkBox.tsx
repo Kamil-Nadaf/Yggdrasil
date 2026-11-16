@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { canvasApi } from "../../api/canvas";
 import { activeEnginePayload, loadEngines } from "../../lib/canvasEngines";
 import { boundsOf, drawStroke, renderCrop, type Stroke } from "./ink";
@@ -12,6 +13,8 @@ interface Props {
   /** `rect` is the written area in px relative to this overlay, which sits exactly over the slide editor. */
   onPlace: (kind: Kind, value: string, rect: PlaceRect) => void;
   onClose: () => void;
+  /** Where the controls go: the Slides top bar. */
+  slot: HTMLElement | null;
 }
 
 const INK = "#1D2B44";
@@ -34,7 +37,7 @@ function plainText(src: string): string {
 
 /** Transparent writing layer over the slide editor. Write anywhere on the slide; on Render (or after a pause)
  *  the writing is recognised and placed on the slide where you wrote it. */
-export default function SlideInk({ onPlace, onClose }: Props) {
+export default function SlideInk({ onPlace, onClose, slot }: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const cv = useRef<HTMLCanvasElement>(null);
   const strokes = useRef<Stroke[]>([]);
@@ -151,7 +154,7 @@ export default function SlideInk({ onPlace, onClose }: Props) {
   return (
     <div ref={wrap} className="si-layer" role="group" aria-label="Write on the slide">
       <canvas ref={cv} className="si-canvas" onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} />
-      <div className="si-bar" onPointerDown={(e) => e.stopPropagation()}>
+      {slot && createPortal(<div className="si-tools" role="toolbar" aria-label="Write on slide">      
         <button type="button" className={`btn cv-touch${!eraser ? " btn-primary" : ""}`} aria-pressed={!eraser} onClick={() => setEraser(false)}>Pen</button>
         <button type="button" className={`btn cv-touch${eraser ? " btn-primary" : ""}`} aria-pressed={eraser} onClick={() => setEraser(true)}>Eraser</button>
         <button type="button" className="btn cv-touch" disabled={!count} onClick={() => { strokes.current = strokes.current.slice(0, -1); redraw(); bump((n) => n + 1); }}>Undo</button>
@@ -165,7 +168,8 @@ export default function SlideInk({ onPlace, onClose }: Props) {
         <button type="button" className="btn cv-touch" onClick={onClose}>Done</button>
         <button type="button" className="ib-link" onClick={() => { requestSettingsSection("handwriting"); window.dispatchEvent(new CustomEvent("ygg:open-settings")); }}>Engines ›</button>
         {msg && <span className="si-msg" role="status">{msg}</span>}
-      </div>
+      
+</div>, slot)}
     </div>
   );
 }

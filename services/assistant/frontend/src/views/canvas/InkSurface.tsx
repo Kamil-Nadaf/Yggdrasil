@@ -173,7 +173,7 @@ export default function InkSurface(p: Props) {
     if (t === "pen") penSeen.current = true;
     if (t === "mouse" && e.button !== 0) return;
     const sc = scrollRef.current!;
-    e.currentTarget.setPointerCapture(e.pointerId);
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* pointer already gone: draw anyway */ }
     e.preventDefault();
 
     if (t === "touch" && !(fingerDraws && !penSeen.current)) {

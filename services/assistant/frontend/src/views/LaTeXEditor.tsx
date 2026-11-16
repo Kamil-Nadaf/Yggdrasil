@@ -30,7 +30,8 @@ import LatexAssetViewer from "../components/LatexAssetViewer";
 import LatexFigurePicker from "../components/LatexFigurePicker";
 import CitePicker, { type CiteCommand } from "./books/CitePicker";
 import NotesImportPicker from "./books/NotesImportPicker";
-import InkDialog from "./canvas/InkDialog";
+import CanvasView from "./CanvasView";
+import "./canvas/canvas.css";
 import { apiErrorMessage } from "../lib/apiError";
 import { downloadBlobUrl, downloadBase64 } from "../lib/download";
 import { imageExt, imageFileName, imageFilesFrom } from "../lib/pastedImages";
@@ -244,7 +245,7 @@ function EditorPane({
         <button type="button" className="latex-fmt-btn" title="Inline math" aria-label="Inline math" {...pressKeepFocus(() => onTool("math"))}>$x$</button>
         <button type="button" className="latex-fmt-btn" title="Display math" aria-label="Display math" {...pressKeepFocus(() => onTool("displaymath"))}>⟦⟧</button>
         <button type="button" className="latex-fmt-btn" title="Cite" aria-label="Cite" {...pressKeepFocus(() => onTool("cite"))}>cite</button>
-        <button type="button" className="latex-fmt-btn" title="Write by hand and convert to LaTeX" aria-label="Draw" {...pressKeepFocus(() => onTool("ink"))}>✎ draw</button>
+        <button type="button" className="latex-fmt-btn" title="Show or hide the Canvas panel" aria-label="Canvas" {...pressKeepFocus(() => onTool("ink"))}>✎ canvas</button>
         <button type="button" className="latex-fmt-btn" title="Import notes from a book" aria-label="Import notes" {...pressKeepFocus(() => onTool("notes"))}>notes</button>
         <button type="button" className="latex-fmt-btn" title="Label" aria-label="Label" {...pressKeepFocus(() => onTool("label"))}>lbl</button>
         <button type="button" className="latex-fmt-btn" title="Reference" aria-label="Reference" {...pressKeepFocus(() => onTool("ref"))}>ref</button>
@@ -500,7 +501,8 @@ export default function LaTeXEditor() {
   const [figureOpen, setFigureOpen] = useState(false);
   const [citeOpen, setCiteOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
-  const [inkOpen, setInkOpen] = useState(false);
+  const [inkDock, setInkDockState] = useState(() => localStorage.getItem("yggdrasil:latex-ink") === "1");
+  const setInkDock = (on: boolean) => { setInkDockState(on); localStorage.setItem("yggdrasil:latex-ink", on ? "1" : "0"); };
   // Always points at the latest closure so the CodeMirror paste/drop handlers (created once) see current state.
   const imageInsertRef = useRef<(files: File[]) => void>(() => {});
   const editorVisible = viewMode !== "pdf";
@@ -623,7 +625,6 @@ export default function LaTeXEditor() {
 
   /** Insert handwriting converted by the Canvas at the cursor, on its own lines. */
   function insertInk(latex: string) {
-    setInkOpen(false);
     const view = viewRef.current;
     if (!view || !latex.trim()) return;
     const sel = view.state.selection.main;
@@ -835,7 +836,8 @@ export default function LaTeXEditor() {
         setNotesOpen(true);
         break;
       case "ink":
-        setInkOpen(true);
+        if (inkDock) setInkDock(false);
+        else { setInkDock(true); if (viewMode === "editor") changeViewMode("split"); }
         break;
       case "label":
         wrapOrInsert("\\label{", "}", "sec:id");
@@ -1633,6 +1635,8 @@ export default function LaTeXEditor() {
         compiling={compiling}
         saving={saving}
         viewMode={viewMode}
+        inkDock={inkDock}
+        onInkDock={setInkDock}
         filesCollapsed={filesCollapsed}
         canDelete={
           Boolean(selected) ||
@@ -1721,15 +1725,6 @@ export default function LaTeXEditor() {
           fileInputRef.current?.click();
         }}
       />
-      {inkOpen && (
-        <InkDialog
-          title="Draw to LaTeX"
-          insertLabel="Insert at cursor"
-          insertAllLabel="Insert all blocks"
-          onInsert={(latex) => insertInk(latex)}
-          onClose={() => setInkOpen(false)}
-        />
-      )}
       {notesOpen && (
         <NotesImportPicker
           project={filename.includes("/") ? filename.split("/")[0] : ""}
@@ -1881,6 +1876,21 @@ export default function LaTeXEditor() {
         onShowSidebar={() => setFilesOpen(true)}
         sidebarSize={{ default: 22, min: 16, max: 40 }}
       >
+        {inkDock && (
+          <>
+            <Panel id="latex-ink" defaultSize={viewMode === "split" ? "30" : "45"} minSize="22" className="latex-panel">
+              <CanvasView
+                embedded
+                title="Canvas"
+                insertLabel="Insert at cursor"
+                insertAllLabel="Insert all blocks"
+                onInsert={(latex) => insertInk(latex)}
+                onClose={() => setInkDock(false)}
+              />
+            </Panel>
+            <PanelResizeHandle className="latex-resize-handle" />
+          </>
+        )}
         {editorVisible && (
           <>
             <Panel

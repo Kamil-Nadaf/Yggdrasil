@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { ProjectStats } from "../api/client";
-import InkDialog from "./canvas/InkDialog";
+import InkBox from "./canvas/InkBox";
 import "./slides.css";
 
 type Deck = { name: string; size: number; updated_at: string };
@@ -49,17 +49,10 @@ export default function SlidesView({ lockedProject }: { lockedProject?: string }
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
   const [inkOpen, setInkOpen] = useState(false);
   const [inkMsg, setInkMsg] = useState("");
-  // The slide editor is a separate module, so the converted LaTeX goes to the clipboard for its Formula dialog.
-  const copyInk = async (latex: string) => {
-    const plain = latex.trim().replace(/^\\\[\s*|\s*\\\]$/g, "").trim();
-    setInkOpen(false);
-    try {
-      await navigator.clipboard.writeText(plain);
-      setInkMsg("Copied. In the editor choose Insert → Formula (Σ) and paste.");
-    } catch {
-      setInkMsg("Copy was blocked by the browser. Reopen Draw and use Copy on the source box.");
-    }
-    window.setTimeout(() => setInkMsg(""), 9000);
+  // Rendered handwriting goes to the slide editor, which places it on the current slide.
+  const placeInk = (kind: "formula" | "text", value: string) => {
+    if (!value.trim()) { setInkMsg("Nothing was recognised."); return; }
+    try { frameRef.current?.contentWindow?.postMessage({ source: "yggdrasil-host", type: "place", kind, latex: value, text: value }, "*"); } catch { /* ignore */ }
   };
   const phone = isPhone();
   const frameRef = useRef<HTMLIFrameElement | null>(null);
@@ -191,14 +184,12 @@ export default function SlidesView({ lockedProject }: { lockedProject?: string }
           {phone && <span className="sl-hint">View only on phone</span>}
           {!phone && <button className="btn" onClick={() => pickFile("append")} title="Add slides from a .pptx (PowerPoint / Google Slides download), .pptist or .json file">Import slides…</button>}
           {importInput}
-          {!phone && <button className="btn" onClick={() => setInkOpen(true)} title="Write a formula by hand, convert it to LaTeX, then paste it into the Formula dialog">✎ Draw formula</button>}
+          {!phone && <button className="btn" onClick={() => setInkOpen((v) => !v)} aria-pressed={inkOpen} title="Add an ink box: write by hand, press Render, and it is placed on the slide">✎ Ink box</button>}
           {inkMsg && <span className="sl-hint" role="status">{inkMsg}</span>}
           <button className="btn sl-fs" onClick={() => setFull((v) => !v)} title={full ? "Exit full window (Esc)" : "Full window"}>{full ? "Exit full window" : "Full window"}</button>
         </div>
         <iframe ref={frameRef} key={src} className="sl-frame" src={src} title={`Deck ${open}`} allow="fullscreen" onLoad={sendTheme} />
-        {inkOpen && (
-          <InkDialog title="Draw a formula" insertLabel="Copy LaTeX" insertAllLabel="Copy all blocks" onInsert={(latex) => void copyInk(latex)} onClose={() => setInkOpen(false)} />
-        )}
+        {inkOpen && <InkBox onPlace={placeInk} onClose={() => setInkOpen(false)} />}
       </div>
     );
   }

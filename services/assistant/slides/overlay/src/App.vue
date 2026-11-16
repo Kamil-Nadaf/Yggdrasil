@@ -19,6 +19,8 @@ import { isPC } from '@/utils/common'
 import api from '@/services'
 import { loadDeck, saveDeck, tell, hasDeck, viewOnly, autoPresent } from '@/yggdrasil/bridge'
 import useImport from '@/hooks/useImport'
+import useCreateElement from '@/hooks/useCreateElement'
+import { hfmath } from '@/components/LaTeXEditor/hfmath'
 
 import Editor from './views/Editor/index.vue'
 import Screen from './views/Screen/index.vue'
@@ -27,6 +29,8 @@ import FullscreenSpin from '@/components/FullscreenSpin.vue'
 
 const _isPC = isPC()
 const { importPPTXFile, importSpecificFile, importJSON } = useImport()
+const { createLatexElement, createTextElement } = useCreateElement()
+
 
 const mainStore = useMainStore()
 const slidesStore = useSlidesStore()
@@ -86,6 +90,26 @@ onMounted(async () => {
     if (name.endsWith('.pptx')) importPPTXFile([file], { cover })
     else if (name.endsWith('.pptist')) importSpecificFile([file], cover)
     else if (name.endsWith('.json')) importJSON([file], cover)
+  })
+
+  // Handwriting rendered by the host's ink box: drop it on the current slide as a formula or a text box.
+  window.addEventListener('message', (e: MessageEvent) => {
+    const d = e.data
+    if (!d || d.source !== 'yggdrasil-host' || d.type !== 'place') return
+    try {
+      if (d.kind === 'formula' && typeof d.latex === 'string' && d.latex.trim()) {
+        const eq = new hfmath(d.latex)
+        const box = eq.box({})
+        createLatexElement({ latex: d.latex, path: eq.pathd({}), w: box.w + 32, h: box.h + 32 })
+      }
+      else if (d.kind === 'text' && typeof d.text === 'string' && d.text.trim()) {
+        const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        const html = d.text.split('\n').map((l: string) => `<p>${esc(l)}</p>`).join('')
+        createTextElement({ left: 120, top: 120, width: 560, height: 60 + 30 * d.text.split('\n').length }, { content: html })
+      }
+      tell('placed', { kind: d.kind })
+    }
+    catch (err) { tell('error', { message: String(err) }) }
   })
 
   await deleteDiscardedDB()

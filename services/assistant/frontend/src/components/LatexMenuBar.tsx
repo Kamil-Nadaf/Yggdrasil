@@ -24,6 +24,8 @@ export function LatexMenuBar({
   compiling,
   saving,
   viewMode,
+  inkDock,
+  onInkDock,
   filesCollapsed,
   canDelete,
   canDownloadPdf,
@@ -69,6 +71,8 @@ export function LatexMenuBar({
   compiling: boolean;
   saving: boolean;
   viewMode: LatexViewMode;
+  inkDock: boolean;
+  onInkDock: (on: boolean) => void;
   filesCollapsed: boolean;
   canDelete: boolean;
   canDownloadPdf: boolean;
@@ -190,18 +194,28 @@ export function LatexMenuBar({
     { type: "sep" },
     {
       type: "item",
-      label: viewMode === "editor" ? "✓ Editor only" : "Editor only",
-      onClick: () => onViewMode("editor"),
+      label: viewMode === "editor" && !inkDock ? "✓ Editor only" : "Editor only",
+      onClick: () => { onInkDock(false); onViewMode("editor"); },
     },
     {
       type: "item",
-      label: viewMode === "split" ? "✓ Editor + PDF" : "Editor + PDF",
-      onClick: () => onViewMode("split"),
+      label: viewMode === "split" && !inkDock ? "✓ Editor + PDF" : "Editor + PDF",
+      onClick: () => { onInkDock(false); onViewMode("split"); },
     },
     {
       type: "item",
-      label: viewMode === "pdf" ? "✓ PDF only" : "PDF only",
-      onClick: () => onViewMode("pdf"),
+      label: viewMode === "pdf" && inkDock ? "✓ Canvas + PDF" : "Canvas + PDF",
+      onClick: () => { onInkDock(true); onViewMode("pdf"); },
+    },
+    {
+      type: "item",
+      label: viewMode === "split" && inkDock ? "✓ Canvas + Editor + PDF" : "Canvas + Editor + PDF",
+      onClick: () => { onInkDock(true); onViewMode("split"); },
+    },
+    {
+      type: "item",
+      label: viewMode === "pdf" && !inkDock ? "✓ PDF only" : "PDF only",
+      onClick: () => { onInkDock(false); onViewMode("pdf"); },
     },
     { type: "sep" },
     {

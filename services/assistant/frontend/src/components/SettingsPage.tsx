@@ -1,6 +1,9 @@
 import { createContext, Fragment, useContext, useEffect, useState, type ReactNode } from "react";
 import AbstractText from "./AbstractText";
 import { api } from "../api/client";
+import EngineSettings from "../views/canvas/EngineSettings";
+import { loadEngines, saveEngines, type Engine } from "../lib/canvasEngines";
+import "../views/canvas/canvas.css";
 
 const colorPickerIcon = "/color-picker-icon.png";
 import {
@@ -167,6 +170,7 @@ const SETTINGS_SECTIONS: { id: string; title: string; group: string; includes: s
   { id: "tasks", title: "Tasks", group: "Workspace", includes: ["taskStatuses", "taskOptions", "tasksync"] },
   { id: "sync", title: "Sync", group: "Workspace", includes: ["sync"] },
   { id: "ai", title: "AI & integrations", group: "Connect", includes: ["ai", "connections", "webhook"] },
+  { id: "handwriting", title: "Handwriting engines", group: "Connect", includes: ["handwriting"] },
   { id: "data", title: "Backup & data", group: "Data", includes: ["data"] },
   { id: "about", title: "About", group: "Data", includes: ["about", "updates"] },
 ];
@@ -261,6 +265,7 @@ export default function SettingsPage({ open = true, onClose, firstRun, onDataPat
     latexFileCount?: number;
     vaultPath?: string;
   } | null>(null);
+  const [hwEngines, setHwEngines] = useState<Engine[]>(() => loadEngines());
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     appearance: true,
     ai: true,
@@ -1268,6 +1273,13 @@ export default function SettingsPage({ open = true, onClose, firstRun, onDataPat
             </div>
             {aiMsg && <div className="ok mono" style={{ fontSize: 12, marginTop: 8 }}>{aiMsg}</div>}
           </div>
+        </CollapsibleSection>
+
+        <CollapsibleSection id="handwriting" title="Handwriting engines">
+          <div className="cv-muted" style={{ marginBottom: 12 }}>
+            Used by the Canvas panel in LaTeX and the ink box in Slides. Engines are tried in order and the first clean result wins. Keys stay in this browser.
+          </div>
+          <EngineSettings inline engines={hwEngines} onChange={(next) => { setHwEngines(next); saveEngines(next); }} />
         </CollapsibleSection>
 
         <CollapsibleSection id="account" title="Account" open={!!openSections.account} onToggle={() => toggle("account")}>

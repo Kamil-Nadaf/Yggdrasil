@@ -3,9 +3,9 @@ import type { ReactNode } from "react";
 import katex from "katex";
 import { api } from "../api/client";
 import { canvasApi } from "../api/canvas";
-import { activeEnginePayload, loadEngines, saveEngines, type Engine } from "../lib/canvasEngines";
+import { activeEnginePayload, loadEngines } from "../lib/canvasEngines";
 import InkSurface from "./canvas/InkSurface";
-import EngineSettings from "./canvas/EngineSettings";
+import { requestSettingsSection } from "../lib/driveSync";
 import {
   PAGE_NAME_RE, PAGE_W, asDisplayLatex, emptyPage, pageSlug, renderCrop,
   type Block, type PageData, type Stroke, type Tool,
@@ -73,8 +73,6 @@ export default function CanvasView({ onOpenLatex, embedded, onInsert, insertLabe
   const [mode, setMode] = useState<Mode>("lasso");
   const [selection, setSelection] = useState<number[]>([]);
 
-  const [engines, setEngines] = useState<Engine[]>(() => loadEngines());
-  const [showEngines, setShowEngines] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeBlock, setActiveBlock] = useState<number | null>(null);
@@ -228,8 +226,8 @@ export default function CanvasView({ onOpenLatex, embedded, onInsert, insertLabe
       picked = pen.filter((s) => !used.has(s.id));
     } else picked = pen.filter((s) => which.includes(s.id));
     if (!picked.length) { setNote("Nothing to convert. Write something or select it with the lasso."); return; }
-    const payload = activeEnginePayload(engines);
-    if (!payload.length) { setError("No engine is switched on. Open Engines and turn one on."); return; }
+    const payload = activeEnginePayload(loadEngines());
+    if (!payload.length) { setError("No engine is switched on. Turn one on in Settings, Handwriting engines."); return; }
     const image = renderCrop(picked);
     if (!image) return;
 
@@ -314,8 +312,6 @@ export default function CanvasView({ onOpenLatex, embedded, onInsert, insertLabe
     setFingerDraws(on);
     localStorage.setItem("yggdrasil:canvas-finger", on ? "1" : "0");
   };
-  const updateEngines = (next: Engine[]) => { setEngines(next); saveEngines(next); };
-  const enabledCount = engines.filter((e) => e.enabled).length;
 
   const convertLabel = mode === "lasso" ? "Convert selection" : mode === "page" ? "Convert page" : "Convert now";
   const canConvert = !busy && (mode === "lasso" ? selection.length > 0 : pending > 0 || mode === "page");
@@ -349,8 +345,8 @@ export default function CanvasView({ onOpenLatex, embedded, onInsert, insertLabe
             </button>
           ))}
         </div>
-        <button type="button" className="btn cv-touch" onClick={() => setShowEngines(true)}>
-          Engines · {enabledCount} on
+        <button type="button" className="btn cv-touch" title="Engines are set up in Settings" onClick={() => { requestSettingsSection("handwriting"); window.dispatchEvent(new CustomEvent("ygg:open-settings")); }}>
+          Engines ›
         </button>
         {onClose && <button type="button" className="btn cv-touch" onClick={onClose} aria-label="Close">Close</button>}
       </div>
@@ -476,8 +472,6 @@ export default function CanvasView({ onOpenLatex, embedded, onInsert, insertLabe
           )}
         </aside>
       </div>
-
-      {showEngines && <EngineSettings engines={engines} onChange={updateEngines} onClose={() => setShowEngines(false)} />}
     </div>
   );
 }

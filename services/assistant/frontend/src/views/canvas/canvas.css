@@ -242,3 +242,14 @@
 .cv-dialog-backdrop { position: fixed; inset: 0; z-index: 6500; background: rgba(0, 0, 0, 0.6); display: flex; align-items: stretch; justify-content: center; padding: 12px; box-sizing: border-box; }
 .cv-dialog { flex: 1; min-width: 0; max-width: 1500px; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg); }
 .cv-dialog .cv-shell { height: 100%; }
+
+/* ink box on a slide */
+.ib-box { position: absolute; z-index: 20; top: 96px; left: calc(50% - 250px); width: 500px; max-width: calc(100% - 24px); display: flex; flex-direction: column; background: var(--bg); border: 2px dashed var(--border); border-radius: 12px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35); overflow: hidden; }
+.ib-head { display: flex; align-items: center; gap: 8px; padding: 4px 8px 4px 12px; font-size: 13px; font-weight: 600; cursor: grab; touch-action: none; border-bottom: 1px solid var(--border); }
+.ib-page { position: relative; height: 340px; }
+.ib-bar { display: flex; align-items: center; gap: 8px; padding: 8px; flex-wrap: wrap; border-top: 1px solid var(--border); }
+.ib-foot { display: flex; align-items: center; gap: 12px; padding: 4px 12px 8px; flex-wrap: wrap; font-size: 12px; }
+.ib-keep { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.ib-link { background: none; border: 0; color: var(--muted); text-decoration: underline; cursor: pointer; font: inherit; padding: 8px 0; }
+.cv-inline-engines { max-width: 760px; }
+.cv-inline-engines .cv-modal-head { margin-bottom: 12px; }

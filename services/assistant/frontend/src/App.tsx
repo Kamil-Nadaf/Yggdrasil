@@ -33,7 +33,7 @@ const LAYOUT_KEY = "yggdrasil:split-layout";
 const PANES_KEY = "yggdrasil:split-panes";
 const SPLIT_RATIO_KEY = "yggdrasil:split-ratio";
 /** Every section a pane can show, Settings included, in the order new panes pick their defaults. */
-const ALL_VIEWS: View[] = ["editor", "scores", "tasks", "papers", "books", "latex", "canvas", "calendar", "projects", "slides", "graph", "ask", "settings"];
+const ALL_VIEWS: View[] = ["editor", "scores", "tasks", "papers", "books", "latex", "calendar", "projects", "slides", "graph", "ask", "settings"];
 const LAYOUT_IDS: SplitLayout[] = ["1x2", "2x1", "2x2", "1x3", "3x1", "2x3", "3x2", "1x4"];
 const paneCount = (l: SplitLayout) => { const [r, c] = layoutDims(l); return r * c; };
 
@@ -77,6 +77,11 @@ export default function App() {
   const navPrefs = useNavPrefs();
   const [editorCitekey, setEditorCitekey] = useState<string | null>(null);
   const [prevView, setPrevView] = useState<Exclude<View, "settings">>("scores");
+  useEffect(() => {
+    const h = () => goView("settings");
+    window.addEventListener("ygg:open-settings", h);
+    return () => window.removeEventListener("ygg:open-settings", h);
+  });
   const [notesTab, setNotesTab] = useState<NotesTab>("collection");
   const [tasksTab, setTasksTab] = useState<TasksTab>("list");
   const [papersSection, setPapersSection] = useState<PapersSection>("daily");

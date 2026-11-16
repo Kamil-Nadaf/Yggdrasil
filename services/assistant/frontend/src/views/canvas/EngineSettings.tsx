@@ -1,16 +1,17 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { canvasApi } from "../../api/canvas";
 import { PRESETS, newEngine, type Engine, type EnginePreset } from "../../lib/canvasEngines";
 
 interface Props {
   engines: Engine[];
   onChange: (next: Engine[]) => void;
-  onClose: () => void;
+  onClose?: () => void;
+  inline?: boolean;
 }
 
 type Probe = { state: "busy" } | { state: "ok"; models: string[] } | { state: "err"; message: string };
 
-export default function EngineSettings({ engines, onChange, onClose }: Props) {
+export default function EngineSettings({ engines, onChange, onClose, inline }: Props) {
   const [probes, setProbes] = useState<Record<string, Probe>>({});
 
   const patch = (id: string, change: Partial<Engine>) =>
@@ -34,15 +35,20 @@ export default function EngineSettings({ engines, onChange, onClose }: Props) {
     }
   };
 
-  return (
+  const wrap = (children: ReactNode) => inline
+    ? <div className="cv-inline-engines">{children}</div>
+    : (
     <div className="cv-modal-backdrop" role="presentation" onClick={onClose}>
-      <div className="cv-modal" role="dialog" aria-modal="true" aria-label="Recognition engines" onClick={(e) => e.stopPropagation()}>
+      <div className="cv-modal" role="dialog" aria-modal="true" aria-label="Recognition engines" onClick={(e) => e.stopPropagation()}>{children}</div>
+    </div>);
+  return wrap(
+    <>
         <div className="cv-modal-head">
           <div>
             <div className="cv-modal-title">Recognition engines</div>
             <div className="cv-muted">Tried from top to bottom. The first answer that is well-formed LaTeX is used. Keys stay in this browser and are sent only with each request.</div>
           </div>
-          <button type="button" className="btn cv-touch" onClick={onClose}>Done</button>
+          {onClose && <button type="button" className="btn cv-touch" onClick={onClose}>Done</button>}
         </div>
 
         <div className="cv-engine-list">
@@ -106,7 +112,6 @@ export default function EngineSettings({ engines, onChange, onClose }: Props) {
             </button>
           ))}
         </div>
-      </div>
-    </div>
+    </>,
   );
 }

@@ -1,4 +1,4 @@
-.sl-wrap { display: flex; flex-direction: column; height: 100%; min-height: 0; gap: 8px; min-width: 0; }
+.sl-wrap { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; gap: 8px; min-width: 0; }
 .sl-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .sl-title { font-weight: 600; }
 .sl-hint, .sl-meta { color: var(--muted); font-size: 12px; }

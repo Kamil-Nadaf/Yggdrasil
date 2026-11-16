@@ -8,10 +8,10 @@ interface Slot { key: string; label: string; letter: string }
 
 /** Floating palette shown next to selected text: colours, underline/highlight, note, and CERIC slots (papers only). */
 export default function PdfSelectionPopup({
-  x, y, below, prefs, markup, onMarkup, onPick, onNote, onToNotes, slots, addingSlot, onCeric, text,
+  x, y, below, prefs, markup, onMarkup, onPick, onNote, onToNotes, onDefine, defineOn, slots, addingSlot, onCeric, text,
 }: {
   x: number; y: number; below: boolean; prefs: HighlightPrefs; markup: Markup; onMarkup: (m: Markup) => void;
-  onPick: (color: string) => void; onNote: () => void; onToNotes?: () => void;
+  onPick: (color: string) => void; onNote: () => void; onToNotes?: () => void; onDefine?: () => void; defineOn?: boolean;
   slots: Slot[] | null; addingSlot: string | null; onCeric: (slotKey: string) => void; text: string;
 }) {
   const [cfg, setCfg] = useState(false);
@@ -57,6 +57,9 @@ export default function PdfSelectionPopup({
         <button type="button" className="pdfv-pill" onClick={onNote} title="Highlight and write a note">+ Note</button>
         {onToNotes && (
           <button type="button" className="pdfv-pill notes" onClick={onToNotes} title="Save this text to the book's notes (for LaTeX import)">→ Notes</button>
+        )}
+        {onDefine && (
+          <button type="button" className={`pdfv-pill${defineOn ? " on" : ""}`} onClick={onDefine} title="Show the meaning of the selected word" aria-pressed={!!defineOn}>Meaning</button>
         )}
         <button type="button" className={`pdfv-pill${cfg ? " on" : ""}`} onClick={() => setCfg((v) => !v)} title="Colours and opacity" aria-label="Highlight settings">⚙</button>
       </div>

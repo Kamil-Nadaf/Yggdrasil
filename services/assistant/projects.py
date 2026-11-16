@@ -129,3 +129,29 @@ def clean_latex_links(raw: Any) -> list[str]:
             continue
         out.append(name[:200])
     return out[:50]
+
+
+PRIORITIES = ("high", "medium", "low")
+_PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
+
+
+def clean_priority(raw: Any) -> Optional[str]:
+    """'high' / 'medium' / 'low' (case-insensitive) or None."""
+    v = str(raw or "").strip().lower()
+    return v if v in PRIORITIES else None
+
+
+def clean_order(raw: Any) -> Optional[int]:
+    if isinstance(raw, bool):
+        return None
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return n if n >= 0 else None
+
+
+def project_sort_key(p: dict) -> tuple:
+    """Starred projects first, then the manual order, then name. Projects never moved sort by name after it."""
+    order = p.get("order")
+    return (not p.get("favorite"), order if order is not None else 10**9, str(p.get("name") or "").lower())

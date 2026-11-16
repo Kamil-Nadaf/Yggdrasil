@@ -86,6 +86,18 @@ export default function Nav({ current, onNavigate, split, onSplitToggle, subs, o
   const floating = prefs.mode !== "fixed";
   const auto = prefs.mode === "hidden" || prefs.autoHide;
   const iconOnly = collapsed || floating || horizontal;
+  // Which section's sub-menu is open from hovering (JS, not :hover, so a gap between the button and the flyout can't close it).
+  const [hoverKey, setHoverKey] = useState<string | null>(null);
+  const hoverTimer = useRef<number | undefined>(undefined);
+  const hoverIn = (k: string) => {
+    window.clearTimeout(hoverTimer.current);
+    hoverTimer.current = window.setTimeout(() => setHoverKey(k), iconOnly ? 0 : 200);
+  };
+  const hoverOut = () => {
+    window.clearTimeout(hoverTimer.current);
+    hoverTimer.current = window.setTimeout(() => setHoverKey(null), 300);
+  };
+  useEffect(() => () => window.clearTimeout(hoverTimer.current), []);
   const [revealed, setRevealed] = useState(false);
   const hideTimer = useRef<number | undefined>(undefined);
   const reveal = () => { window.clearTimeout(hideTimer.current); setRevealed(true); };
@@ -115,7 +127,7 @@ export default function Nav({ current, onNavigate, split, onSplitToggle, subs, o
           const active = current === item.id || !!split?.includes(item.id);
           const sub = SUBS[item.id];
           return (
-            <div key={item.id} className="side-group">
+            <div key={item.id} className="side-group" onMouseEnter={sub ? () => hoverIn(item.id) : undefined} onMouseLeave={sub ? hoverOut : undefined}>
               <button
                 type="button"
                 className={`nav-item side-item${active ? " active" : ""}`}
@@ -125,17 +137,17 @@ export default function Nav({ current, onNavigate, split, onSplitToggle, subs, o
               >
                 {item.icon}
                 {!iconOnly && <span>{item.label}</span>}
-                {!iconOnly && sub && <span className="side-caret" aria-hidden="true">{active ? "▾" : "▸"}</span>}
+                {!iconOnly && sub && <span className="side-caret" aria-hidden="true">{active || hoverKey === item.id ? "▾" : "▸"}</span>}
               </button>
-              {sub && (active || iconOnly) && (
-                <div className={iconOnly ? "side-fly" : "side-sub"}>
+              {sub && (iconOnly || active || hoverKey === item.id) && (
+                <div className={iconOnly ? `side-fly${hoverKey === item.id ? " open" : ""}` : "side-sub"}>
                   {iconOnly && <div className="side-fly-h">{item.label}</div>}
                   {sub.items.map((t) => (
                     <button
                       key={t.id}
                       type="button"
                       className={`side-subitem${active && subs[sub.key] === t.id ? " active" : ""}`}
-                      onClick={() => { onSub(sub.key, t.id); onNavigate(item.id); }}
+                      onClick={() => { setHoverKey(null); onSub(sub.key, t.id); onNavigate(item.id); }}
                     >
                       {t.label}
                     </button>

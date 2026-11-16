@@ -6,6 +6,21 @@ no cloud account required.
 
 ---
 
+## Install with a package manager (no download)
+
+| OS | Command |
+|---|---|
+| macOS (Homebrew) | `brew tap Kamil-Nadaf/yggdrasil https://github.com/Kamil-Nadaf/Yggdrasil && brew install --cask yggdrasil` — update with `brew upgrade --cask yggdrasil` |
+| Windows (Scoop) | `scoop bucket add yggdrasil https://github.com/Kamil-Nadaf/Yggdrasil` then `scoop install yggdrasil` — update with `scoop update yggdrasil` |
+| Windows (PowerShell, no Scoop) | `irm https://raw.githubusercontent.com/Kamil-Nadaf/Yggdrasil/main/scripts/install.ps1 \| iex` |
+| macOS or Linux (one line) | `curl -fsSL https://raw.githubusercontent.com/Kamil-Nadaf/Yggdrasil/main/scripts/install.sh \| bash` |
+
+The Homebrew cask removes the macOS "unidentified developer" warning for you. The one-line installers
+always fetch the latest release; add a version to pick another (`... \| bash -s -- v0.4.36`).
+Your notes are never touched by installing or updating.
+
+---
+
 ## macOS
 
 ### Requirements

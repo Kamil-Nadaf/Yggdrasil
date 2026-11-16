@@ -64,6 +64,7 @@ Static frontend served from /app/frontend/dist at /
 
 import os
 import re
+from urllib.parse import quote
 import glob
 import json
 import time
@@ -2576,6 +2577,98 @@ def _pdf_locations(key: str) -> tuple[Path, Path]:
     return store / f"{k}.pdf", store / f"{k}.annotations.json"
 
 
+# ── Word meanings for the PDF reader ─────────────────────────────────────────
+# Looked up from the server so the browser needs no cross-site access (and it works in the desktop app too).
+# Sources are tried in turn; only the selected word or phrase is sent.
+_DEFINE_CACHE: dict[str, dict] = {}
+
+
+async def _define_dictionary(c: httpx.AsyncClient, term: str):
+    r = await c.get(f"https://api.dictionaryapi.dev/api/v2/entries/en/{quote(term.lower())}")
+    if r.status_code != 200:
+        return None
+    data = r.json()
+    if not isinstance(data, list) or not data:
+        return None
+    meanings = []
+    for entry in data:
+        for m in entry.get("meanings", []):
+            defs = [d.get("definition", "") for d in m.get("definitions", []) if d.get("definition")][:2]
+            if defs:
+                meanings.append({"pos": m.get("partOfSpeech", ""), "defs": defs})
+    if not meanings:
+        return None
+    first = data[0]
+    phon = first.get("phonetic") or next((p.get("text") for p in first.get("phonetics", []) if p.get("text")), None)
+    urls = first.get("sourceUrls") or []
+    return {"term": first.get("word", term), "phonetic": phon, "meanings": meanings[:4], "source": "Dictionary", "url": urls[0] if urls else None}
+
+
+async def _define_datamuse(c: httpx.AsyncClient, term: str):
+    r = await c.get("https://api.datamuse.com/words", params={"sp": term.lower(), "md": "d", "max": 1})
+    if r.status_code != 200:
+        return None
+    data = r.json()
+    if not data or data[0].get("word", "").lower() != term.lower():
+        return None
+    by_pos: dict[str, list[str]] = {}
+    names = {"n": "noun", "v": "verb", "adj": "adjective", "adv": "adverb", "u": ""}
+    for d in data[0].get("defs", []):
+        pos, _, text = d.partition("\t")
+        if text:
+            by_pos.setdefault(names.get(pos, pos), []).append(text)
+    if not by_pos:
+        return None
+    meanings = [{"pos": k, "defs": v[:2]} for k, v in by_pos.items()][:4]
+    return {"term": data[0]["word"], "phonetic": None, "meanings": meanings, "source": "Datamuse", "url": None}
+
+
+async def _define_wikipedia(c: httpx.AsyncClient, term: str):
+    async def summary(title: str):
+        r = await c.get(f"https://en.wikipedia.org/api/rest_v1/page/summary/{quote(title.replace(' ', '_'))}", params={"redirect": "true"})
+        if r.status_code != 200:
+            return None
+        j = r.json()
+        return j if j.get("extract") else None
+
+    j = await summary(term)
+    if not j:
+        r = await c.get("https://en.wikipedia.org/w/api.php", params={"action": "opensearch", "limit": 1, "format": "json", "search": term})
+        hits = r.json() if r.status_code == 200 else []
+        if isinstance(hits, list) and len(hits) > 1 and hits[1]:
+            j = await summary(hits[1][0])
+    if not j:
+        return None
+    text = j["extract"]
+    if len(text) > 420:
+        text = text[:420].rsplit(" ", 1)[0] + "…"
+    page = (j.get("content_urls") or {}).get("desktop", {}).get("page")
+    return {"term": j.get("title", term), "phonetic": None, "meanings": [], "summary": text, "source": "Wikipedia", "url": page}
+
+
+@app.get("/api/define")
+async def define_term(term: str):
+    t = re.sub(r"\s+", " ", term).strip()
+    if not re.fullmatch(r"[A-Za-z][A-Za-z'’-]*( [A-Za-z][A-Za-z'’-]*){0,3}", t) or len(t) > 40:
+        return {"ok": False, "reason": "none"}
+    key = t.lower()
+    if key in _DEFINE_CACHE:
+        return {"ok": True, "def": _DEFINE_CACHE[key]}
+    steps = [_define_wikipedia] if " " in t else [_define_dictionary, _define_datamuse, _define_wikipedia]
+    reached = False
+    async with httpx.AsyncClient(timeout=6, follow_redirects=True, headers={"User-Agent": "Yggdrasil/1.0 (reader word lookup)", "Accept": "application/json"}) as c:
+        for step in steps:
+            try:
+                d = await step(c, t)
+                reached = True
+                if d:
+                    _DEFINE_CACHE[key] = d
+                    return {"ok": True, "def": d}
+            except Exception:
+                continue
+    return {"ok": False, "reason": "none" if reached else "offline"}
+
+
 @app.get("/api/pdf-file")
 async def pdf_file(key: str, url: str = ""):
     """The locally saved copy of a paper if we have one, otherwise the public PDF (proxied)."""
@@ -3360,6 +3453,9 @@ async def list_task_projects():
 from projects import (  # noqa: E402
     PROJECT_TAG_PREFIX as _PROJ_TAG,
     clean_latex_links as _proj_clean_latex,
+    clean_order as _proj_order,
+    clean_priority as _proj_priority,
+    project_sort_key as _proj_sort_key,
     project_slugs_of as _proj_slugs_of,
     safe_filename as _proj_safe_name,
     summarize_tasks as _proj_summarize,
@@ -3415,6 +3511,9 @@ def _project_stats(d: Path, reading: dict[str, int]) -> Optional[dict]:
         "notes": _count_files(_project_notes_dir(d.name), "*.md"),
         "files": _count_files(_project_files_dir(d.name)),
         "latex": _proj_clean_latex(meta.get("latex")),
+        "favorite": bool(meta.get("favorite")),
+        "priority": _proj_priority(meta.get("priority")),
+        "order": _proj_order(meta.get("order")),
     }
 
 
@@ -3428,8 +3527,73 @@ async def list_projects():
             st = _project_stats(d, reading)
             if st:
                 out.append(st)
-    out.sort(key=lambda p: p["name"].lower())
+    out.sort(key=_proj_sort_key)
     return {"projects": out}
+
+
+class ProjectOrder(BaseModel):
+    slugs: list[str]
+
+
+@app.put("/api/projects/order")
+async def set_project_order(payload: ProjectOrder):
+    """Manual order of the Projects grid: position i in `slugs` becomes order i."""
+    seen: set[str] = set()
+    for i, slug in enumerate(payload.slugs):
+        if slug in seen or slug == PINNED_PROJECT_SLUG:
+            continue
+        seen.add(slug)
+        meta = project_dir(slug) / "_project.md"
+        if not meta.exists():
+            continue
+        post = frontmatter.load(str(meta))
+        post.metadata["order"] = i
+        meta.write_text(frontmatter.dumps(post))
+    return {"ok": True}
+
+
+class ProjectUpdate(BaseModel):
+    name: Optional[str] = None
+    favorite: Optional[bool] = None
+    priority: Optional[str] = None  # "high" | "medium" | "low" | "" (clear)
+
+
+@app.put("/api/projects/{slug}")
+async def update_project(slug: str, payload: ProjectUpdate):
+    """Rename (display name only; the slug, tags, notes and files keep working), star, set priority."""
+    if slug == PINNED_PROJECT_SLUG:
+        raise HTTPException(status_code=400, detail="Daily Habits can't be edited")
+    d = project_dir(slug)
+    meta = d / "_project.md"
+    if not meta.exists():
+        raise HTTPException(status_code=404, detail="Project not found")
+    post = frontmatter.load(str(meta))
+    if payload.name is not None:
+        name = payload.name.strip()[:120]
+        if not name:
+            raise HTTPException(status_code=400, detail="Name is required")
+        for other in tasks_dir().iterdir():
+            if other.is_dir() and other.name != slug:
+                om = other / "_project.md"
+                if om.exists() and str(frontmatter.load(str(om)).metadata.get("name") or other.name).strip().lower() == name.lower():
+                    raise HTTPException(status_code=409, detail="A project with this name already exists")
+        post.metadata["name"] = name
+    if payload.favorite is not None:
+        if payload.favorite:
+            post.metadata["favorite"] = True
+        else:
+            post.metadata.pop("favorite", None)
+    if payload.priority is not None:
+        pr = _proj_priority(payload.priority)
+        if payload.priority.strip() and pr is None:
+            raise HTTPException(status_code=400, detail="Priority must be high, medium, low or empty")
+        if pr:
+            post.metadata["priority"] = pr
+        else:
+            post.metadata.pop("priority", None)
+    meta.write_text(frontmatter.dumps(post))
+    st = _project_stats(d, _reading_counts())
+    return {"ok": True, "project": st}
 
 
 @app.get("/api/projects/{slug}")

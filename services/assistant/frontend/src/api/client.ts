@@ -457,6 +457,9 @@ export interface ProjectStats {
   notes: number;
   files: number;
   latex: string[];
+  favorite: boolean;
+  priority: "high" | "medium" | "low" | null;
+  order: number | null;
 }
 export interface ProjectFile { name: string; size: number; modified: string }
 
@@ -637,6 +640,9 @@ export const api = {
 
   projects: {
     list: () => req<{ projects: ProjectStats[] }>("GET", "/api/projects"),
+    update: (slug: string, body: { name?: string; favorite?: boolean; priority?: "high" | "medium" | "low" | "" }) =>
+      req<{ ok: boolean; project: ProjectStats }>("PUT", `/api/projects/${encodeURIComponent(slug)}`, body),
+    reorder: (slugs: string[]) => req<{ ok: boolean }>("PUT", "/api/projects/order", { slugs }),
     get: (slug: string) =>
       req<{ project: ProjectStats; tag: string; notes_folder: string }>("GET", `/api/projects/${encodeURIComponent(slug)}`),
     setLatex: (slug: string, latex: string[]) =>

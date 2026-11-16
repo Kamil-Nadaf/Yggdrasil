@@ -10,6 +10,15 @@ import AbstractText from "../components/AbstractText";
 const SHORTLIST_KEY = "yggdrasil:shortlist";
 const MY_LIST_KEY = "yggdrasil:my-list";
 const PANEL_SIZES_KEY = "yggdrasil:panel-sizes";
+const VIEW_KEY = "yggdrasil:arxiv-view";
+const TILES_KEY = "yggdrasil:arxiv-tiles";
+type ArxivPage = "daily" | "shortlist" | "mylist";
+function lsGet(key: string): string | null {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function lsSet(key: string, v: string) {
+  try { localStorage.setItem(key, v); } catch { /* optional */ }
+}
 const TOPIC_KEY = "yggdrasil:arxiv-topic";
 const CUSTOM_TOPICS_KEY = "yggdrasil:custom-topics";
 
@@ -198,6 +207,11 @@ export default function ArxivSearch() {
   const [myList, setMyList] = useState<ArxivPaper[]>(() => loadList(MY_LIST_KEY));
   const [activeId, setActiveId] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastMsg | null>(null);
+  const [viewMode, setViewMode] = useState<"split" | "pages">(() => (lsGet(VIEW_KEY) === "pages" ? "pages" : "split"));
+  const [page, setPage] = useState<ArxivPage>("daily");
+  const [tiles, setTiles] = useState<boolean>(() => lsGet(TILES_KEY) === "1");
+  const chooseView = (v: "split" | "pages") => { setViewMode(v); lsSet(VIEW_KEY, v); };
+  const chooseTiles = (v: boolean) => { setTiles(v); lsSet(TILES_KEY, v ? "1" : "0"); };
 
   const { defaultLayout, onLayoutChange } = useDefaultLayout({
     id: "arxiv-search",
@@ -296,6 +310,7 @@ export default function ArxivSearch() {
 
   function addToShortlist(paper: ArxivPaper) {
     setShortlist((prev) => (prev.some((p) => p.id === paper.id) ? prev : [paper, ...prev]));
+    if (viewMode === "pages") showToast("Added to Shortlisted", true);
   }
 
   function removeFromShortlist(id: string) {
@@ -305,6 +320,7 @@ export default function ArxivSearch() {
   function readPaper(paper: ArxivPaper) {
     setMyList((prev) => (prev.some((p) => p.id === paper.id) ? prev : [paper, ...prev]));
     setActiveId(paper.id);
+    if (viewMode === "pages") setPage("mylist");
   }
 
   function clearMyList() {
@@ -382,17 +398,8 @@ export default function ArxivSearch() {
     return groups;
   }, [allTopics, topicQuery]);
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 48px)" }}>
-      <Group
-        id="arxiv-search"
-        orientation="horizontal"
-        className="arxiv-panel-group"
-        defaultLayout={defaultLayout}
-        onLayoutChange={onLayoutChange}
-      >
-        {/* Panel 1 — Daily Papers */}
-        <Panel id="daily" defaultSize={25} minSize={15} className="arxiv-panel">
+  const dailyContent = (
+    <>
           <div className="arxiv-panel-header">
             <h2>Daily Archive</h2>
             <input
@@ -404,6 +411,10 @@ export default function ArxivSearch() {
               title="Show arXiv's listing for this date, as on arxiv.org (papers submitted in the 1–3 days before it)"
             />
             <div className="arxiv-panel-header-spacer" />
+            <div className="arxiv-seg arxiv-seg-sm" role="group" aria-label="Layout">
+              <button type="button" aria-pressed={!tiles} title="List view" onClick={() => chooseTiles(false)}>☰</button>
+              <button type="button" aria-pressed={tiles} title="Tile view" onClick={() => chooseTiles(true)}>▦</button>
+            </div>
             <span className="arxiv-count">{filteredDaily.length}{filterText ? `/${daily.length}` : ""}</span>
           </div>
           <div className="arxiv-search-bar" style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}>
@@ -532,7 +543,7 @@ export default function ArxivSearch() {
               arXiv hasn't announced today's listing yet — showing the latest available batch ({latestListingDate}). New papers publish once per business day, evenings US Eastern.
             </div>
           )}
-          <div className="arxiv-panel-list">
+          <div className={`arxiv-panel-list${tiles ? " tiles" : ""}`}>
             {dailyLoading ? (
               <div className="arxiv-panel-empty">Loading…</div>
             ) : filteredDaily.length === 0 ? (
@@ -579,12 +590,10 @@ export default function ArxivSearch() {
               })
             )}
           </div>
-        </Panel>
-
-        <Separator className="arxiv-resize-handle" />
-
-        {/* Panel 2 — Shortlisted */}
-        <Panel id="shortlist" defaultSize={20} minSize={15} className="arxiv-panel">
+    </>
+  );
+  const shortlistContent = (
+    <>
           <div className="arxiv-panel-header">
             <h2>Shortlisted</h2>
             <div className="arxiv-panel-header-spacer" />
@@ -628,12 +637,10 @@ export default function ArxivSearch() {
               })
             )}
           </div>
-        </Panel>
-
-        <Separator className="arxiv-resize-handle" />
-
-        {/* Panel 3 — My List (reading pane) */}
-        <Panel id="mylist" defaultSize={55} minSize={30} className="arxiv-panel">
+    </>
+  );
+  const mylistContent = (
+    <>
           <div className="arxiv-panel-header">
             <h2>My List</h2>
             <div className="arxiv-panel-header-spacer" />
@@ -732,8 +739,66 @@ export default function ArxivSearch() {
               </div>
             </div>
           )}
+    </>
+  );
+  const PAGES: { id: ArxivPage; label: string; count: number }[] = [
+    { id: "daily", label: "Today's papers", count: filteredDaily.length },
+    { id: "shortlist", label: "Shortlisted", count: shortlist.length },
+    { id: "mylist", label: "My list", count: myList.length },
+  ];
+
+  return (
+    <div className="arxiv-view" style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 48px)" }}>
+      <div className="arxiv-viewbar">
+        {viewMode === "pages" && (
+          <div className="arxiv-pagetabs" role="tablist" aria-label="Sections">
+            {PAGES.map((x, i) => (
+              <button key={x.id} type="button" role="tab" aria-selected={page === x.id} className={page === x.id ? "on" : ""} onClick={() => setPage(x.id)}>
+                <span className="arxiv-pageno">{i + 1}</span> {x.label} <em>{x.count}</em>
+              </button>
+            ))}
+          </div>
+        )}
+        <span style={{ flex: 1 }} />
+        <div className="arxiv-seg" role="group" aria-label="View">
+          <button type="button" aria-pressed={viewMode === "split"} title="Three sections side by side" onClick={() => chooseView("split")}>Split view</button>
+          <button type="button" aria-pressed={viewMode === "pages"} title="One section per page: Today's papers, Shortlisted, My list" onClick={() => chooseView("pages")}>Pages</button>
+        </div>
+      </div>
+      {viewMode === "pages" ? (
+        <div className="arxiv-pagebody">
+          <div className="arxiv-panel">
+            {page === "daily" ? dailyContent : page === "shortlist" ? shortlistContent : mylistContent}
+          </div>
+        </div>
+      ) : (
+      <Group
+        id="arxiv-search"
+        orientation="horizontal"
+        className="arxiv-panel-group"
+        defaultLayout={defaultLayout}
+        onLayoutChange={onLayoutChange}
+      >
+        {/* Panel 1 — Daily Papers */}
+        <Panel id="daily" defaultSize={25} minSize={15} className="arxiv-panel">
+          {dailyContent}
+        </Panel>
+
+        <Separator className="arxiv-resize-handle" />
+
+        {/* Panel 2 — Shortlisted */}
+        <Panel id="shortlist" defaultSize={20} minSize={15} className="arxiv-panel">
+          {shortlistContent}
+        </Panel>
+
+        <Separator className="arxiv-resize-handle" />
+
+        {/* Panel 3 — My List (reading pane) */}
+        <Panel id="mylist" defaultSize={55} minSize={30} className="arxiv-panel">
+          {mylistContent}
         </Panel>
       </Group>
+      )}
 
       {toast && (
         <div className={`arxiv-toast ${toast.ok ? "ok" : "error"}`}>{toast.text}</div>

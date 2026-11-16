@@ -26,6 +26,43 @@ const OPEN_KEY = "yggdrasil:project-open";
 const TAB_KEY = "yggdrasil:project-tab";
 const tagOf = (slug: string) => `project:${slug}`;
 
+type SortMode = "manual" | "priority" | "name" | "deadline";
+const SORTS: { id: SortMode; label: string }[] = [
+  { id: "manual", label: "Manual" },
+  { id: "priority", label: "Priority" },
+  { id: "name", label: "Name" },
+  { id: "deadline", label: "Next deadline" },
+];
+const SORT_KEY = "yggdrasil:project-sort";
+const PRIORITIES: { id: "high" | "medium" | "low"; label: string }[] = [
+  { id: "high", label: "High" },
+  { id: "medium", label: "Medium" },
+  { id: "low", label: "Low" },
+];
+const PRI_RANK = { high: 0, medium: 1, low: 2 } as const;
+
+/** Starred projects always come first; the rest follow the chosen sort. */
+function sortProjects(list: ProjectStats[], mode: SortMode): ProjectStats[] {
+  const byName = (a: ProjectStats, b: ProjectStats) => a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+  const rest = (a: ProjectStats, b: ProjectStats): number => {
+    if (mode === "name") return byName(a, b);
+    if (mode === "priority") {
+      const d = (a.priority ? PRI_RANK[a.priority] : 3) - (b.priority ? PRI_RANK[b.priority] : 3);
+      return d || byName(a, b);
+    }
+    if (mode === "deadline") {
+      if (a.next_deadline && b.next_deadline) return a.next_deadline.localeCompare(b.next_deadline) || byName(a, b);
+      if (a.next_deadline) return -1;
+      if (b.next_deadline) return 1;
+      return byName(a, b);
+    }
+    const oa = a.order ?? Number.MAX_SAFE_INTEGER;
+    const ob = b.order ?? Number.MAX_SAFE_INTEGER;
+    return oa === ob ? byName(a, b) : oa < ob ? -1 : 1;
+  };
+  return [...list].sort((a, b) => Number(b.favorite) - Number(a.favorite) || rest(a, b));
+}
+
 function ls(key: string): string | null {
   try { return localStorage.getItem(key); } catch { return null; }
 }
@@ -58,6 +95,11 @@ export default function ProjectsView({ onOpenLatex }: { onOpenLatex?: () => void
   const [err, setErr] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(() => ls(OPEN_KEY));
   const [newOpen, setNewOpen] = useState(false);
+  const [sort, setSort] = useState<SortMode>(() => (SORTS.some((x) => x.id === ls(SORT_KEY)) ? (ls(SORT_KEY) as SortMode) : "manual"));
+  const [menu, setMenu] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<ProjectStats | null>(null);
+  const [dragSlug, setDragSlug] = useState<string | null>(null);
+  const [overSlug, setOverSlug] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -89,6 +131,67 @@ export default function ProjectsView({ onOpenLatex }: { onOpenLatex?: () => void
     }
   }
 
+  const shown = useMemo(() => (list ? sortProjects(list, sort) : null), [list, sort]);
+
+  // Close the card menu on any outside click or Escape.
+  useEffect(() => {
+    if (!menu) return;
+    const close = (e: Event) => {
+      if (e instanceof KeyboardEvent && e.key !== "Escape") return;
+      if (e instanceof MouseEvent && (e.target as HTMLElement | null)?.closest(".pj-menu, .pj-more")) return;
+      setMenu(null);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", close);
+    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", close); };
+  }, [menu]);
+
+  async function patchProject(slug: string, body: { name?: string; favorite?: boolean; priority?: "high" | "medium" | "low" | "" }) {
+    setMenu(null);
+    try {
+      await api.projects.update(slug, body);
+      await load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not update project");
+    }
+  }
+
+  async function removeProject(p: ProjectStats) {
+    setMenu(null);
+    if (!window.confirm(`Delete "${p.name}"?\n\nIts tasks are removed. Notes, documents and papers tagged with it stay in your vault.`)) return;
+    try {
+      await api.taskProjects.delete(p.slug);
+      await load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not delete project");
+    }
+  }
+
+  function reorder(slugs: string[]) {
+    setList((l) => l && l.map((p) => ({ ...p, order: slugs.indexOf(p.slug) >= 0 ? slugs.indexOf(p.slug) : p.order })));
+    api.projects.reorder(slugs).catch((e) => { setErr(e instanceof Error ? e.message : "Could not save the order"); void load(); });
+  }
+
+  function move(slug: string, dir: -1 | 1) {
+    setMenu(null);
+    const slugs = (shown ?? []).map((p) => p.slug);
+    const i = slugs.indexOf(slug);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= slugs.length) return;
+    [slugs[i], slugs[j]] = [slugs[j], slugs[i]];
+    reorder(slugs);
+  }
+
+  function dropOn(target: string) {
+    const from = dragSlug;
+    setDragSlug(null);
+    setOverSlug(null);
+    if (!from || from === target || !shown) return;
+    const slugs = shown.map((p) => p.slug).filter((x) => x !== from);
+    slugs.splice(slugs.indexOf(target), 0, from);
+    reorder(slugs);
+  }
+
   if (open && list && !current) {
     // The project was deleted elsewhere.
     setOpen(null);
@@ -106,30 +209,98 @@ export default function ProjectsView({ onOpenLatex }: { onOpenLatex?: () => void
             <h2>Projects</h2>
             <span className="muted">Tasks, notes, documents, papers and reading — one place per project.</span>
             <span style={{ flex: 1 }} />
+            <label className="pj-sort muted">
+              Sort{" "}
+              <select value={sort} onChange={(e) => { const v = e.target.value as SortMode; setSort(v); setLs(SORT_KEY, v); }} aria-label="Sort projects">
+                {SORTS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+              </select>
+            </label>
             <button type="button" className="btn btn-primary" onClick={() => setNewOpen(true)}>+ New project</button>
           </div>
           {!list && <div className="muted tk-empty">Loading…</div>}
           {list && list.length === 0 && <div className="muted tk-empty">No projects yet. Create one to start.</div>}
           <div className="pj-grid">
-            {list?.map((p) => {
+            {shown?.map((p, idx) => {
               const due = dueLabel(p.next_deadline);
+              const manual = sort === "manual";
               return (
-                <button key={p.slug} type="button" className="pj-card" onClick={() => openProject(p.slug)}>
+                <div
+                  key={p.slug}
+                  role="button"
+                  tabIndex={0}
+                  className={`pj-card${dragSlug === p.slug ? " pj-dragging" : ""}${overSlug === p.slug && dragSlug !== p.slug ? " pj-dropover" : ""}`}
+                  draggable={manual}
+                  onClick={() => openProject(p.slug)}
+                  onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openProject(p.slug); } }}
+                  onDragStart={(e) => { setDragSlug(p.slug); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", p.slug); }}
+                  onDragOver={(e) => { if (manual && dragSlug) { e.preventDefault(); setOverSlug(p.slug); } }}
+                  onDragLeave={() => setOverSlug((o) => (o === p.slug ? null : o))}
+                  onDrop={(e) => { e.preventDefault(); dropOn(p.slug); }}
+                  onDragEnd={() => { setDragSlug(null); setOverSlug(null); }}
+                >
                   <div className="pj-card-top">
-                    <strong>{p.name}</strong>
+                    <button
+                      type="button"
+                      className={`pj-star${p.favorite ? " on" : ""}`}
+                      title={p.favorite ? "Unstar project" : "Star project"}
+                      aria-label={p.favorite ? `Unstar ${p.name}` : `Star ${p.name}`}
+                      aria-pressed={p.favorite}
+                      onClick={(e) => { e.stopPropagation(); void patchProject(p.slug, { favorite: !p.favorite }); }}
+                    >{p.favorite ? "★" : "☆"}</button>
+                    <strong className="pj-name">{p.name}</strong>
+                    {p.priority && <span className={`pj-badge pj-pri pj-pri-${p.priority}`}>{p.priority}</span>}
                     {p.overdue > 0 && <span className="pj-badge pj-over">{p.overdue} overdue</span>}
+                    <button
+                      type="button"
+                      className="pj-more"
+                      title="Project options"
+                      aria-label={`Options for ${p.name}`}
+                      aria-haspopup="menu"
+                      aria-expanded={menu === p.slug}
+                      onClick={(e) => { e.stopPropagation(); setMenu(menu === p.slug ? null : p.slug); }}
+                    >⋯</button>
+                    {menu === p.slug && (
+                      <div className="pj-menu" role="menu" onClick={(e) => e.stopPropagation()}>
+                        <button type="button" role="menuitem" onClick={() => { setMenu(null); setRenaming(p); }}>Rename…</button>
+                        <button type="button" role="menuitem" onClick={() => void patchProject(p.slug, { favorite: !p.favorite })}>{p.favorite ? "Unstar" : "Star"}</button>
+                        <div className="pj-menu-label">Priority</div>
+                        {PRIORITIES.map((x) => (
+                          <button key={x.id} type="button" role="menuitemradio" aria-checked={p.priority === x.id} className={p.priority === x.id ? "on" : ""} onClick={() => void patchProject(p.slug, { priority: x.id })}>
+                            {p.priority === x.id ? "✓ " : ""}{x.label}
+                          </button>
+                        ))}
+                        {p.priority && <button type="button" role="menuitem" onClick={() => void patchProject(p.slug, { priority: "" })}>No priority</button>}
+                        {manual && (
+                          <>
+                            <div className="pj-menu-label">Order</div>
+                            <button type="button" role="menuitem" disabled={idx === 0} onClick={() => move(p.slug, -1)}>Move earlier</button>
+                            <button type="button" role="menuitem" disabled={idx === shown.length - 1} onClick={() => move(p.slug, 1)}>Move later</button>
+                          </>
+                        )}
+                        <button type="button" role="menuitem" className="pj-danger" onClick={() => void removeProject(p)}>Delete…</button>
+                      </div>
+                    )}
                   </div>
                   <div className="pj-bar" aria-label={`${p.progress}% done`}><i style={{ width: `${p.progress}%` }} /></div>
                   <div className="pj-meta muted">{p.done_count}/{p.task_count} tasks · {p.progress}%{due ? <> · next <span className={due.cls}>{due.text}</span></> : null}</div>
                   <div className="pj-chips">
                     <span>{p.starred} ★</span><span>{p.notes} notes</span><span>{p.files} docs</span><span>{p.latex.length} drafts</span><span>{p.reading} readings</span>
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
         </>
       )}
+      <LatexPromptModal
+        open={!!renaming}
+        title="Rename project"
+        label="Project name"
+        initial={renaming?.name ?? ""}
+        confirmLabel="Rename"
+        onClose={() => setRenaming(null)}
+        onConfirm={(v) => { const r = renaming; setRenaming(null); if (r && v.trim() && v.trim() !== r.name) void patchProject(r.slug, { name: v.trim() }); }}
+      />
       <LatexPromptModal open={newOpen} title="New project" label="Project name" confirmLabel="Create" onClose={() => setNewOpen(false)} onConfirm={(v) => v.trim() && void createProject(v.trim())} />
     </div>
   );

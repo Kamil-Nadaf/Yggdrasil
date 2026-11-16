@@ -5581,7 +5581,9 @@ h2 { font-size: 15px; color: var(--accent); }
 .side-subitem:hover { color: var(--text); background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .side-subitem.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); font-weight: 600; }
 .side-fly { display: none; position: absolute; left: 52px; top: 0; min-width: 180px; padding: 8px; z-index: 60; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.25); flex-direction: column; gap: 2px; }
-.side-group:hover > .side-fly, .side-group:focus-within > .side-fly { display: flex; }
+.side-fly.open, .side-group:has(:focus-visible) > .side-fly { display: flex; }
+/* invisible bridge so the pointer can travel from the button to the flyout without it closing */
+.side-fly::before { content: ""; position: absolute; inset: -9px; z-index: -1; }
 .side-fly-h { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 4px 10px 6px; }
 :root[data-theme] .app-nav.side .nav-item { font-size: 14px; padding: 0 10px; }
 
@@ -5823,3 +5825,23 @@ h2 { font-size: 15px; color: var(--accent); }
 /* PDF reader "File" menu */
 .pdfv-filemenu { display: inline-flex; flex: 0 0 auto; }
 .pdfv-filemenu .latex-menu-trigger { height: 30px; padding: 0 10px; font-size: 13px; border-radius: 6px; }
+
+/* Daily Archive: view bar, pages mode, tile layout */
+.arxiv-view .arxiv-panel-group { height: auto !important; flex: 1 1 0; min-height: 0; }
+.arxiv-viewbar { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--surface); flex: 0 0 auto; }
+.arxiv-pagetabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.arxiv-pagetabs button { background: none; border: 1px solid transparent; color: var(--muted); font: inherit; font-size: 13px; padding: 4px 12px; border-radius: 999px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.arxiv-pagetabs button:hover { color: var(--text); }
+.arxiv-pagetabs button.on { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.arxiv-pagetabs em { font-style: normal; font-size: 11px; opacity: .7; }
+.arxiv-pageno { font-size: 11px; width: 18px; height: 18px; line-height: 18px; text-align: center; border-radius: 50%; border: 1px solid currentColor; }
+.arxiv-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.arxiv-seg button { background: none; border: 0; color: var(--muted); font: inherit; font-size: 12px; padding: 4px 10px; cursor: pointer; }
+.arxiv-seg button + button { border-left: 1px solid var(--border); }
+.arxiv-seg button[aria-pressed="true"] { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--text); }
+.arxiv-seg-sm button { padding: 2px 8px; font-size: 13px; }
+.arxiv-pagebody { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+.arxiv-pagebody .arxiv-panel { flex: 1; min-height: 0; max-width: 1400px; width: 100%; margin: 0 auto; }
+.arxiv-panel-list.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; align-content: start; }
+
+.rsb-auto { font-size: 11px; padding: 6px 10px 2px; }

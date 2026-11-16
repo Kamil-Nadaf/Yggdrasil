@@ -1,12 +1,26 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import BookIcon from "./BookIcons";
+import { buildOutline, scanPdfLines, type Heading } from "../lib/pdfOutline";
 
 export type SidebarTab = "toc" | "thumbs" | "search" | "notes";
 
 export interface FindHit { page: number; nth: number; snippet: string }
 
-interface OutlineNode { title: string; dest: unknown; items: OutlineNode[] }
+interface OutlineNode { title: string; dest: unknown; items: OutlineNode[]; /** set for contents detected from the text (no embedded outline) */ page?: number }
+
+const AUTO_KEY = "yggdrasil:pdf-outline:v1:";
+function headingsToTree(hs: Heading[]): OutlineNode[] {
+  const root: OutlineNode[] = [];
+  const stack: { level: number; node: OutlineNode }[] = [];
+  for (const h of hs) {
+    const node: OutlineNode = { title: h.title, dest: null, items: [], page: h.page };
+    while (stack.length && stack[stack.length - 1].level >= h.level) stack.pop();
+    (stack.length ? stack[stack.length - 1].node.items : root).push(node);
+    stack.push({ level: h.level, node });
+  }
+  return root;
+}
 
 interface Props {
   pdf: PDFDocumentProxy | null;
@@ -57,10 +71,41 @@ export default function ReaderSidebar(p: Props) {
 function Outline({ pdf, onJump }: { pdf: PDFDocumentProxy | null; onJump: (page: number) => void }) {
   const [items, setItems] = useState<OutlineNode[] | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [auto, setAuto] = useState(false);
+  const [scan, setScan] = useState<{ done: number; total: number } | null>(null);
   useEffect(() => {
     if (!pdf) return;
     let dead = false;
-    pdf.getOutline().then((o) => { if (!dead) setItems((o as unknown as OutlineNode[] | null) || []); }).catch(() => { if (!dead) setItems([]); });
+    setAuto(false);
+    setScan(null);
+    (async () => {
+      let embedded: OutlineNode[] = [];
+      try { embedded = ((await pdf.getOutline()) as unknown as OutlineNode[] | null) || []; } catch { embedded = []; }
+      if (dead) return;
+      if (embedded.length > 0) { setItems(embedded); return; }
+      // No embedded outline: read the printed Contents page / headings from the text (cached per document).
+      const key = AUTO_KEY + (pdf.fingerprints?.[0] ?? "");
+      try {
+        const cached = localStorage.getItem(key);
+        if (cached) {
+          const t = headingsToTree(JSON.parse(cached) as Heading[]);
+          if (!dead) { setAuto(true); setItems(t); }
+          return;
+        }
+      } catch { /* ignore a bad cache entry */ }
+      setItems(null);
+      try {
+        const { lines, pageCount } = await scanPdfLines(pdf, (done, total) => { if (!dead) setScan({ done, total }); }, () => dead);
+        if (dead) return;
+        const hs = buildOutline(lines, pageCount);
+        try { localStorage.setItem(key, JSON.stringify(hs)); } catch { /* cache is optional */ }
+        setScan(null);
+        setAuto(hs.length > 0);
+        setItems(headingsToTree(hs));
+      } catch {
+        if (!dead) { setScan(null); setItems([]); }
+      }
+    })();
     return () => { dead = true; };
   }, [pdf]);
 
@@ -82,20 +127,25 @@ function Outline({ pdf, onJump }: { pdf: PDFDocumentProxy | null; onJump: (page:
       return (
         <div key={id}>
           <div className="rsb-toc-row" style={{ paddingLeft: 6 + depth * 14 }}>
-            <button type="button" className="rsb-caret" aria-label={open[id] ? "Collapse" : "Expand"} style={{ visibility: kids ? "visible" : "hidden" }} onClick={() => setOpen((o) => ({ ...o, [id]: !o[id] }))}>
-              <BookIcon name={open[id] ? "down" : "next"} size={12} />
+            <button type="button" className="rsb-caret" aria-label={(auto ? open[id] !== false : open[id]) ? "Collapse" : "Expand"} style={{ visibility: kids ? "visible" : "hidden" }} onClick={() => setOpen((o) => ({ ...o, [id]: auto ? o[id] === false : !o[id] }))}>
+              <BookIcon name={(auto ? open[id] !== false : open[id]) ? "down" : "next"} size={12} />
             </button>
-            <button type="button" className="rsb-toc-item" onClick={() => void go(n.dest)} title={n.title}>{n.title || "Untitled"}</button>
+            <button type="button" className="rsb-toc-item" onClick={() => (n.page ? onJump(n.page) : void go(n.dest))} title={n.page ? `${n.title} · p. ${n.page}` : n.title}>{n.title || "Untitled"}</button>
           </div>
-          {kids && open[id] && render(n.items, depth + 1, id)}
+          {kids && (auto ? open[id] !== false : open[id]) && render(n.items, depth + 1, id)}
         </div>
       );
     });
   }
 
-  if (!items) return <div className="rsb-empty muted">Loading…</div>;
-  if (items.length === 0) return <div className="rsb-empty muted">This PDF has no table of contents. Use the Pages tab or search.</div>;
-  return <div className="rsb-toc">{render(items, 0, "")}</div>;
+  if (!items) return <div className="rsb-empty muted">{scan ? `Finding sections… ${scan.done}/${scan.total} pages` : "Loading…"}</div>;
+  if (items.length === 0) return <div className="rsb-empty muted">No sections found in this PDF. Use the Pages tab or search.</div>;
+  return (
+    <div className="rsb-toc">
+      {auto && <div className="rsb-auto muted">Sections detected from the text</div>}
+      {render(items, 0, "")}
+    </div>
+  );
 }
 
 function Thumb({ pdf, num, ratio, active, root, onJump }: { pdf: PDFDocumentProxy; num: number; ratio: number; active: boolean; root: HTMLElement | null; onJump: (n: number) => void }) {

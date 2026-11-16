@@ -9,6 +9,8 @@ import { useCericAppend } from "./CericToolbar";
 import { PreviewToolbar, useFullscreenPane, useZoom } from "./WorkspacePreviewPane";
 import { useCollapsed } from "../lib/useCollapsed";
 import PdfSelectionPopup, { type Markup } from "./PdfSelectionPopup";
+import PdfDefineCard from "./PdfDefineCard";
+import { lookupTerm } from "../lib/lookup";
 import { colorCss, slotColor, useHighlightPrefs } from "../lib/highlightPrefs";
 import "./pdfAnnotate.css";
 import ReaderNotes from "./ReaderNotes";
@@ -294,6 +296,8 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
   const [rnOpen, setRnOpen] = useState(false);
   const [rsOpen, setRsOpen] = useState(() => { try { return localStorage.getItem("reader-rside") !== "0"; } catch { return true; } });
   const [rsTab, setRsTab] = useState<"paper" | "mine">("paper");
+  const [defineFor, setDefineFor] = useState<string | null>(null);
+  useEffect(() => { if (!sel) setDefineFor(null); }, [sel]);
   const [sbW, setSbW] = useState(() => { try { return Number(localStorage.getItem("reader-sb-w")) || 280; } catch { return 280; } });
   useEffect(() => { try { localStorage.setItem("reader-sb-w", String(sbW)); localStorage.setItem("reader-rside", rsOpen ? "1" : "0"); } catch { /* ignore */ } }, [sbW, rsOpen]);
   const [rnQueue, setRnQueue] = useState<string[]>([]);
@@ -432,7 +436,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
   /** Reads the browser selection after any mouse-up / key-up (also when the drag ends outside the pages). */
   function processSelection(e: Event) {
     const target = e.target as Element | null;
-    if (target?.closest?.(".pdfv-selpop, .pdfv-tools, .pdfv-draft")) return;
+    if (target?.closest?.(".pdfv-selpop, .pdfv-define, .pdfv-tools, .pdfv-draft")) return;
     if (tool !== "select") return;
     const s = window.getSelection();
     const text = s?.toString().trim() || "";
@@ -502,6 +506,36 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
     return 1;
   }
 
+  // Keep the reading position when the page width changes (zoom, split view, window or pane resize).
+  // Pages are laid out with estimated heights until they render, so the raw scroll offset would land on a
+  // different page. We remember the page and how far into it we are, and put the view back after relayout.
+  const anchorRef = useRef<{ page: number; frac: number } | null>(null);
+  const restoreUntil = useRef(0);
+  function recordAnchor(p: number) {
+    if (!rootEl || Date.now() < restoreUntil.current) return;
+    const el = rootEl.querySelector<HTMLElement>(`.pdfv-page[data-page="${p}"]`);
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    anchorRef.current = { page: p, frac: (rootEl.getBoundingClientRect().top - r.top) / Math.max(1, r.height) };
+  }
+  useEffect(() => {
+    const a = anchorRef.current;
+    if (!rootEl || !a) return;
+    restoreUntil.current = Date.now() + 1200;
+    const apply = () => {
+      const el = rootEl.querySelector<HTMLElement>(`.pdfv-page[data-page="${a.page}"]`);
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const delta = a.frac * r.height - (rootEl.getBoundingClientRect().top - r.top);
+      if (Math.abs(delta) > 1) rootEl.scrollTop += delta;
+    };
+    apply();
+    let n = 0;
+    const t = window.setInterval(() => { apply(); if (++n >= 9) window.clearInterval(t); }, 130);
+    return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageWidth, ratio]);
+
   // Reading position: jump to the saved page once, then report scrolling back to the host.
   const onPageRef = useRef(doc.onPage);
   onPageRef.current = doc.onPage;
@@ -523,6 +557,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
     const report = () => {
       raf = 0;
       const p = currentPage();
+      recordAnchor(p);
       if (p !== last) { last = p; setCurPage(p); onPageRef.current?.(p, pages); }
     };
     const onScroll = () => { if (!raf) raf = window.requestAnimationFrame(report); };
@@ -886,8 +921,12 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
           x={anchor.x} y={anchor.y} below={anchor.below} prefs={prefs} markup={markup} onMarkup={setMarkup} text={sel.text}
           onPick={(c) => applySel(c)} onNote={() => applySel(prefs.defaultColor, { note: true })}
           onToNotes={doc.notes ? () => void toNotes() : undefined}
+          onDefine={lookupTerm(sel.text) ? () => setDefineFor((d) => (d === sel.text ? null : sel.text)) : undefined} defineOn={defineFor === sel.text}
           slots={doc.paper ? cer.slots : null} addingSlot={cer.addingSlot} onCeric={(k) => addToCeric(k, cer.slots.findIndex((x) => x.key === k))}
         />
+      )}
+      {sel && anchor && defineFor === sel.text && lookupTerm(sel.text) && (
+        <PdfDefineCard key={defineFor} text={sel.text} below={anchor.below} onClose={() => setDefineFor(null)} />
       )}
       {textFail && <div className="pdfv-warn">Text selection isn’t available for this PDF (see the console for details). You can still add a page note from the Notes list.</div>}
       {toast && <div className={`pdfv-toast ${toast.ok ? "ok" : "error"}`}>{toast.text}</div>}

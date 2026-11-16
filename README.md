@@ -10,77 +10,24 @@ self-hosted Docker web app.
 
 ## Install
 
-Download the installer for your computer from the
-**[latest release](https://github.com/Kamil-Nadaf/Yggdrasil/releases/latest)**
-(scroll to **Assets**). No Docker, Python or Node needed.
+**Package manager** (no download needed):
 
-| Your computer | Download | Then |
-|---|---|---|
-| **macOS — Apple Silicon** (M1/M2/M3/M4) | `Yggdrasil-…-mac-arm64.pkg` (or `.dmg`) | Open → Continue → Install |
-| **macOS — Intel** | `Yggdrasil-…-mac-intel.pkg` (or `.dmg`) | Open → Continue → Install |
-| **Windows** | `Yggdrasil-…-windows.zip` | Unzip → double-click `Yggdrasil.bat` |
-| **Linux** | `Yggdrasil-…-linux.tar.gz` | Extract → `./install.sh` |
+```bash
+# macOS
+brew tap Kamil-Nadaf/yggdrasil https://github.com/Kamil-Nadaf/Yggdrasil && brew install --cask yggdrasil
+# Windows (PowerShell)
+scoop bucket add yggdrasil https://github.com/Kamil-Nadaf/Yggdrasil; scoop install yggdrasil
+# Linux (and macOS without Homebrew)
+curl -fsSL https://raw.githubusercontent.com/Kamil-Nadaf/Yggdrasil/main/scripts/install.sh | bash
+```
 
-The apps are not code-signed, so your OS may warn you the first time — the
-steps below show how to get past it.
+**Or download** the file for your computer from the
+**[latest release](https://github.com/Kamil-Nadaf/Yggdrasil/releases/latest)**:
+macOS `.pkg`/`.dmg` (arm64 = Apple Silicon, intel = Intel), Windows `.zip`, Linux `.tar.gz`.
+The apps are not code-signed, so your OS may warn on first launch.
 
-### macOS
-
-1. Not sure which Mac you have? Apple menu → **About This Mac**: *Chip: Apple M…* → download the
-   **arm64** file; *Processor: Intel…* → download the **intel** file.
-2. **macOS will block it the first time** (the installer isn't signed by Apple),
-   with *"…can't be opened because Apple cannot check it for malicious software"*.
-   Click **Done** (not Move to Trash), then either:
-   - open **System Settings → Privacy & Security**, scroll down to *"Yggdrasil… was
-     blocked"* and click **Open Anyway** → **Open**; or
-   - right-click the `.pkg` → **Open** → **Open**; or
-   - in Terminal: `xattr -d com.apple.quarantine ~/Downloads/Yggdrasil-*-mac.pkg`
-3. Run the installer: **Continue → Install**. It puts Yggdrasil in `/Applications`
-   and clears the quarantine flag on the app.
-4. Open **Yggdrasil** from Launchpad or Finder. If it says the app is "damaged",
-   run `xattr -cr /Applications/Yggdrasil.app` in Terminal and try again.
-
-**Prefer the `.dmg`?** Open it, drag **Yggdrasil** into **Applications**, eject the
-disk image, then open the app. If macOS blocks it:
-
-- *"cannot be opened because the developer cannot be verified"* → right-click the
-  app → **Open** → **Open**. (Or **System Settings → Privacy & Security → Open Anyway**.)
-- *"Yggdrasil is damaged and can't be opened"* → the app is fine; macOS just
-  flags unsigned downloads. Open **Terminal** and run:
-  ```bash
-  xattr -cr /Applications/Yggdrasil.app
-  ```
-
-### Windows
-
-1. Download the `.zip` from the release page.
-2. Right-click it → **Extract All…** (don't run it from inside the zip).
-3. Open the extracted folder and double-click **`Yggdrasil.bat`**.
-   If Windows SmartScreen appears: **More info → Run anyway**.
-4. *(Only for the LaTeX editor)* install [MiKTeX](https://miktex.org/download)
-   and make sure `pdflatex` / `latexmk` are on your PATH. Everything else
-   works without it.
-
-### Linux
-
-1. Download the `.tar.gz` from the release page.
-2. Install the GTK/WebKit libraries once:
-   ```bash
-   # Ubuntu / Debian
-   sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-webkit2-4.1 pkg-config
-   # Fedora
-   sudo dnf install python3-gobject gtk3 webkit2gtk3 pkgconfig
-   # Arch
-   sudo pacman -S python-gobject gtk3 webkit2gtk pkgconf
-   ```
-3. Extract and install:
-   ```bash
-   tar -xzf Yggdrasil-*-linux.tar.gz
-   cd Yggdrasil-linux
-   ./install.sh          # adds Yggdrasil to your app menu
-   ```
-   Or run it without installing: `./Yggdrasil`.
-   Uninstall anytime with `~/.local/share/Yggdrasil/uninstall.sh`.
+Step-by-step help for every OS, warnings, updating and uninstalling: **[Documentation → INSTALL.md](INSTALL.md)**
+(a full documentation site on GitHub Pages is planned).
 
 ### First launch (all platforms)
 

@@ -229,9 +229,53 @@ jobs:
             | Linux | `Yggdrasil-*-linux.tar.gz` → extract → `./install.sh` |
             | Android | `Yggdrasil-*-android.apk` → open on the phone (allow installs from this source). Needs the phone server from `mobile/` running on your Mac/server — see [mobile/README.md](https://github.com/${{ github.repository }}/blob/main/mobile/README.md) |
 
+            Prefer a package manager? macOS: `brew tap Kamil-Nadaf/yggdrasil https://github.com/Kamil-Nadaf/Yggdrasil && brew install --cask yggdrasil` ·
+            Windows: `scoop bucket add yggdrasil https://github.com/Kamil-Nadaf/Yggdrasil` then `scoop install yggdrasil` ·
+            macOS/Linux: `curl -fsSL https://raw.githubusercontent.com/Kamil-Nadaf/Yggdrasil/main/scripts/install.sh | bash`
+            (details in [INSTALL.md](https://github.com/${{ github.repository }}/blob/main/INSTALL.md)).
+
             Already installed? Open **Settings → Updates → Check for updates** — most releases
             install in-app (`Yggdrasil-app-*.zip`), no download needed.
 
             The apps are not code-signed. On macOS, if Gatekeeper blocks the DMG
             build, right-click → Open, or run `xattr -cr /Applications/Yggdrasil.app`.
             See [INSTALL.md](https://github.com/${{ github.repository }}/blob/main/INSTALL.md).
+
+  packages:
+    name: Update Homebrew and Scoop
+    needs: [release]
+    if: ${{ !cancelled() && needs.release.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # The Homebrew tap (Casks/) and Scoop bucket (bucket/) live in this repo on main.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Download release files
+        run: |
+          mkdir -p assets
+          gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --dir assets \
+            --pattern '*-mac-arm64.dmg' --pattern '*-mac-intel.dmg' --pattern '*-windows.zip' || true
+          ls -lh assets
+
+      - name: Render manifests
+        run: python3 packaging/package-managers/render.py "${GITHUB_REF_NAME}" "${GITHUB_REPOSITORY}" assets manifests
+
+      - name: Attach manifests to the release
+        run: gh release upload "${GITHUB_REF_NAME}" manifests/* --repo "${GITHUB_REPOSITORY}" --clobber
+
+      - name: Commit tap and bucket to main
+        run: |
+          mkdir -p Casks bucket
+          [ -f manifests/yggdrasil.rb ] && cp manifests/yggdrasil.rb Casks/yggdrasil.rb
+          [ -f manifests/yggdrasil.json ] && cp manifests/yggdrasil.json bucket/yggdrasil.json
+          git add Casks bucket
+          git diff --cached --quiet && exit 0
+          git -c user.name="yggdrasil-release" -c user.email="release@users.noreply.github.com" commit -m "package managers: ${GITHUB_REF_NAME}"
+          git pull --rebase origin main
+          git push origin HEAD:main

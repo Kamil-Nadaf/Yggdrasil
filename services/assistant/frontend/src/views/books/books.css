@@ -340,6 +340,9 @@
 .pdfv-find-box { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; height: 26px; padding: 0 6px; border: 1px solid var(--border); border-radius: 999px; }
 .pdfv-find-box input { width: 120px; border: none; outline: none; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; padding: 0; }
 .pdfv-find-box input::-webkit-search-cancel-button { display: none; }
+/* No native search-field box or focus ring inside the pill: the pill itself shows focus. */
+.pdfv-find-box input, .pdfv-find-box input:focus, .pdfv-find-box input:focus-visible { -webkit-appearance: none; appearance: none; border: 0 !important; outline: none !important; box-shadow: none !important; background: transparent !important; border-radius: 0; }
+.pdfv-find-box:focus-within { border-color: var(--accent); }
 .pdfv-find-count { font-size: 11px; white-space: nowrap; }
 .pdfv-zoom-pct { flex: 0 0 auto; min-width: 38px; text-align: center; font-size: 11px; background: none; border: none; color: var(--muted, #888); cursor: pointer; font-family: inherit; }
 .pdfv-tb-tools { display: inline-flex; align-items: center; gap: 1px; flex: 0 0 auto; }
@@ -405,3 +408,15 @@ body.rsb-dragging { cursor: col-resize; user-select: none; }
 .rd-timer-btn { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border: 0; border-radius: 50%; background: var(--accent, #7c6cd6); color: #fff; cursor: pointer; padding: 0; }
 .rd-timer.paused { opacity: .85; }
 .rd-timer.paused .rd-timer-btn { background: #d9a13a; }
+
+/* Notes list in the reader: compact buttons and colour dots (the global .btn is large for this narrow panel).
+   The paper theme forces 2px borders on every button/textarea, so these rules carry :root[data-theme] to outrank it. */
+.pdfv-notes-head, .pdfv-note-top { gap: 3px; }
+.pdfv-notes-head { gap: 5px; }
+:root[data-theme] .pdfv-notes-head .btn, :root[data-theme] .pdfv-note-top .btn { padding: 2px 6px; border-width: 1px; font-size: 12px; line-height: 1.4; height: auto; white-space: nowrap; flex: 0 0 auto; }
+:root[data-theme] .pdfv-notes-head .btn { padding: 2px 8px; }
+.pdfv-note-top { flex-wrap: wrap; }
+.pdfv-note-top .pdfv-swatch.small { flex: 0 0 auto; width: 10px; height: 10px; border-width: 1px; }
+.pdfv-note-top .pdfv-swatch.small.on { box-shadow: 0 0 0 1.5px var(--text); }
+:root[data-theme] .pdfv-note-input { border-width: 1px; border-color: var(--border); border-radius: 6px; padding: 4px 7px; font-size: 12.5px; min-height: 34px; background: var(--bg); }
+:root[data-theme] .pdfv-note-input:focus { border-color: var(--accent); outline: none; }

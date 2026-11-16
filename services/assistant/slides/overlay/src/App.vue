@@ -96,14 +96,18 @@ onMounted(async () => {
     const d = e.data
     if (!d || d.source !== 'yggdrasil-host' || d.type !== 'place') return
     try {
+      // `.viewport` is a zero-size box scaled from its top-left corner, so its position is the slide's origin and its transform is the scale.
       const vp = document.querySelector('.viewport') as HTMLElement | null
       const r = vp?.getBoundingClientRect()
-      const k = r && viewportSize.value ? r.width / viewportSize.value : 0
-      const rect = d.rect && k ? {
-        left: (d.rect.x - r!.left) / k,
-        top: (d.rect.y - r!.top) / k,
-        width: d.rect.w / k,
-        height: d.rect.h / k,
+      const k = parseFloat((vp?.style.transform.match(/scale\(([\d.]+)\)/) || [])[1] || '0')
+      // The host measures in its own pixels; scale to this frame's pixels in case the page is zoomed.
+      const fx = d.stage && d.stage.w ? window.innerWidth / d.stage.w : 1
+      const fy = d.stage && d.stage.h ? window.innerHeight / d.stage.h : 1
+      const rect = d.rect && r && k ? {
+        left: (d.rect.x * fx - r.left) / k,
+        top: (d.rect.y * fy - r.top) / k,
+        width: (d.rect.w * fx) / k,
+        height: (d.rect.h * fy) / k,
       } : null
       const id = nanoid(10)
       if (d.kind === 'formula' && typeof d.latex === 'string' && d.latex.trim()) {

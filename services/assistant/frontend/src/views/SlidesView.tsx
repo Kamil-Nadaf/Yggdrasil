@@ -51,10 +51,11 @@ export default function SlidesView({ lockedProject }: { lockedProject?: string }
   const [inkMsg, setInkMsg] = useState("");
   // Handwriting written on the slide is recognised here and placed by the editor where it was written.
   const placeInk = (kind: "formula" | "text", value: string, rect: PlaceRect) => {
-    try { frameRef.current?.contentWindow?.postMessage({ source: "yggdrasil-host", type: "place", kind, latex: value, text: value, rect }, "*"); } catch { /* ignore */ }
+    try { frameRef.current?.contentWindow?.postMessage({ source: "yggdrasil-host", type: "place", kind, latex: value, text: value, rect, stage: { w: stageRef.current?.clientWidth ?? 0, h: stageRef.current?.clientHeight ?? 0 } }, "*"); } catch { /* ignore */ }
   };
   const phone = isPhone();
   const frameRef = useRef<HTMLIFrameElement | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const sendTheme = useCallback(() => {
     try { frameRef.current?.contentWindow?.postMessage({ source: "yggdrasil-host", type: "theme", vars: themeVars() }, "*"); } catch { /* ignore */ }
   }, []);
@@ -187,7 +188,7 @@ export default function SlidesView({ lockedProject }: { lockedProject?: string }
           {inkMsg && <span className="sl-hint" role="status">{inkMsg}</span>}
           <button className="btn sl-fs" onClick={() => setFull((v) => !v)} title={full ? "Exit full window (Esc)" : "Full window"}>{full ? "Exit full window" : "Full window"}</button>
         </div>
-        <div className="sl-stage">
+        <div className="sl-stage" ref={stageRef}>
           <iframe ref={frameRef} key={src} className="sl-frame" src={src} title={`Deck ${open}`} allow="fullscreen" onLoad={sendTheme} />
           {inkOpen && <SlideInk onPlace={placeInk} onClose={() => setInkOpen(false)} />}
         </div>

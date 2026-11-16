@@ -16,6 +16,7 @@ Routes live under /api/canvas.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -121,7 +122,7 @@ def validate_latex(src: str) -> list[str]:
 # ── Engine call ──────────────────────────────────────────────────────────────
 
 def _default_client() -> httpx.AsyncClient:
-    return httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
+    return httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0))
 
 
 def _answer_text(msg: dict) -> str:
@@ -175,7 +176,11 @@ async def _call_engine(
     }
     if eng.model.strip():
         body["model"] = eng.model.strip()
+    # Busy hosted models answer 503/429 for a moment: one quick retry before moving on to the next engine.
     resp = await client.post(f"{base}/chat/completions", headers=_headers(eng.api_key), json=body)
+    if resp.status_code in (429, 503):
+        await asyncio.sleep(1.5)
+        resp = await client.post(f"{base}/chat/completions", headers=_headers(eng.api_key), json=body)
     if resp.status_code >= 400:
         raise RuntimeError(_short_error(resp))
     msg = (resp.json().get("choices") or [{}])[0].get("message") or {}

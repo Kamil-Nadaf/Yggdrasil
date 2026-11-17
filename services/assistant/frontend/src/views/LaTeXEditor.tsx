@@ -1881,7 +1881,7 @@ export default function LaTeXEditor() {
       >
         {inkDock && (
           <>
-            <Panel id="latex-ink" defaultSize={viewMode === "split" ? "40" : "50"} minSize="25" className="latex-panel">
+            <Panel id="latex-ink" defaultSize={String(viewMode === "split" ? (filesCollapsed ? 36 : 28) : viewMode === "pdf" ? (filesCollapsed ? 50 : 40) : (filesCollapsed ? 45 : 38))} minSize="20" className="latex-panel">
               <CanvasView
                 embedded
                 title="Canvas"
@@ -1900,8 +1900,8 @@ export default function LaTeXEditor() {
               id="latex-editor"
               defaultSize={
                 viewMode === "split"
-                  ? inkDock ? "32" : filesCollapsed ? "55" : "50"
-                  : filesCollapsed ? "100" : "82"
+                  ? inkDock ? (filesCollapsed ? "34" : "28") : filesCollapsed ? "55" : "50"
+                  : inkDock ? (filesCollapsed ? "55" : "44") : filesCollapsed ? "100" : "82"
               }
               minSize="25"
               className="latex-panel"
@@ -1917,8 +1917,8 @@ export default function LaTeXEditor() {
             id="latex-preview"
             defaultSize={
               viewMode === "split"
-                ? inkDock ? "28" : filesCollapsed ? "45" : "32"
-                : filesCollapsed ? "100" : "82"
+                ? inkDock ? (filesCollapsed ? "30" : "22") : filesCollapsed ? "45" : "32"
+                : inkDock ? (filesCollapsed ? "50" : "38") : filesCollapsed ? "100" : "82"
             }
             minSize="25"
             className="latex-panel"

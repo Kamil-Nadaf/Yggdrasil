@@ -36,7 +36,7 @@ export default function ConvertButton({ fileKey, url = "", name, kind, onResult,
         localStorage.setItem("yggdrasil:pdf-select", body.file.id);
         localStorage.setItem("yggdrasil:tools-page", "pdf");
       } catch { /* ignore */ }
-      const running = body.file.status === "running";
+      const running = body.file.status === "running" || !!body.started;
       setState(running ? "converting" : "added");
       onResult?.(
         body.existed

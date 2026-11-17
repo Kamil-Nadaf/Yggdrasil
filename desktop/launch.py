@@ -58,6 +58,7 @@ def safe_boot(window) -> None:
     except BaseException:
         tb = traceback.format_exc()
         blog("boot: FAILED\n" + tb)
+        mark_boot_failed()
         last = tb.strip().splitlines()[-1] if tb.strip() else "unknown error"
         try:
             window.evaluate_js(f"setStatus({json.dumps('Startup failed: ' + last + ' — details in ' + str(log_file()))})")
@@ -88,6 +89,35 @@ def _updates_root() -> Path:
     return support_dir() / "updates"
 
 
+def _pending_tries(pending: Path) -> int:
+    """How many starts have already tried this update without finishing boot ("0.5.1:1" → 1; the old "0.5.1" → 1)."""
+    try:
+        text = pending.read_text(encoding="utf-8").strip()
+    except Exception:
+        return 1
+    if ":" in text:
+        try:
+            return int(text.rsplit(":", 1)[1])
+        except ValueError:
+            return 1
+    return 1
+
+
+def mark_boot_failed() -> None:
+    """The app code of an installed update crashed while starting: the next start must not use it again."""
+    try:
+        pending = _updates_root() / "boot.pending"
+        if pending.exists():
+            pending.write_text(f"{pending.read_text(encoding='utf-8').split(':')[0].strip()}:{MAX_BOOT_TRIES}", encoding="utf-8")
+    except Exception:
+        pass
+
+
+# An update gets this many starts to finish booting. A first start can be slow (data migration, LaTeX setup), and quitting
+# or sleeping the Mac during it used to throw the update away; one interrupted start is now forgiven, a crash is not.
+MAX_BOOT_TRIES = 2
+
+
 def resources_dir() -> Path:
     """The app code folder: an installed in-app update when it is newer than the bundled code, else the bundle."""
     global _RES_CACHE
@@ -99,14 +129,20 @@ def resources_dir() -> Path:
     cur = root / "current"
     pending = root / "boot.pending"
     try:
+        tries = 0
         if pending.exists():
-            # the previous start with an update never finished booting → drop it and use the bundled code
-            shutil.rmtree(root / "failed", ignore_errors=True)
-            if cur.exists():
-                cur.rename(root / "failed")
-            pending.unlink(missing_ok=True)
-            blog("update: previous boot with an update failed — using the bundled version")
-        elif cur.exists():
+            tries = _pending_tries(pending)
+            if tries >= MAX_BOOT_TRIES:
+                # the update failed to finish booting repeatedly (or crashed) → drop it and use the bundled code
+                shutil.rmtree(root / "failed", ignore_errors=True)
+                if cur.exists():
+                    cur.rename(root / "failed")
+                pending.unlink(missing_ok=True)
+                tries = 0
+                blog("update: previous boots with an update failed — using the bundled version")
+            else:
+                blog(f"update: previous start did not finish booting (try {tries + 1} of {MAX_BOOT_TRIES})")
+        if cur.exists():
             info = json.loads((cur / "update.json").read_text(encoding="utf-8"))
             bundled = re.search(r'APP_VERSION\s*=\s*"([^"]+)"', (base / "data_manifest.py").read_text(encoding="utf-8"))
             ok = (
@@ -116,7 +152,7 @@ def resources_dir() -> Path:
                 and _vtuple(str(info.get("version"))) > _vtuple(bundled.group(1) if bundled else "")
             )
             if ok:
-                pending.write_text(str(info.get("version")), encoding="utf-8")
+                pending.write_text(f"{info.get('version')}:{tries + 1}", encoding="utf-8")
                 chosen = cur
                 blog(f"update: using installed update {info.get('version')}")
     except Exception as exc:  # never let a broken update stop the app from starting

@@ -322,7 +322,7 @@ export default function PdfWorkbench({ onBack }: { onBack: () => void }) {
           ))}
         </ul>
         {files.length === 0 && <div className="tl-help" style={{ padding: "0 4px" }}>Added files appear here. Drop PDFs anywhere on this page.</div>}
-        <div className="pw-foot">{status === null ? "" : status.mineru.installed ? `MinerU ${status.mineru.version}` : "MinerU is not installed"}</div>
+        <div className="pw-foot">{status === null ? "" : status.mineru.installed ? `MinerU ${status.mineru.version}` : "MinerU comes with the full installer"}</div>
       </aside>
 
       <section className="pw-main">

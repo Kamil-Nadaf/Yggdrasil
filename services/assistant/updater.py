@@ -20,6 +20,8 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.parse
+import urllib.request
 import zipfile
 from pathlib import Path
 from typing import Callable
@@ -29,6 +31,7 @@ from fastapi import APIRouter, HTTPException
 
 REPO = os.environ.get("YGG_UPDATE_REPO", "Kamil-Nadaf/Yggdrasil")
 MAX_PAYLOAD = 200 * 1024 * 1024
+API_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
 PAYLOAD_RE = re.compile(r"^Yggdrasil-app-v?(\d+\.\d+\.\d+)\.zip$")
 
 
@@ -68,20 +71,62 @@ def installer_asset(assets: list[dict]) -> dict | None:
     return None
 
 
-def fetch_latest() -> dict:
+def _routes(url: str = "") -> list[str | None]:
+    """Connection routes to try in order. An app opened from the Dock/Start menu doesn't inherit the shell's proxy
+    variables, so the system proxy is tried first (when there is one), then a direct connection. Hosts the system
+    says to bypass, and localhost, always go direct."""
+    routes: list[str | None] = []
+    if not os.environ.get("YGG_NO_PROXY"):
+        try:
+            host = (urllib.parse.urlparse(url).hostname or "") if url else ""
+            skip = host in ("localhost", "127.0.0.1", "::1") or (bool(host) and urllib.request.proxy_bypass(host))
+            found = urllib.request.getproxies()
+            proxy = found.get("https") or found.get("http")
+            if proxy and not skip:
+                routes.append(proxy if "://" in proxy else "http://" + proxy)
+        except Exception:
+            pass
+    routes.append(None)
+    return routes
+
+
+_LATEST: dict = {"at": 0.0, "data": None}
+LATEST_TTL = 300  # seconds: the check, the prompt and the install share one GitHub call (unauthenticated limit is 60/hour)
+
+
+def fetch_latest(force: bool = False) -> dict:
+    now = time.time()
+    if not force and _LATEST["data"] is not None and now - _LATEST["at"] < LATEST_TTL:
+        return _LATEST["data"]
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "Yggdrasil-updater"}
     token = os.environ.get("YGG_UPDATE_TOKEN")
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    try:
-        r = httpx.get(f"https://api.github.com/repos/{REPO}/releases/latest", headers=headers, timeout=12, follow_redirects=True)
-    except httpx.HTTPError as exc:
-        raise HTTPException(502, f"Couldn't reach GitHub: {exc}") from exc
-    if r.status_code == 404:
-        raise HTTPException(404, "No published release found yet (the repository may be private or have no releases).")
-    if r.status_code != 200:
-        raise HTTPException(502, f"GitHub answered {r.status_code} while checking for updates.")
-    return r.json()
+    last = "no answer"
+    for attempt in range(3):
+        for route in _routes(API_URL):
+            try:
+                r = httpx.get(API_URL, headers=headers,
+                              timeout=httpx.Timeout(20, connect=10), follow_redirects=True, proxy=route)
+            except httpx.HTTPError as exc:
+                last = str(exc) or exc.__class__.__name__
+                continue
+            if r.status_code == 404:
+                raise HTTPException(404, "No published release found yet (the repository may be private or have no releases).")
+            if r.status_code in (403, 429) and "rate limit" in r.text.lower():
+                if _LATEST["data"] is not None:
+                    return _LATEST["data"]
+                raise HTTPException(429, "GitHub is rate-limiting update checks from this network — try again in a few minutes.")
+            if r.status_code != 200:
+                last = f"GitHub answered {r.status_code}"
+                continue
+            _LATEST["at"], _LATEST["data"] = now, r.json()
+            return _LATEST["data"]
+        if attempt < 2:
+            time.sleep(1.5 * (attempt + 1))
+    if _LATEST["data"] is not None:  # offline right now, but we did hear from GitHub earlier this session
+        return _LATEST["data"]
+    raise HTTPException(502, f"Couldn't reach GitHub ({last}). Check your connection or proxy and try again.")
 
 
 def describe(release: dict, current: str, desktop: bool) -> dict:
@@ -115,38 +160,119 @@ def _safe_members(zf: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
     return out
 
 
-def install_payload(info: dict) -> dict:
+ProgressFn = Callable[[str, int, int], None]
+
+
+def _total_from(resp, have: int, hint: int) -> int:
+    headers = getattr(resp, "headers", None) or {}
+    try:
+        rng = headers.get("content-range")
+        if rng and "/" in rng and rng.rsplit("/", 1)[1].strip().isdigit():
+            return int(rng.rsplit("/", 1)[1])
+        length = headers.get("content-length")
+        if length and str(length).isdigit():
+            return have + int(length)
+    except Exception:
+        pass
+    return hint
+
+
+def _download(url: str, dest: Path, size_hint: int, progress: ProgressFn | None) -> None:
+    """Download ``url`` into ``dest`` (a .part file), resuming where an earlier try stopped and retrying on network
+    errors. A flaky connection no longer means starting over: progress made so far is kept between tries."""
+    last = "no answer"
+    for attempt in range(6):
+        have = dest.stat().st_size if dest.exists() else 0
+        if size_hint and have >= size_hint:
+            return
+        for route in _routes(url):
+            headers = {"User-Agent": "Yggdrasil-updater"}
+            if have:
+                headers["Range"] = f"bytes={have}-"
+            try:
+                with httpx.stream("GET", url, headers=headers, timeout=httpx.Timeout(30, connect=15),
+                                  follow_redirects=True, proxy=route) as resp:
+                    code = resp.status_code
+                    if code == 416 and have:  # asked for bytes past the end: we already have it all
+                        return
+                    if code not in (200, 206):
+                        last = f"HTTP {code}"
+                        continue
+                    resuming = code == 206 and have > 0
+                    if not resuming:
+                        have = 0
+                    total = _total_from(resp, have, size_hint)
+                    with dest.open("ab" if resuming else "wb") as fh:
+                        for chunk in resp.iter_bytes(1 << 16):
+                            have += len(chunk)
+                            if have > MAX_PAYLOAD:
+                                dest.unlink(missing_ok=True)
+                                raise HTTPException(502, "The update package is unexpectedly large.")
+                            fh.write(chunk)
+                            if progress:
+                                progress("downloading", have, total)
+                    if not size_hint or have >= size_hint:
+                        return
+                    last = "the connection closed early"
+            except httpx.HTTPError as exc:
+                last = str(exc) or exc.__class__.__name__
+                have = dest.stat().st_size if dest.exists() else 0
+        time.sleep(min(1.5 * (attempt + 1), 6))
+    raise HTTPException(502, f"Download failed after several tries ({last}). What was downloaded is kept, so trying again resumes it.")
+
+
+def _rename_retry(src: Path, dst: Path, tries: int = 8) -> None:
+    """Rename a folder, retrying briefly: on Windows, antivirus or the search indexer can hold freshly written files."""
+    for i in range(tries):
+        try:
+            src.rename(dst)
+            return
+        except OSError:
+            if i == tries - 1:
+                raise
+            time.sleep(0.4 * (i + 1))
+
+
+def install_payload(info: dict, progress: ProgressFn | None = None) -> dict:
     payload = info.get("payload")
     if not payload or not payload.get("url"):
         raise HTTPException(409, "This release has no in-app update package — download the full installer instead.")
     root = updates_dir()
     root.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=root, suffix=".zip", delete=False) as tmp:
-        tmp_path = Path(tmp.name)
+    for old in root.glob(".staging-*"):  # leftovers of an install that was interrupted
+        shutil.rmtree(old, ignore_errors=True)
+    version_hint = str(info.get("latest") or "")
+    part = root / f".download-{version_hint}.part"
     try:
-        h = hashlib.sha256()
-        size = 0
+        size_hint = int(payload.get("size") or 0)
+    except (TypeError, ValueError):
+        size_hint = 0
+    digest = str(payload.get("digest") or "")
+    for attempt in range(2):
+        _download(payload["url"], part, size_hint, progress)
+        if digest.startswith("sha256:"):
+            h = hashlib.sha256()
+            with part.open("rb") as fh:
+                for block in iter(lambda: fh.read(1 << 20), b""):
+                    h.update(block)
+            if digest.split(":", 1)[1].lower() != h.hexdigest():
+                part.unlink(missing_ok=True)  # a corrupt partial can't be resumed: start clean once
+                if attempt == 0:
+                    continue
+                raise HTTPException(502, "The downloaded update didn't match its checksum — try again.")
+        break
+    if progress:
+        progress("installing", 1, 1)
+    try:
         try:
-            with httpx.stream("GET", payload["url"], headers={"User-Agent": "Yggdrasil-updater"}, timeout=60, follow_redirects=True) as resp:
-                if resp.status_code != 200:
-                    raise HTTPException(502, f"Download failed ({resp.status_code}).")
-                with tmp_path.open("wb") as fh:
-                    for chunk in resp.iter_bytes(1 << 16):
-                        size += len(chunk)
-                        if size > MAX_PAYLOAD:
-                            raise HTTPException(502, "The update package is unexpectedly large.")
-                        h.update(chunk)
-                        fh.write(chunk)
-        except httpx.HTTPError as exc:
-            raise HTTPException(502, f"Download failed: {exc}") from exc
-        digest = str(payload.get("digest") or "")
-        if digest.startswith("sha256:") and digest.split(":", 1)[1].lower() != h.hexdigest():
-            raise HTTPException(502, "The downloaded update didn't match its checksum — try again.")
-        try:
-            zf = zipfile.ZipFile(tmp_path)
+            zf = zipfile.ZipFile(part)
         except zipfile.BadZipFile as exc:
-            raise HTTPException(502, "The update package is not a valid zip.") from exc
+            part.unlink(missing_ok=True)
+            raise HTTPException(502, "The update package is not a valid zip — try again.") from exc
         with zf:
+            if zf.testzip() is not None:
+                part.unlink(missing_ok=True)
+                raise HTTPException(502, "The update package is damaged — try again.")
             members = _safe_members(zf)
             names = {m.filename for m in members}
             if not {"update.json", "main.py", "frontend/dist/index.html"} <= names:
@@ -163,14 +289,76 @@ def install_payload(info: dict) -> dict:
             zf.extractall(staging)
         current = root / "current"
         previous = root / "previous"
+        moved = False
         if current.exists():
             shutil.rmtree(previous, ignore_errors=True)
-            current.rename(previous)
-        staging.rename(current)
+            try:
+                _rename_retry(current, previous)
+                moved = True
+            except OSError as exc:
+                shutil.rmtree(staging, ignore_errors=True)
+                raise HTTPException(500, f"Couldn't replace the installed update ({exc}). Close other Yggdrasil windows and try again.") from exc
+        try:
+            _rename_retry(staging, current)
+        except OSError as exc:
+            if moved:  # never leave the app without a working update folder
+                try:
+                    _rename_retry(previous, current)
+                except OSError:
+                    pass
+            shutil.rmtree(staging, ignore_errors=True)
+            raise HTTPException(500, f"Couldn't put the update in place ({exc}). The previous version is untouched.") from exc
         (root / "boot.pending").unlink(missing_ok=True)
+        part.unlink(missing_ok=True)
         return {"ok": True, "version": version, "restart_required": True}
-    finally:
-        tmp_path.unlink(missing_ok=True)
+    except HTTPException as exc:
+        if exc.status_code != 500:  # a package that was rejected must not be reused by the next try
+            part.unlink(missing_ok=True)
+        raise
+    except Exception as exc:
+        raise HTTPException(500, f"Update failed: {exc}") from exc
+
+
+# ── background install job: the UI starts it, then polls for progress ──────────────────────────────
+_JOB: dict = {"state": "idle", "downloaded": 0, "total": 0, "version": "", "error": "", "code": 0}
+_JOB_LOCK = threading.Lock()
+
+
+def job_status() -> dict:
+    with _JOB_LOCK:
+        return dict(_JOB)
+
+
+def start_job(info: dict) -> dict:
+    with _JOB_LOCK:
+        if _JOB["state"] in ("downloading", "installing"):
+            return dict(_JOB)
+        try:
+            total = int((info.get("payload") or {}).get("size") or 0)
+        except (TypeError, ValueError):
+            total = 0
+        _JOB.update(state="downloading", downloaded=0, total=total, version=str(info.get("latest") or ""), error="", code=0)
+
+    def report(phase: str, done: int, total: int) -> None:
+        with _JOB_LOCK:
+            _JOB["state"] = "installing" if phase == "installing" else "downloading"
+            if phase == "downloading":
+                _JOB["downloaded"], _JOB["total"] = done, total or _JOB["total"]
+
+    def run() -> None:
+        try:
+            install_payload(info, report)
+            with _JOB_LOCK:
+                _JOB.update(state="done", error="", code=0)
+        except HTTPException as exc:
+            with _JOB_LOCK:
+                _JOB.update(state="error", error=str(exc.detail), code=exc.status_code)
+        except Exception as exc:  # never leave the UI waiting on a job that died
+            with _JOB_LOCK:
+                _JOB.update(state="error", error=f"Update failed: {exc}", code=500)
+
+    threading.Thread(target=run, daemon=True, name="ygg-update-install").start()
+    return job_status()
 
 
 def _relaunch_argv() -> list[str]:
@@ -261,18 +449,32 @@ def restart_app() -> None:
 def make_update_router(app_version: str, desktop: bool, restarter: Callable[[], None] = restart_app) -> APIRouter:
     router = APIRouter(prefix="/api/update", tags=["update"])
 
-    @router.get("/check")
-    def check() -> dict:
-        return describe(fetch_latest(), app_version, desktop)
-
-    @router.post("/install")
-    def install() -> dict:
+    def _installable() -> dict:
         if not desktop:
             raise HTTPException(400, "In-app install is only available in the desktop app. For Docker, rebuild with `docker compose up -d --build`.")
         info = describe(fetch_latest(), app_version, desktop)
         if not info["available"]:
             raise HTTPException(409, "You already have the latest version.")
-        return install_payload(info)
+        if not info["payload"]:
+            raise HTTPException(409, "This release has no in-app update package — download the full installer instead.")
+        return info
+
+    @router.get("/check")
+    def check(fresh: bool = False) -> dict:
+        return describe(fetch_latest(force=True) if fresh else fetch_latest(), app_version, desktop)
+
+    @router.post("/install")
+    def install() -> dict:
+        """Blocking install (kept for scripts); the app uses /install/start + /install/status."""
+        return install_payload(_installable())
+
+    @router.post("/install/start")
+    def install_start() -> dict:
+        return start_job(_installable())
+
+    @router.get("/install/status")
+    def install_status() -> dict:
+        return job_status()
 
     @router.post("/restart")
     def restart() -> dict:

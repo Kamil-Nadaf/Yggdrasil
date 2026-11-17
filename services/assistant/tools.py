@@ -163,7 +163,7 @@ def make_router(
 
     def launch(d: Path, tier: str, pages: str) -> None:
         if not mineru_bin():
-            raise HTTPException(500, "MinerU is missing from this install")
+            raise HTTPException(500, "MinerU isn't part of this install. It comes with the full installer (in-app updates can't add it) - install the latest full installer once to get it.")
         eid = d.name
         if eid in _RUN:
             raise HTTPException(409, "Already converting")

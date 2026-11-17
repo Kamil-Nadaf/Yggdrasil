@@ -1,3 +1,4 @@
+import { describeProgress, restartDesktopApp, runInstall } from "../lib/updateInstall";
 import { createContext, Fragment, useContext, useEffect, useState, type ReactNode } from "react";
 import AbstractText from "./AbstractText";
 import { api } from "../api/client";
@@ -228,6 +229,7 @@ export default function SettingsPage({ open = true, onClose, firstRun, onDataPat
   const [updBusy, setUpdBusy] = useState<"" | "check" | "install" | "restart">("");
   const [updMsg, setUpdMsg] = useState("");
   const [updReady, setUpdReady] = useState(false);
+  const [updProg, setUpdProg] = useState("");
 
   async function updCall<T>(path: string, method: "GET" | "POST"): Promise<T> {
     const r = await fetch(`/api/update/${path}`, { method });
@@ -238,7 +240,7 @@ export default function SettingsPage({ open = true, onClose, firstRun, onDataPat
   async function checkForUpdate() {
     setUpdBusy("check"); setUpdMsg(""); setUpdReady(false);
     try {
-      const r = await updCall<UpdateInfo>("check", "GET");
+      const r = await updCall<UpdateInfo>("check?fresh=1", "GET");
       setUpd(r);
       setUpdMsg(r.available ? "" : "You’re up to date.");
     } catch (e) {
@@ -247,14 +249,19 @@ export default function SettingsPage({ open = true, onClose, firstRun, onDataPat
     } finally { setUpdBusy(""); }
   }
   async function installUpdate() {
-    setUpdBusy("install"); setUpdMsg("");
+    setUpdBusy("install"); setUpdMsg(""); setUpdProg("Starting…");
     try {
-      await updCall<{ ok: boolean }>("install", "POST");
-      setUpdReady(true);
-      setUpdMsg("Update installed. Restart Yggdrasil to start using it.");
+      await runInstall((p) => setUpdProg(describeProgress(p)));
+      setUpdReady(true); setUpdProg("");
+      setUpdMsg("Update installed — restarting…");
+      setUpdBusy("restart");
+      try { await restartDesktopApp(); }
+      catch { setUpdBusy(""); setUpdMsg("Update installed. Restart Yggdrasil to start using it."); }
     } catch (e) {
+      setUpdProg("");
       setUpdMsg(e instanceof Error ? e.message : "Update failed.");
-    } finally { setUpdBusy(""); }
+      setUpdBusy("");
+    }
   }
   async function restartApp() {
     setUpdBusy("restart");
@@ -1654,7 +1661,7 @@ export default function SettingsPage({ open = true, onClose, firstRun, onDataPat
               </button>
               {upd?.available && upd.can_hot_update && !updReady && (
                 <button type="button" className="btn btn-primary" onClick={installUpdate} disabled={updBusy !== ""}>
-                  {updBusy === "install" ? "Installing…" : `Install v${upd.latest}`}
+                  {updBusy === "install" ? (updProg || "Installing…") : `Install v${upd.latest}`}
                 </button>
               )}
               {updReady && (

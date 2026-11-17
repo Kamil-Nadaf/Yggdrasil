@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { UpdateError, describeProgress, restartDesktopApp, runInstall } from "../lib/updateInstall";
 
 type Info = { latest: string; current: string; available: boolean; can_hot_update: boolean; notes?: string; url?: string; installer?: { url?: string } | null };
 
@@ -9,6 +10,7 @@ export default function UpdatePrompt() {
   const [info, setInfo] = useState<Info | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [prog, setProg] = useState("");
 
   useEffect(() => {
     const t = window.setTimeout(async () => {
@@ -33,12 +35,20 @@ export default function UpdatePrompt() {
       window.open(info!.installer?.url || info!.url || "https://github.com/Kamil-Nadaf/Yggdrasil/releases/latest", "_blank", "noopener");
       return;
     }
-    setBusy(true); setErr("");
+    setBusy(true); setErr(""); setProg("Starting…");
     try {
-      const i = await fetch("/api/update/install", { method: "POST" });
-      if (!i.ok) throw new Error(((await i.json().catch(() => ({}))) as { detail?: string }).detail || `Update failed (${i.status})`);
-      await fetch("/api/update/restart", { method: "POST" }).catch(() => {});
-    } catch (e) { setErr(e instanceof Error ? e.message : "Update failed."); setBusy(false); }
+      await runInstall((p) => setProg(describeProgress(p)));
+      setProg("Installed — restarting…");
+      try { await restartDesktopApp(); }
+      catch { setErr("Update installed. Please close and reopen Yggdrasil to start using it."); setBusy(false); setProg(""); }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Update failed.");
+      setBusy(false); setProg("");
+      // a release that needs new bundled libraries can only come from the full installer
+      if (e instanceof UpdateError && e.code === 409 && /full installer/i.test(e.message) && info!.installer?.url) {
+        window.open(info!.installer.url, "_blank", "noopener");
+      }
+    }
   }
 
   return (
@@ -51,7 +61,7 @@ export default function UpdatePrompt() {
         {err && <p className="crit">{err}</p>}
         <div className="update-prompt-actions">
           <button type="button" className="btn" disabled={busy} onClick={later}>Later</button>
-          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void now()}>{busy ? "Updating…" : "Update now"}</button>
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void now()}>{busy ? (prog || "Updating…") : "Update now"}</button>
         </div>
       </div>
     </div>

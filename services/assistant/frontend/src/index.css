@@ -5905,3 +5905,12 @@ h2 { font-size: 15px; color: var(--accent); }
 .latex-shell--cards .cv-bar { border-bottom-color: var(--border); }
 .latex-shell--cards .cv-embed-title { font-family: var(--font-title); font-size: 15px; font-weight: 600; }
 .latex-shell--cards .cv-rail { background: transparent; }
+
+/* ── Corners setting: boxes that had no radius, and rows that had no spacing ─────────────── */
+.arxiv-panel { border-radius: var(--card-radius, 0px); }
+/* The search bar's children (note, button row, filter box) were stacked with no gap between them. */
+.arxiv-search-bar { display: flex; flex-direction: column; gap: 8px; }
+.loki-input-row textarea,
+.loki-input-row textarea:focus,
+.loki-input-row textarea:focus-visible { outline: none !important; box-shadow: none; border-radius: var(--radius); }
+.loki-input-row:focus-within { border-color: var(--accent); }

@@ -373,3 +373,13 @@
 /* dark-theme contrast for active controls */
 .tp-seg button.on, .tp-cal-body .cal2-views-in .btn-primary, .sc-views .btn-primary { background: var(--text); color: var(--bg); border-color: var(--text); }
 .tp-cal-body .cal2-week-col.today .cal2-week-day strong, .tp-cal-body .cal2-cell.today .cal2-num { background: var(--text); color: var(--bg); }
+
+/* Corners setting: these boxes had no radius of their own, so Soft/Round never reached them. */
+.tp-panel { border-radius: var(--card-radius, 0px); overflow: hidden; }
+.tp-filter { border-radius: var(--radius); overflow: hidden; }
+.tp-sq { border-radius: var(--radius); }
+.tp-pri { border-radius: calc(var(--radius) * .6); }
+.rt-group { border-radius: var(--card-radius, 0px); overflow: hidden; }
+.cal2-views { border-radius: var(--radius); }
+.cal2-views .btn { border-radius: var(--radius); }
+.cal2-week-col.sel:last-child, .cal2-week-col.today:last-child { border-top-right-radius: 0; }

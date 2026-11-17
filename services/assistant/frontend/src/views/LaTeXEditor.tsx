@@ -1,3 +1,4 @@
+import { LatexStatusBar } from "../components/LatexStatusBar";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EditorView, basicSetup } from "codemirror";
 import { keymap } from "@codemirror/view";
@@ -1870,6 +1871,8 @@ export default function LaTeXEditor() {
 
       <WorkspaceLayout
         panelGroupId="latex"
+        variant="cards"
+        footer={<LatexStatusBar compiling={compiling} compiled={compiled} dirty={dirty} diagnostics={diagnostics} lineCol={lineCol} />}
         menuBar={menuBar}
         sidebar={sidebar}
         sidebarCollapsed={filesCollapsed}

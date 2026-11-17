@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   WorkspaceMenuBar,
-  ViewModeToggle,
   FilesToggleButton,
   pressKeepFocus,
   type MenuConfig,
@@ -343,15 +342,17 @@ export function LatexMenuBar({
   const rightSlot = (
     <>
       <FilesToggleButton collapsed={filesCollapsed} onToggle={onToggleFiles} />
-      <ViewModeToggle
-        modes={[
-          { id: "editor" as const, label: "Editor", title: "Editor only" },
-          { id: "split" as const, label: "Split", title: "Editor + PDF" },
-          { id: "pdf" as const, label: "PDF", title: "PDF only" },
-        ]}
-        active={viewMode}
-        onChange={onViewMode}
-      />
+      <div className="latex-layout-pill" role="group" aria-label="Workspace layout">
+        {([
+          { id: "ep", label: "Editor + PDF", on: viewMode === "split" && !inkDock, set: () => { onInkDock(false); onViewMode("split"); } },
+          { id: "cp", label: "Canvas + PDF", on: viewMode === "pdf" && inkDock, set: () => { onInkDock(true); onViewMode("pdf"); } },
+          { id: "cep", label: "Canvas + Editor + PDF", on: viewMode === "split" && inkDock, set: () => { onInkDock(true); onViewMode("split"); } },
+        ]).map((l) => (
+          <button key={l.id} type="button" className={l.on ? "on" : ""} aria-pressed={l.on} onClick={l.set}>
+            {l.label}
+          </button>
+        ))}
+      </div>
       <button
         type="button"
         className={`btn ${sideOpen ? "latex-side-toggle-on" : ""}`}

@@ -10,11 +10,11 @@
 .pane-head { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--border); background: var(--surface); min-width: 0; }
 .pane-select { height: 28px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); padding: 0 8px; font-size: 13px; font-weight: 600; }
 .pane-subs { display: flex; gap: 2px; overflow-x: auto; min-width: 0; }
-.pane-sub { height: 26px; border: 0; background: none; color: var(--muted); font-size: 12px; padding: 0 9px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+.pane-sub { height: 26px; border: 0; background: none; color: var(--muted); font-size: 12px; padding: 0 9px; border-radius: calc(var(--radius) * 1); cursor: pointer; white-space: nowrap; }
 .pane-sub:hover { color: var(--text); background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .pane-sub.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); font-weight: 600; }
 .pane-spacer { flex: 1; }
-.pane-btn { width: 26px; height: 26px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); cursor: pointer; line-height: 1; }
+.pane-btn { width: 26px; height: 26px; border: 1px solid var(--border); border-radius: calc(var(--radius) * 1); background: var(--surface); color: var(--text); cursor: pointer; line-height: 1; }
 .pane-btn:hover { border-color: var(--accent); }
 
 /* Views that size themselves by the window height must size by their pane instead */
@@ -44,11 +44,11 @@
 .split-bar-label { font-family: var(--font-mono, monospace); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 .split-bar-btns { display: flex; gap: 6px; flex-wrap: wrap; }
 .split-bar-hint { margin-left: auto; font-size: 12px; color: var(--muted); }
-.split-bar-toggle { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 12px; }
+.split-bar-toggle { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: calc(var(--radius) * 1); padding: 4px 10px; cursor: pointer; font-size: 12px; }
 .split-bar-toggle:hover { border-color: var(--accent); }
 .split-bar-min { padding: 2px 12px; gap: 10px; }
 .split-bar-min .split-bar-title { font-size: 13px; }
-.split-lay { width: 52px; height: 48px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; padding: 0; }
+.split-lay { width: 52px; height: 48px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: calc(var(--radius) * 1); cursor: pointer; padding: 0; }
 .split-lay:hover { border-color: var(--accent); }
 .split-lay.on { border: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--bg)); }
 .split-glyph { width: 30px; height: 20px; display: grid; gap: 2px; }

@@ -266,15 +266,15 @@ function PdfTool() {
 
         <label className="tl-lab">Output</label>
         <div className="theme-mode-toggle">
-          <button className={output === "markdown" ? "active" : ""} onClick={() => setOutput("markdown")}>Markdown</button>
-          <button className={output === "latex" ? "active" : ""} onClick={() => setOutput("latex")}>LaTeX</button>
+          <button className={`theme-mode-btn${output === "markdown" ? " selected" : ""}`} onClick={() => setOutput("markdown")}>Markdown</button>
+          <button className={`theme-mode-btn${output === "latex" ? " selected" : ""}`} onClick={() => setOutput("latex")}>LaTeX</button>
         </div>
 
         {status?.mineru.installed && (
           <>
             <label className="tl-lab">Quality tier</label>
             <div className="theme-mode-toggle">
-              {status.tiers.map((t) => <button key={t} className={tier === t ? "active" : ""} onClick={() => setTier(t)}>{t}</button>)}
+              {status.tiers.map((t) => <button key={t} className={`theme-mode-btn${tier === t ? " selected" : ""}`} onClick={() => setTier(t)}>{t}</button>)}
             </div>
             <div className="tl-help">{TIER_NOTE[tier]}</div>
           </>
@@ -315,8 +315,8 @@ function PdfTool() {
               <>
                 <div className="tl-res-bar">
                   <div className="theme-mode-toggle">
-                    <button className={view === "text" ? "active" : ""} onClick={() => setView("text")}>Text</button>
-                    <button className={view === "source" ? "active" : ""} onClick={() => setView("source")}>Wrap</button>
+                    <button className={`theme-mode-btn${view === "text" ? " selected" : ""}`} onClick={() => setView("text")}>Text</button>
+                    <button className={`theme-mode-btn${view === "source" ? " selected" : ""}`} onClick={() => setView("source")}>Wrap</button>
                   </div>
                   <span className="tl-spacer" />
                   {job.status === "done" && (

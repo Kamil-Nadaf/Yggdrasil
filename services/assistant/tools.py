@@ -7,7 +7,7 @@ Each uploaded PDF becomes an entry that persists in the vault, so the file list 
     result.txt      Markdown from MinerU (".txt" so the notes indexer does not pick it up)
     meta.json       name, size, tier, pages, status, timestamps, error
 
-MinerU ships inside the app (requirements.txt), so there is no fallback converter. The CLI is
+MinerU is an optional add-on (addons.py) downloaded from Tools; Docker and dev installs have it as a normal package. The CLI is
 `mineru-kit parse input.pdf -o out.md --tier flash|basic|standard|advanced`. It is looked up on PATH and
 next to the running interpreter, which is where the desktop installers put it.
 
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import shutil
 import sys
@@ -39,12 +40,17 @@ _RUN: dict[str, dict[str, Any]] = {}
 
 
 def _entry_point() -> Optional[tuple[str, str]]:
-    """(module, attr) of the `mineru-kit` console script, read from package metadata.
+    """(module, attr) of the `mineru-kit` console script.
 
-    pip writes console scripts with an absolute shebang to the build-time Python. After the
-    bundled interpreter is relocated (macOS .app, Windows/Linux installers) that shebang is
-    dead and exec fails with ENOENT even though the script exists - so we never exec it and
-    call the entry point with the running interpreter instead."""
+    MinerU is an optional add-on (see addons.py) installed into the app's data folder, or, in
+    Docker and dev, a normal package. pip writes console scripts with an absolute shebang to the
+    build-time Python, which is dead after the bundled interpreter is relocated, so the script is
+    never exec'd: the entry point is called with the running interpreter instead."""
+    import addons
+
+    found = addons.entry_point("mineru", "mineru-kit")
+    if found:
+        return found
     try:
         from importlib.metadata import entry_points
 
@@ -57,6 +63,17 @@ def _entry_point() -> Optional[tuple[str, str]]:
     return None
 
 
+def mineru_env() -> dict[str, str]:
+    """Environment for the MinerU subprocess: the add-on folder first on PYTHONPATH."""
+    import addons
+
+    env = dict(os.environ)
+    site = addons.site_path("mineru")
+    if site:
+        env["PYTHONPATH"] = site + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    return env
+
+
 def mineru_cmd() -> Optional[list[str]]:
     """Argv prefix that runs `mineru-kit`, or None when MinerU isn't installed."""
     ep = _entry_point()
@@ -67,15 +84,7 @@ def mineru_cmd() -> Optional[list[str]]:
         )
         return [sys.executable, "-c", code]
     found = shutil.which("mineru-kit")
-    if found:
-        return [found]
-    here = Path(sys.executable).resolve().parent
-    for base in (here, here / "Scripts", here / "bin"):
-        for name in ("mineru-kit", "mineru-kit.exe"):
-            c = base / name
-            if c.is_file():
-                return [str(c)]
-    return None
+    return [found] if found else None
 
 
 def mineru_bin() -> Optional[str]:
@@ -84,6 +93,11 @@ def mineru_bin() -> Optional[str]:
 
 
 def mineru_version() -> str:
+    import addons
+
+    v = addons.installed_version("mineru")
+    if v:
+        return v
     try:
         from importlib.metadata import version
 
@@ -168,7 +182,7 @@ def make_router(
             cmd += ["--pages", pages]
         try:
             try:
-                proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+                proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=mineru_env())
             except FileNotFoundError as e:
                 raise RuntimeError(f"Couldn't start MinerU ({cmd[0]}): {e.strerror or e}. Reinstall the full installer.") from e
             _RUN[eid]["proc"] = proc
@@ -198,7 +212,7 @@ def make_router(
 
     def launch(d: Path, tier: str, pages: str) -> None:
         if not mineru_cmd():
-            raise HTTPException(500, "MinerU isn't part of this install. It comes with the full installer (in-app updates can't add it) - install the latest full installer once to get it.")
+            raise HTTPException(500, "MinerU isn't installed yet. Open Tools -> PDF and press Install MinerU.")
         eid = d.name
         if eid in _RUN:
             raise HTTPException(409, "Already converting")

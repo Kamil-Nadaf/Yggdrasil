@@ -1,3 +1,4 @@
+import AddonCard from "../components/AddonCard";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
@@ -322,7 +323,9 @@ export default function PdfWorkbench({ onBack }: { onBack: () => void }) {
           ))}
         </ul>
         {files.length === 0 && <div className="tl-help" style={{ padding: "0 4px" }}>Added files appear here. Drop PDFs anywhere on this page.</div>}
-        <div className="pw-foot">{status === null ? "" : status.mineru.installed ? `MinerU ${status.mineru.version}` : "MinerU comes with the full installer"}</div>
+        {status !== null && !status.mineru.installed
+          ? <AddonCard id="mineru" compact onChange={() => { fetch("/api/tools/pdf/status").then((r) => r.json()).then(setStatus).catch(() => { /* ignore */ }); }} />
+          : <div className="pw-foot">{status === null ? "" : `MinerU ${status.mineru.version}`}</div>}
       </aside>
 
       <section className="pw-main">

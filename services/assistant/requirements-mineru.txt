@@ -1,0 +1,3 @@
+# Optional PDF -> Markdown engine. The desktop apps download it on demand (Tools -> Add-ons, see addons.py);
+# Docker and dev installs include it here.
+mineru>=4.0,<5

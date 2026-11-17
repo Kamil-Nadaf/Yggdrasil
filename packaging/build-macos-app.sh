@@ -140,11 +140,15 @@ echo "→ Installing Python dependencies..."
 
 # ── Prune dead weight from the bundled Python (not used at runtime) ─────────
 SP="${PYDIR}/lib/python3.12/site-packages"
-rm -rf "${SP}/PyObjCTest" "${SP}/pip" "${SP}"/pip-*.dist-info \
+# pip stays: optional add-ons (MinerU) are installed on demand with it (addons.py).
+rm -rf "${SP}/PyObjCTest" \
        "${SP}/setuptools" "${SP}"/setuptools-*.dist-info "${SP}/pkg_resources" "${SP}/_distutils_hack" "${SP}/distutils-precedence.pth"
 "${PYDIR}/bin/python3" -c "import fastapi, uvicorn, webview, numpy, sqlite3; print('→ prune OK')"
 PYTHONPATH="${APPDIR}" "${PYDIR}/bin/python3" -c "import vecstore; print('→ vecstore OK')"
-test -x "${PYDIR}/bin/mineru-kit" && echo "→ MinerU CLI OK" || { echo "MinerU CLI missing from the bundled Python"; exit 1; }
+"${PYDIR}/bin/python3" -m pip --version >/dev/null && echo "→ pip OK (add-on installs)" || { echo "pip missing from the bundled Python: add-ons could not be installed"; exit 1; }
+echo "→ Biggest folders in the bundle (size check):"
+du -sk "${SP}"/* 2>/dev/null | sort -rn | head -15 | awk '{printf "   %6.1f MB  %s\n", $1/1024, $2}'
+du -sm "${APPDIR}/.." 2>/dev/null | awk '{print "→ Bundle total: " $1 " MB"}' || true
 
 # ── Ad-hoc sign ─────────────────────────────────────────────────────────────
 if command -v codesign >/dev/null 2>&1; then

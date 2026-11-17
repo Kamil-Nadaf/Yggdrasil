@@ -139,3 +139,20 @@
 .pw-md th, .pw-md td { border: 1px solid var(--border); padding: 4px 8px; }
 .pw-result .tl-out { border: 0; padding: 0; background: transparent; white-space: pre-wrap; word-break: break-word; }
 @media (max-width: 900px) { .pw { grid-template-columns: 1fr; } .pw-cols { grid-template-columns: 1fr; } }
+
+/* optional add-ons (components/AddonCard.tsx) */
+.ad-card { display: flex; flex-direction: column; gap: 8px; padding: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--card-radius, 14px); }
+.ad-card--compact { padding: 10px 12px; gap: 6px; }
+.ad-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ad-name { font-weight: 600; font-size: 14px; }
+.ad-badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+.ad-badge--on { color: #2e9b57; border-color: color-mix(in srgb, #2e9b57 50%, var(--border)); }
+.ad-desc { color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+.ad-actions { display: flex; gap: 8px; }
+.ad-progress { display: flex; flex-direction: column; gap: 4px; }
+.ad-bar { height: 5px; border-radius: 999px; background: var(--border); overflow: hidden; position: relative; }
+.ad-bar span { position: absolute; inset: 0 auto 0 0; width: 35%; border-radius: inherit; background: var(--page-accent, var(--text)); animation: ad-slide 1.3s ease-in-out infinite; }
+@keyframes ad-slide { 0% { left: -35%; } 100% { left: 100%; } }
+.ad-msg { font-size: 12px; }
+.ad-hint { font-size: 11.5px; color: var(--muted); }
+.tl-section { margin: 4px 0 -4px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }

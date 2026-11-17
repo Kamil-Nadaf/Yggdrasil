@@ -5,6 +5,7 @@ import type { ProjectStats } from "../api/client";
 import SlidesView from "./SlidesView";
 import GraphView from "./GraphView";
 import PdfWorkbench from "./PdfWorkbench";
+import AddonCard from "../components/AddonCard";
 import "./tools.css";
 
 type Page = "hub" | "pdf" | "slides" | "graph";
@@ -63,6 +64,11 @@ export default function ToolsView({ onOpenEditor }: Props) {
           </button>
         ))}
         <div className="tl-card tl-card--ghost"><span className="tl-card-title">More tools soon</span><span className="tl-card-desc">Add one by registering it here.</span></div>
+      </div>
+      <div className="tl-section">Add-ons</div>
+      <div className="tl-help">The app stays small. Heavier engines are downloaded here when you need them, and kept when the app updates.</div>
+      <div className="tl-grid">
+        <AddonCard id="mineru" />
       </div>
     </div>
   );

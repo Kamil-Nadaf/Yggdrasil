@@ -179,3 +179,11 @@ LaTeX is optional. Make sure TinyTeX finished downloading on first launch (needs
 ---
 
 © 2026 Kamil Nadaf · MIT License · [GitHub](https://github.com/Kamil-Nadaf/Yggdrasil)
+
+
+## Optional add-ons (Tools)
+
+The installer is the small base app. Heavier engines are downloaded from **Tools → Add-ons** (or from the tool that needs them, e.g. Tools → PDF) and stored in the app's data folder (`~/.yggdrasil/addons` unless `YGG_CONFIG_PATH` is set), so they survive app updates.
+
+- **MinerU** (PDF → Markdown / LaTeX, about 1 GB): press *Install MinerU*, wait for the download, then convert. No restart needed. *Remove* frees the space again.
+- Docker and dev installs include MinerU through `requirements-mineru.txt`.

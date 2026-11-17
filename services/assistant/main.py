@@ -5512,6 +5512,8 @@ async def _tools_resolve_pdf(key: str, url: str):
 
 
 app.include_router(_make_tools_router(lambda: VAULT, _tools_resolve_pdf))
+from addons import make_router as _make_addons_router  # noqa: E402
+app.include_router(_make_addons_router())
 
 
 async def _drivesync_loop():

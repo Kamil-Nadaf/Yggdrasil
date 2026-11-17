@@ -70,8 +70,8 @@ cat > "${APP}/Contents/Info.plist" << 'EOF'
   <key>CFBundleName</key><string>Yggdrasil</string>
   <key>CFBundleDisplayName</key><string>Yggdrasil</string>
   <key>CFBundleIdentifier</key><string>io.yggdrasil.app</string>
-  <key>CFBundleVersion</key><string>0.5.1</string>
-  <key>CFBundleShortVersionString</key><string>0.5.1</string>
+  <key>CFBundleVersion</key><string>0.5.2</string>
+  <key>CFBundleShortVersionString</key><string>0.5.2</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>Yggdrasil</string>
   <key>CFBundleIconFile</key><string>Yggdrasil</string>
@@ -103,31 +103,13 @@ cp "${ROOT}/desktop/launch.py"         "${RES}/desktop/launch.py"
 cp "${ROOT}/desktop/setup.py"          "${RES}/desktop/setup.py"
 cp "${ROOT}/desktop/splash.html"       "${RES}/desktop/splash.html"
 cp "${ROOT}/desktop/yggdrasil-logo.png" "${RES}/desktop/yggdrasil-logo.png"
-cp "${ROOT}/services/assistant/main.py"          "${APPDIR}/main.py"
-cp "${ROOT}/services/assistant/gate.py"          "${APPDIR}/gate.py"
-cp "${ROOT}/services/assistant/zotero.py"        "${APPDIR}/zotero.py"
-cp "${ROOT}/services/assistant/data_manifest.py" "${APPDIR}/data_manifest.py"
-cp "${ROOT}/services/assistant/graph_links.py"   "${APPDIR}/graph_links.py"
-cp "${ROOT}/services/assistant/vecstore.py"      "${APPDIR}/vecstore.py"
-cp "${ROOT}/services/assistant/graph_keywords.py" "${APPDIR}/graph_keywords.py"
-cp "${ROOT}/services/assistant/reading.py" "${APPDIR}/reading.py"
-cp "${ROOT}/services/assistant/citations.py" "${APPDIR}/citations.py"
-cp "${ROOT}/services/assistant/updater.py" "${APPDIR}/updater.py"
-cp "${ROOT}/services/assistant/zotero_annotations.py" "${APPDIR}/zotero_annotations.py"
-cp "${ROOT}/services/assistant/book_notes.py" "${APPDIR}/book_notes.py"
-cp "${ROOT}/services/assistant/note_tags.py" "${APPDIR}/note_tags.py"
-cp "${ROOT}/services/assistant/analysis_tags.py" "${APPDIR}/analysis_tags.py"
-cp "${ROOT}/services/assistant/arxiv_topics.py"  "${APPDIR}/arxiv_topics.py"
-cp "${ROOT}/services/assistant/task_statuses.py" "${APPDIR}/task_statuses.py"
-cp "${ROOT}/services/assistant/goals.py"         "${APPDIR}/goals.py"
-cp "${ROOT}/services/assistant/notifications.py" "${APPDIR}/notifications.py"
-cp "${ROOT}/services/assistant/task_options.py"  "${APPDIR}/task_options.py"
-cp "${ROOT}/services/assistant/task_sync.py"     "${APPDIR}/task_sync.py"
-cp "${ROOT}/services/assistant/drive_sync.py"    "${APPDIR}/drive_sync.py"
-cp "${ROOT}/services/assistant/projects.py"       "${APPDIR}/projects.py"
-cp "${ROOT}/services/assistant/latex_tools.py"    "${APPDIR}/latex_tools.py"
-cp "${ROOT}/services/assistant/canvas.py"         "${APPDIR}/canvas.py"
-cp "${ROOT}/services/assistant/mcp_server.py"    "${APPDIR}/mcp_server.py"
+# Every backend module (same set the in-app update package ships). A hand-kept list here once missed tools.py and
+# icloud_sync.py, and the installed app crashed on start with "No module named 'tools'".
+for f in "${ROOT}"/services/assistant/*.py; do
+  case "$(basename "$f")" in test_*) continue ;; esac
+  cp "$f" "${APPDIR}/$(basename "$f")"
+done
+test -f "${APPDIR}/tools.py" -a -f "${APPDIR}/main.py" || { echo "backend modules were not copied"; exit 1; }
 rm -rf "${APPDIR}/frontend"
 mkdir -p "${APPDIR}/frontend"
 cp -R "${FRONTEND}/dist" "${APPDIR}/frontend/dist"
@@ -224,7 +206,7 @@ pkgbuild \
   --root "$PKG_ROOT" \
   --scripts "$PKG_SCRIPTS" \
   --identifier io.yggdrasil.app \
-  --version 0.5.1 \
+  --version 0.5.2 \
   "$PKG_UNSIGNED"
 
 DIST_XML="${OUT}/distribution.xml"
@@ -241,7 +223,7 @@ cat > "$DIST_XML" << EOF
     <choice id="yggdrasil" title="Yggdrasil" description="Install Yggdrasil to /Applications">
         <pkg-ref id="io.yggdrasil.app">Yggdrasil.pkg</pkg-ref>
     </choice>
-    <pkg-ref id="io.yggdrasil.app" version="0.5.1" onConclusion="none">Yggdrasil.pkg</pkg-ref>
+    <pkg-ref id="io.yggdrasil.app" version="0.5.2" onConclusion="none">Yggdrasil.pkg</pkg-ref>
 </installer-gui-script>
 EOF
 

@@ -46,9 +46,11 @@ New-Item -ItemType Directory -Force -Path $DistApp, $DistDesktop, $DistLatex, (J
 
 Copy-Item (JP $DesktopSrc @("launch.py")), (JP $DesktopSrc @("setup.py")), (JP $DesktopSrc @("splash.html")), (JP $DesktopSrc @("yggdrasil-logo.png")) $DistDesktop
 Copy-Item (JP $DesktopSrc @("icons", "yggdrasil.ico")) $DistDesktop   # window, notifications and the Start Menu/Desktop shortcut
-foreach ($f in @("main.py", "gate.py", "zotero.py", "data_manifest.py", "graph_links.py", "vecstore.py", "graph_keywords.py", "note_tags.py", "reading.py", "citations.py", "zotero_annotations.py", "book_notes.py", "updater.py", "analysis_tags.py", "arxiv_topics.py", "task_statuses.py", "task_options.py", "goals.py", "notifications.py", "task_sync.py", "drive_sync.py", "projects.py", "latex_tools.py", "canvas.py", "mcp_server.py")) {
-  Copy-Item (Join-Path $AssistantSrc $f) $DistApp
+# Every backend module (same set the in-app update package ships) - a hand-kept list once missed tools.py.
+Get-ChildItem -Path $AssistantSrc -Filter "*.py" | Where-Object { $_.Name -notlike "test_*" } | ForEach-Object {
+  Copy-Item $_.FullName $DistApp
 }
+if (-not ((Test-Path (Join-Path $DistApp "tools.py")) -and (Test-Path (Join-Path $DistApp "main.py")))) { throw "backend modules were not copied" }
 $DistFrontendDir = Join-Path $DistApp "frontend"
 New-Item -ItemType Directory -Force -Path $DistFrontendDir | Out-Null
 Copy-Item -Recurse (Join-Path $Frontend "dist") (Join-Path $DistFrontendDir "dist")

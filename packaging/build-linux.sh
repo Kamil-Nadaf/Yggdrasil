@@ -24,9 +24,12 @@ cp "${ROOT}/desktop/setup.py" "$DIST/desktop/"
 cp "${ROOT}/desktop/splash.html" "$DIST/desktop/"
 cp "${ROOT}/desktop/yggdrasil-logo.png" "$DIST/desktop/"
 cp "${ROOT}/desktop/icons/yggdrasil-512.png" "$DIST/desktop/"
-for f in main.py gate.py zotero.py data_manifest.py graph_links.py vecstore.py graph_keywords.py note_tags.py reading.py citations.py zotero_annotations.py book_notes.py updater.py analysis_tags.py arxiv_topics.py task_statuses.py task_options.py goals.py notifications.py task_sync.py drive_sync.py projects.py latex_tools.py canvas.py mcp_server.py; do
-  cp "${ROOT}/services/assistant/$f" "$DIST/app/"
+# Every backend module (same set the in-app update package ships) - a hand-kept list once missed tools.py.
+for f in "${ROOT}"/services/assistant/*.py; do
+  case "$(basename "$f")" in test_*) continue ;; esac
+  cp "$f" "$DIST/app/"
 done
+test -f "$DIST/app/tools.py" -a -f "$DIST/app/main.py" || { echo "backend modules were not copied"; exit 1; }
 mkdir -p "$DIST/app/frontend"
 cp -R "${FRONTEND}/dist" "$DIST/app/frontend/dist"
 # Slides module (PPTist, AGPL-3.0): optional, needs git + network once

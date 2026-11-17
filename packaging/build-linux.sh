@@ -30,6 +30,7 @@ for f in "${ROOT}"/services/assistant/*.py; do
   cp "$f" "$DIST/app/"
 done
 test -f "$DIST/app/tools.py" -a -f "$DIST/app/main.py" || { echo "backend modules were not copied"; exit 1; }
+python3 "${ROOT}/scripts/check-packaged-app.py" "$DIST/app"
 mkdir -p "$DIST/app/frontend"
 cp -R "${FRONTEND}/dist" "$DIST/app/frontend/dist"
 # Slides module (PPTist, AGPL-3.0): optional, needs git + network once

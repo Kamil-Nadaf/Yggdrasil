@@ -229,8 +229,8 @@ jobs:
             | Linux | `Yggdrasil-*-linux.tar.gz` → extract → `./install.sh` |
             | Android | `Yggdrasil-*-android.apk` → open on the phone (allow installs from this source). Needs the phone server from `mobile/` running on your Mac/server — see [mobile/README.md](https://github.com/${{ github.repository }}/blob/main/mobile/README.md) |
 
-            Prefer a package manager? macOS: `brew tap Kamil-Nadaf/yggdrasil https://github.com/Kamil-Nadaf/Yggdrasil && brew install --cask yggdrasil` ·
-            Windows: `scoop bucket add yggdrasil https://github.com/Kamil-Nadaf/Yggdrasil` then `scoop install yggdrasil` ·
+            Prefer a package manager? macOS: `brew tap Kamil-Nadaf/yggdrasil https://github.com/Kamil-Nadaf/Yggdrasil` → `brew trust --cask kamil-nadaf/yggdrasil/yggdrasil` → `brew install --cask kamil-nadaf/yggdrasil/yggdrasil` (full name needed: plain `yggdrasil` is a different app) ·
+            Windows: `scoop bucket add yggdrasil https://github.com/Kamil-Nadaf/Yggdrasil` then `scoop install yggdrasil/yggdrasil` ·
             macOS/Linux: `curl -fsSL https://raw.githubusercontent.com/Kamil-Nadaf/Yggdrasil/main/scripts/install.sh | bash`
             (details in [INSTALL.md](https://github.com/${{ github.repository }}/blob/main/INSTALL.md)).
 

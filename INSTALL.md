@@ -10,8 +10,8 @@ no cloud account required.
 
 | OS | Command |
 |---|---|
-| macOS (Homebrew) | `brew tap Kamil-Nadaf/yggdrasil https://github.com/Kamil-Nadaf/Yggdrasil && brew install --cask yggdrasil` — update with `brew upgrade --cask yggdrasil` |
-| Windows (Scoop) | `scoop bucket add yggdrasil https://github.com/Kamil-Nadaf/Yggdrasil` then `scoop install yggdrasil` — update with `scoop update yggdrasil` |
+| macOS (Homebrew) | `brew tap Kamil-Nadaf/yggdrasil https://github.com/Kamil-Nadaf/Yggdrasil`, then `brew trust --cask kamil-nadaf/yggdrasil/yggdrasil` (Homebrew 6+; skip on older versions), then `brew install --cask kamil-nadaf/yggdrasil/yggdrasil` — update with `brew upgrade --cask kamil-nadaf/yggdrasil/yggdrasil`. Use the full name: plain `yggdrasil` is a different app (the Yggdrasil network) in Homebrew's own list. |
+| Windows (Scoop) | `scoop bucket add yggdrasil https://github.com/Kamil-Nadaf/Yggdrasil` then `scoop install yggdrasil/yggdrasil` — update with `scoop update yggdrasil/yggdrasil` |
 | Windows (PowerShell, no Scoop) | `irm https://raw.githubusercontent.com/Kamil-Nadaf/Yggdrasil/main/scripts/install.ps1 \| iex` |
 | macOS or Linux (one line) | `curl -fsSL https://raw.githubusercontent.com/Kamil-Nadaf/Yggdrasil/main/scripts/install.sh \| bash` |
 

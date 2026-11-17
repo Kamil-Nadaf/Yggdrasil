@@ -51,6 +51,8 @@ Get-ChildItem -Path $AssistantSrc -Filter "*.py" | Where-Object { $_.Name -notli
   Copy-Item $_.FullName $DistApp
 }
 if (-not ((Test-Path (Join-Path $DistApp "tools.py")) -and (Test-Path (Join-Path $DistApp "main.py")))) { throw "backend modules were not copied" }
+$PyCheck = Get-Command python3, python -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($PyCheck) { & $PyCheck.Source (JP $Root @("scripts", "check-packaged-app.py")) $DistApp; if ($LASTEXITCODE -ne 0) { throw "packaged app is missing modules it imports" } }
 $DistFrontendDir = Join-Path $DistApp "frontend"
 New-Item -ItemType Directory -Force -Path $DistFrontendDir | Out-Null
 Copy-Item -Recurse (Join-Path $Frontend "dist") (Join-Path $DistFrontendDir "dist")

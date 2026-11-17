@@ -110,6 +110,7 @@ for f in "${ROOT}"/services/assistant/*.py; do
   cp "$f" "${APPDIR}/$(basename "$f")"
 done
 test -f "${APPDIR}/tools.py" -a -f "${APPDIR}/main.py" || { echo "backend modules were not copied"; exit 1; }
+python3 "${ROOT}/scripts/check-packaged-app.py" "${APPDIR}"
 rm -rf "${APPDIR}/frontend"
 mkdir -p "${APPDIR}/frontend"
 cp -R "${FRONTEND}/dist" "${APPDIR}/frontend/dist"

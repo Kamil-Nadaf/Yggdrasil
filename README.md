@@ -14,9 +14,11 @@ self-hosted Docker web app.
 
 ```bash
 # macOS
-brew tap Kamil-Nadaf/yggdrasil https://github.com/Kamil-Nadaf/Yggdrasil && brew install --cask yggdrasil
+brew tap Kamil-Nadaf/yggdrasil https://github.com/Kamil-Nadaf/Yggdrasil
+brew trust --cask kamil-nadaf/yggdrasil/yggdrasil   # Homebrew 6+ ignores third-party taps until trusted
+brew install --cask kamil-nadaf/yggdrasil/yggdrasil   # use the full name: plain `yggdrasil` is another app
 # Windows (PowerShell)
-scoop bucket add yggdrasil https://github.com/Kamil-Nadaf/Yggdrasil; scoop install yggdrasil
+scoop bucket add yggdrasil https://github.com/Kamil-Nadaf/Yggdrasil; scoop install yggdrasil/yggdrasil
 # Linux (and macOS without Homebrew)
 curl -fsSL https://raw.githubusercontent.com/Kamil-Nadaf/Yggdrasil/main/scripts/install.sh | bash
 ```

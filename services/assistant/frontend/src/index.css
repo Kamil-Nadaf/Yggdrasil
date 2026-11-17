@@ -915,7 +915,7 @@ h2 { font-size: 15px; color: var(--accent); }
   gap: 12px;
   flex-shrink: 0;
   min-height: 40px;
-  padding: 4px 10px 4px 4px;
+  padding: 4px 14px 4px 10px;
   margin: 0;
   border: none;
   border-bottom: 1px solid var(--border);

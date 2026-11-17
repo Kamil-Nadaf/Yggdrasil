@@ -318,7 +318,7 @@ export default function CanvasView({ onOpenLatex, embedded, onInsert, insertLabe
   const runConvert = () => convertRef.current(mode === "lasso" ? selection : mode === "page" ? "all" : "new");
 
   return (
-    <div className="cv-shell">
+    <div className={`cv-shell${embedded ? " cv-embedded" : ""}`}>
       <div className="cv-bar">
         {embedded && title && <div className="cv-embed-title">{title}</div>}
         <div className="cv-bar-title">

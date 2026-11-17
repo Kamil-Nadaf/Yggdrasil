@@ -1,5 +1,6 @@
-.sl-wrap { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; gap: 8px; min-width: 0; }
-.sl-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sl-wrap { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; gap: 8px; min-width: 0; box-sizing: border-box; padding: 10px 14px 0; }
+.sl-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sl-bar .btn { min-height: 28px; padding: 3px 10px; font-size: 12px; }
 .sl-title { font-weight: 600; }
 .sl-hint, .sl-meta { color: var(--muted); font-size: 12px; }
 .sl-err { color: var(--crit); font-size: 12px; }

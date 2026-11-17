@@ -647,6 +647,36 @@ function applyTextScale() {
   root.setProperty("--text-scale", String(body));
 }
 
+
+/** Corner style for panels, buttons and cards. "theme" keeps each theme's own corners. */
+export type Corners = "theme" | "sharp" | "soft" | "round";
+const CORNERS_KEY = "yggdrasil:corners";
+const CORNER_PX: Record<Exclude<Corners, "theme">, [number, number]> = { sharp: [0, 0], soft: [8, 14], round: [14, 22] };
+
+export function loadCorners(): Corners {
+  const v = localStorage.getItem(CORNERS_KEY);
+  return v === "sharp" || v === "soft" || v === "round" ? v : "theme";
+}
+
+export function saveCorners(c: Corners) {
+  localStorage.setItem(CORNERS_KEY, c);
+  applyCorners();
+  notifyTheme();
+}
+
+function applyCorners() {
+  const root = document.documentElement.style;
+  const c = loadCorners();
+  if (c === "theme") {
+    root.removeProperty("--radius");
+    root.setProperty("--card-radius", "calc(var(--radius) * 2.667)");
+    return;
+  }
+  const [r, card] = CORNER_PX[c];
+  root.setProperty("--radius", `${r}px`);
+  root.setProperty("--card-radius", `${card}px`);
+}
+
 /** Apply the saved theme to <html>. Call on boot and after any change. */
 export function applyTheme(pageId?: PageId) {
   if (pageId) currentPageId = pageId;
@@ -668,6 +698,7 @@ export function applyTheme(pageId?: PageId) {
   applyLogoVars(accent);
   applyGridVars();
   applyTextScale();
+  applyCorners();
   applyPageVars(currentPageId, theme);
   applyAppFonts();
   notifyTheme();

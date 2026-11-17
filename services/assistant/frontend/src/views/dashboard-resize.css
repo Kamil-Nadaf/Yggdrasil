@@ -15,10 +15,10 @@
 .dash-grip-e { top: 28px; bottom: 14px; right: -9px; width: 14px; cursor: ew-resize; }
 .dash-grip-s { left: 14px; right: 14px; bottom: -9px; height: 14px; cursor: ns-resize; }
 .dash-grip-se { right: -9px; bottom: -9px; width: 18px; height: 18px; cursor: nwse-resize; }
-.dash-grip::after { content: ""; position: absolute; background: var(--page-accent, var(--accent)); opacity: .35; border-radius: 3px; transition: opacity .15s; }
+.dash-grip::after { content: ""; position: absolute; background: var(--page-accent, var(--accent)); opacity: .35; border-radius: calc(var(--radius) * 0.5); transition: opacity .15s; }
 .dash-grip-e::after { top: 0; bottom: 0; left: 5px; width: 4px; }
 .dash-grip-s::after { left: 0; right: 0; top: 5px; height: 4px; }
-.dash-grip-se::after { inset: 3px; border-radius: 4px; }
+.dash-grip-se::after { inset: 3px; border-radius: calc(var(--radius) * 0.667); }
 .dash-grip:hover::after, .dash-slot.is-resizing .dash-grip::after { opacity: .9; }
 .dash-slot.is-resizing { outline: 2px dashed var(--page-accent, var(--accent)); outline-offset: 2px; }
 

@@ -34,6 +34,9 @@ import {
   saveGridSettings,
   type GridSettings,
   loadTextScale,
+  loadCorners,
+  saveCorners,
+  type Corners,
   saveTextScale,
   type TextScale,
   type CustomTheme,
@@ -625,6 +628,11 @@ export default function SettingsPage({ open = true, onClose, firstRun, onDataPat
     setTextScale(t);
     saveTextScale(t);
   };
+  const [corners, setCorners] = useState<Corners>(() => loadCorners());
+  const pickCorners = (c: Corners) => {
+    setCorners(c);
+    saveCorners(c);
+  };
   const pickGrid = (g: GridSettings) => {
     setGrid(g);
     saveGridSettings(g);
@@ -973,6 +981,26 @@ export default function SettingsPage({ open = true, onClose, firstRun, onDataPat
               )}
             </div>
           )}
+
+          <div className="settings-item" style={{ marginTop: 14 }}>
+            <label>Corners</label>
+            <div className="settings-info" style={{ marginBottom: 8 }}>
+              Round the edges of panels, buttons and cards in every section. Theme keeps each theme's own corners.
+            </div>
+            <div className="theme-mode-toggle">
+              {([["theme", "Theme"], ["sharp", "Sharp"], ["soft", "Soft"], ["round", "Round"]] as const).map(([id, name]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`theme-mode-btn${corners === id ? " selected" : ""}`}
+                  aria-pressed={corners === id}
+                  onClick={() => pickCorners(id)}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+          </div>
 
           <div className="settings-item" style={{ marginTop: 14 }}>
             <label>Text size</label>

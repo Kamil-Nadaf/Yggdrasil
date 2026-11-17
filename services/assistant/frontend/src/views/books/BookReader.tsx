@@ -63,6 +63,7 @@ export default function BookReader({ book, onBack, onChanged, onPrev, onNext }: 
       key: `book-${book.slug}`,
       initialPage: startPage.current,
       embedded: true,
+      kind: isPaper ? "paper" : "book",
       ...(isPaper
         ? {
             paper: {

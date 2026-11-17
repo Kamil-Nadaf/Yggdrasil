@@ -63,3 +63,32 @@ def test_orphaned_running_entry_becomes_error(tmp_path):
     (d / "meta.json").write_text('{"id":"abcdef012345","name":"x.pdf","status":"running"}', encoding="utf-8")
     f = client(tmp_path).get("/api/tools/pdf/files/abcdef012345").json()
     assert f["status"] == "error"
+
+
+def test_import_dedupes_and_waits_for_books(tmp_path, monkeypatch):
+    src = tmp_path / "book.pdf"
+    src.write_bytes(b"%PDF-1.4 body")
+
+    async def resolve(key, url):
+        return src
+
+    monkeypatch.setattr(tools, "mineru_bin", lambda: "/bin/true")
+    app = FastAPI()
+    app.include_router(tools.make_router(lambda: tmp_path, resolve))
+    c = TestClient(app)
+    first = c.post("/api/tools/pdf/import", json={"key": "book-x", "name": "My Book", "kind": "book"}).json()
+    assert first["existed"] is False and first["started"] is False
+    assert first["file"]["status"] == "ready" and first["file"]["name"] == "My Book.pdf"
+    again = c.post("/api/tools/pdf/import", json={"key": "book-x", "kind": "book"}).json()
+    assert again["existed"] is True and again["file"]["id"] == first["file"]["id"]
+    assert len(c.get("/api/tools/pdf/files").json()["files"]) == 1
+
+
+def test_import_rejects_non_pdf(tmp_path):
+    async def resolve(key, url):
+        return b"<html>"
+
+    app = FastAPI()
+    app.include_router(tools.make_router(lambda: tmp_path, resolve))
+    r = TestClient(app).post("/api/tools/pdf/import", json={"key": "2501.00001", "kind": "paper"})
+    assert r.status_code == 400

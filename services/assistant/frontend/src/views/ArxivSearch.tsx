@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { usePdfOpener } from "../components/PdfViewer";
 import { Group, Panel, Separator, useDefaultLayout, type LayoutStorage } from "react-resizable-panels";
 import AddToCollection from "../components/AddToCollection";
+import ConvertButton from "../components/ConvertButton";
 import ZoteroCollectionSelect, { getZoteroCollection } from "../components/ZoteroCollectionSelect";
 import { api, type ArxivPaper } from "../api/client";
 import { SlotIndicator, CericSelectionToolbar, useCericAppend } from "../components/CericToolbar";
@@ -584,6 +585,7 @@ export default function ArxivSearch() {
                         </a>
                       )}
                       <AddToCollection paper={p} pdfUrl={pdf} onResult={showToast} />
+                      <ConvertButton fileKey={p.id} url={pdf} name={p.title} kind="paper" onResult={showToast} disabled={!pdf} />
                     </div>
                   </div>
                 );
@@ -631,6 +633,7 @@ export default function ArxivSearch() {
                         </a>
                       )}
                       <AddToCollection paper={p} pdfUrl={pdf} onResult={showToast} />
+                      <ConvertButton fileKey={p.id} url={pdf} name={p.title} kind="paper" onResult={showToast} disabled={!pdf} />
                     </div>
                   </div>
                 );
@@ -708,6 +711,7 @@ export default function ArxivSearch() {
                   </a>
                 ) : null}
                 <AddToCollection paper={activePaper} pdfUrl={activePdfUrl} onResult={showToast} />
+                <ConvertButton fileKey={activePaper.id} url={activePdfUrl} name={activePaper.title} kind="paper" onResult={showToast} disabled={!activePdfUrl} />
                 <ZoteroCollectionSelect />
                 <button className="btn btn-primary" onClick={() => handleAddToZotero(activePaper)}>
                   + Add to Zotero

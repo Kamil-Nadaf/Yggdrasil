@@ -10,7 +10,7 @@ interface FileMeta {
   id: string;
   name: string;
   size: number;
-  status: "running" | "done" | "error" | "cancelled";
+  status: "ready" | "running" | "done" | "error" | "cancelled";
   tier: string;
   pages: string;
   error?: string;
@@ -193,7 +193,9 @@ export default function PdfWorkbench({ onBack }: { onBack: () => void }) {
       if (!r.ok) throw new Error(await readError(r, "Could not load files"));
       const list: FileMeta[] = (await r.json()).files;
       setFiles(list);
-      setSel((cur) => (cur && list.some((f) => f.id === cur) ? cur : list[0]?.id ?? null));
+      let want: string | null = null;
+      try { want = localStorage.getItem("yggdrasil:pdf-select"); if (want) localStorage.removeItem("yggdrasil:pdf-select"); } catch { /* ignore */ }
+      setSel((cur) => (want && list.some((f) => f.id === want) ? want : cur && list.some((f) => f.id === cur) ? cur : list[0]?.id ?? null));
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   }, []);
 
@@ -312,7 +314,7 @@ export default function PdfWorkbench({ onBack }: { onBack: () => void }) {
                 <span className={`pw-dot pw-dot--${f.status}`} title={f.status} />
                 <span className="pw-file-main">
                   <span className="pw-file-name">{f.name}</span>
-                  <span className="pw-file-meta">{sizeLabel(f.size)} · {f.status === "running" ? "converting…" : f.status === "done" ? f.tier : f.status}</span>
+                  <span className="pw-file-meta">{sizeLabel(f.size)} · {f.status === "running" ? "converting…" : f.status === "done" ? f.tier : f.status === "ready" ? "not converted" : f.status}</span>
                 </span>
               </button>
               <button className="pw-x" onClick={() => void remove(f.id)} title="Remove this file" aria-label={`Remove ${f.name}`}>×</button>
@@ -401,6 +403,7 @@ export default function PdfWorkbench({ onBack }: { onBack: () => void }) {
                   )}
                   {current.status === "error" && <div className="tl-err pw-msg">{current.error || "Conversion failed"}</div>}
                   {current.status === "cancelled" && <div className="tl-empty">Cancelled. Press Convert to try again.</div>}
+                  {current.status === "ready" && <div className="tl-empty">Added, not converted yet. Pick a tier and pages above, then press Convert. Long books can take a while.</div>}
                   {done && tab === "preview" && <AbstractText text={md} className="pw-md" />}
                   {done && tab === "markdown" && <pre className="tl-out">{md}</pre>}
                   {done && tab === "latex" && <pre className="tl-out">{latex}</pre>}

@@ -14,6 +14,7 @@ import { lookupTerm } from "../lib/lookup";
 import { colorCss, slotColor, useHighlightPrefs } from "../lib/highlightPrefs";
 import "./pdfAnnotate.css";
 import ReaderNotes from "./ReaderNotes";
+import ConvertButton from "./ConvertButton";
 import { MenuDropdown, type MenuId, type MenuItem } from "./WorkspaceMenuBar";
 
 export interface PdfDoc {
@@ -31,6 +32,8 @@ export interface PdfDoc {
   embedded?: boolean;
   /** Books: selected text can be sent straight to the book's notes (no CERIC). */
   notes?: { add: (text: string, page: number) => Promise<void> };
+  /** Collection items: papers convert in the background, books are only added to Tools → PDF. */
+  kind?: "paper" | "book";
 }
 
 /** Provided by PapersView; null outside it (callers then fall back to a normal link). */
@@ -940,6 +943,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
         <div className="pdfv-topbar" role="toolbar" aria-label="Reader toolbar">
           {fileMenu}
           <button type="button" className={ib(sbOpen)} onClick={toggleSb} aria-pressed={sbOpen} title={sbOpen ? "Hide sidebar" : "Show sidebar (contents, pages, search, notes)"}><BookIcon name="sidebar" size={17} /></button>
+          {doc.kind && <ConvertButton iconOnly fileKey={key} url={doc.url} name={doc.title} kind={doc.kind} onResult={showToast} />}
           {lead}
           <span className="pdfv-tb-title" title={doc.title}>{doc.title}</span>
           <span className="pdfv-pg" title="Page">

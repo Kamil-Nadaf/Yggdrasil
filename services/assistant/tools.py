@@ -23,10 +23,11 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional, Union
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse
+from pydantic import BaseModel
 
 TOOLS_DIR = "95-Tools/pdf"
 MAX_PDF_BYTES = 100 * 1024 * 1024
@@ -78,7 +79,21 @@ def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def make_router(get_vault: Callable[[], Path]) -> APIRouter:
+class ImportRequest(BaseModel):
+    key: str            # the reader's own key: an arXiv id, or book-{slug} for the Collection
+    url: str = ""       # public PDF URL, used when there is no saved copy
+    name: str = ""
+    kind: str = "paper"  # "paper" starts converting at once; "book" only gets added
+    auto: Optional[bool] = None
+
+
+PdfSource = Union[bytes, Path]
+
+
+def make_router(
+    get_vault: Callable[[], Path],
+    resolve_pdf: Optional[Callable[[str, str], Awaitable[PdfSource]]] = None,
+) -> APIRouter:
     router = APIRouter(prefix="/api/tools/pdf", tags=["tools"])
 
     def root() -> Path:
@@ -143,6 +158,9 @@ def make_router(get_vault: Callable[[], Path]) -> APIRouter:
             if d.is_dir():
                 write_meta(d, meta)
 
+    def eid_free(eid: str) -> bool:
+        return eid not in _RUN
+
     def launch(d: Path, tier: str, pages: str) -> None:
         if not mineru_bin():
             raise HTTPException(500, "MinerU is missing from this install")
@@ -195,6 +213,51 @@ def make_router(get_vault: Callable[[], Path]) -> APIRouter:
         write_meta(d, meta)
         launch(d, tier, pages)
         return meta
+
+    @router.post("/import")
+    async def import_pdf(req: ImportRequest):
+        """Add a PDF that already lives elsewhere in the app (a paper or a Collection book)."""
+        if resolve_pdf is None:
+            raise HTTPException(500, "Import is not available")
+        key = (req.key or "").strip()
+        if not key:
+            raise HTTPException(400, "Missing key")
+        auto = req.auto if req.auto is not None else req.kind == "paper"
+        # The same source is only added once; it may still need converting.
+        if root().is_dir():
+            for d in root().iterdir():
+                if d.is_dir() and ID_RE.fullmatch(d.name) and (d / "meta.json").is_file():
+                    m = read_meta(d)
+                    if m.get("source_key") == key:
+                        started = False
+                        if auto and m.get("status") in ("ready", "error", "cancelled") and eid_free(d.name):
+                            launch(d, m.get("tier") or "basic", m.get("pages") or "")
+                            started = True
+                            m = read_meta(d)
+                        return {"existed": True, "started": started, "file": m}
+        src = await resolve_pdf(key, req.url)
+        eid = uuid.uuid4().hex[:12]
+        d = root() / eid
+        d.mkdir(parents=True, exist_ok=True)
+        if isinstance(src, Path):
+            shutil.copyfile(src, d / "input.pdf")
+        else:
+            (d / "input.pdf").write_bytes(src)
+        size = (d / "input.pdf").stat().st_size
+        head = (d / "input.pdf").open("rb").read(5)
+        if not head.startswith(b"%PDF") or size > MAX_PDF_BYTES:
+            shutil.rmtree(d, ignore_errors=True)
+            raise HTTPException(400, "That file is not a PDF I can convert (or it is over 100 MB)")
+        name = (req.name or key).strip()
+        if not name.lower().endswith(".pdf"):
+            name += ".pdf"
+        meta = {"id": eid, "name": name[:160], "size": size, "status": "ready", "tier": "basic", "pages": "",
+                "created": _now(), "updated": _now(), "error": "", "source_key": key, "kind": req.kind}
+        write_meta(d, meta)
+        if auto:
+            launch(d, "basic", "")
+            meta = read_meta(d)
+        return {"existed": False, "started": auto, "file": meta}
 
     @router.get("/files/{eid}")
     def get_file(eid: str):

@@ -5501,7 +5501,17 @@ app.include_router(_drivesync_router(_drivesync_path, lambda: VAULT, _drivesync_
 from canvas import make_router as _make_canvas_router  # noqa: E402
 app.include_router(_make_canvas_router(lambda: VAULT, _resolve_llm_base_url))
 from tools import make_router as _make_tools_router  # noqa: E402
-app.include_router(_make_tools_router(lambda: VAULT))
+async def _tools_resolve_pdf(key: str, url: str):
+    """The saved copy if there is one (papers store, or a Collection book), otherwise the public PDF."""
+    local, _ = _pdf_locations(key)
+    if local.exists():
+        return local
+    if not url:
+        raise HTTPException(status_code=404, detail="No saved copy and no URL")
+    return await _fetch_pdf_bytes(url)
+
+
+app.include_router(_make_tools_router(lambda: VAULT, _tools_resolve_pdf))
 
 
 async def _drivesync_loop():

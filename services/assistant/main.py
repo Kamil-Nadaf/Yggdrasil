@@ -5500,6 +5500,8 @@ app.include_router(_drivesync_router(_drivesync_path, lambda: VAULT, _drivesync_
 
 from canvas import make_router as _make_canvas_router  # noqa: E402
 app.include_router(_make_canvas_router(lambda: VAULT, _resolve_llm_base_url))
+from tools import make_router as _make_tools_router  # noqa: E402
+app.include_router(_make_tools_router(_resolve_llm_base_url))
 
 
 async def _drivesync_loop():

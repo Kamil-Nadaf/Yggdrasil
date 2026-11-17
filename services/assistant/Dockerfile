@@ -32,8 +32,13 @@ ENV PIP_DEFAULT_TIMEOUT=120 PIP_RETRIES=10
 COPY requirements.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt
 
+# PDF page renderer for the Tools → PDF vision fallback (small wheel)
+# Optional MinerU: docker compose build --build-arg WITH_MINERU=1 assistant  (large: models + torch)
+ARG WITH_MINERU=0
+RUN --mount=type=cache,target=/root/.cache/pip if [ "$WITH_MINERU" = "1" ]; then pip install "mineru>=4.0,<5"; fi
+
 # Copy API source
-COPY gate.py zotero.py main.py data_manifest.py graph_links.py vecstore.py graph_keywords.py note_tags.py reading.py citations.py zotero_annotations.py book_notes.py updater.py analysis_tags.py arxiv_topics.py task_statuses.py task_options.py goals.py notifications.py task_sync.py drive_sync.py projects.py latex_tools.py canvas.py ./
+COPY gate.py zotero.py main.py data_manifest.py graph_links.py vecstore.py graph_keywords.py note_tags.py reading.py citations.py zotero_annotations.py book_notes.py updater.py analysis_tags.py arxiv_topics.py task_statuses.py task_options.py goals.py notifications.py task_sync.py drive_sync.py projects.py latex_tools.py canvas.py tools.py ./
 
 # Copy built frontend from stage 1
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist

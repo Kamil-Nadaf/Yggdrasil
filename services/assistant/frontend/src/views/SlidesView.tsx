@@ -31,11 +31,12 @@ function themeVars(): Record<string, string> {
 
 /** PPTist editor (separate static module at /slides, loaded only when a deck is open).
  *  Decks are JSON files in 50-Projects/<slug>/slides. Phones get view + present only. */
-export default function SlidesView({ lockedProject }: { lockedProject?: string }) {
+export default function SlidesView({ lockedProject, initialDeck }: { lockedProject?: string; initialDeck?: string }) {
   const [projects, setProjects] = useState<ProjectStats[]>([]);
   const [slug, setSlug] = useState<string>(() => lockedProject || ls(`${LAST_KEY}:project`) || "");
   const [decks, setDecks] = useState<Deck[]>([]);
   const [open, setOpen] = useState<string | null>(null);
+  const initialDeckRef = useRef<string | undefined>(initialDeck);
   const [present, setPresent] = useState(false);
   const [err, setErr] = useState("");
   const [full, setFull] = useState(false);
@@ -79,7 +80,7 @@ export default function SlidesView({ lockedProject }: { lockedProject?: string }
     if (!slug) { setDecks([]); return; }
     api.projects.decks(slug).then((r) => setDecks(r.decks)).catch((e) => setErr(String(e)));
   }, [slug]);
-  useEffect(() => { setOpen(null); refresh(); if (slug && !lockedProject) setLs(`${LAST_KEY}:project`, slug); }, [slug, refresh, lockedProject]);
+  useEffect(() => { setOpen(initialDeckRef.current || null); initialDeckRef.current = undefined; refresh(); if (slug && !lockedProject) setLs(`${LAST_KEY}:project`, slug); }, [slug, refresh, lockedProject]);
 
   // The editor tells us when it has saved so the list stays fresh.
   useEffect(() => {

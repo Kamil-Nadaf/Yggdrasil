@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { api } from "../api/client";
 import type { ProjectStats } from "../api/client";
-import { activeEnginePayload, loadEngines } from "../lib/canvasEngines";
-import { markdownToLatexDocument } from "../lib/markdownToLatex";
 import SlidesView from "./SlidesView";
 import GraphView from "./GraphView";
+import PdfWorkbench from "./PdfWorkbench";
 import "./tools.css";
 
 type Page = "hub" | "pdf" | "slides" | "graph";
@@ -37,15 +36,14 @@ export default function ToolsView({ onOpenEditor }: Props) {
   if (page === "slides") return <SlidesTool onBack={() => go("hub")} />;
   if (page === "pdf") {
     return (
-      <div className="tl-wrap">
-        <TopBar title="PDF → Markdown / LaTeX" onBack={() => go("hub")} />
-        <PdfTool />
+      <div className="tl-wrap tl-wrap--full">
+        <PdfWorkbench onBack={() => go("hub")} />
       </div>
     );
   }
 
   const cards: { id: Page; title: string; desc: string; tag: string; icon: ReactNode }[] = [
-    { id: "pdf", title: "PDF → Markdown / LaTeX", desc: "Turn papers and scans into clean Markdown or LaTeX. Uses MinerU when installed, otherwise your vision engines.", tag: "MinerU", icon: <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h4" /> },
+    { id: "pdf", title: "PDF → Markdown / LaTeX", desc: "Turn papers and scans into clean Markdown or LaTeX with MinerU. Original and result side by side.", tag: "MinerU", icon: <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h4" /> },
     { id: "slides", title: "Slides", desc: "Every deck from every project in one place. Filter by project, open, present.", tag: "Decks", icon: <><rect x="3" y="4" width="18" height="12" rx="1.5" /><path d="M8 20h8M12 16v4" /></> },
     { id: "graph", title: "Graph", desc: "The knowledge graph of your notes, papers and keywords.", tag: "Explore", icon: <><circle cx="6" cy="6" r="2.5" /><circle cx="18" cy="8" r="2.5" /><circle cx="12" cy="18" r="2.5" /><path d="M8 7l8 1M7 8l4 8M17 10l-4 6" /></> },
   ];
@@ -83,12 +81,16 @@ function TopBar({ title, onBack, right }: { title: string; onBack: () => void; r
 
 // ── Slides across projects ───────────────────────────────────────────────────
 
+const hueOf = (s: string) => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
+
 type DeckRow = { project: ProjectStats; name: string; updated_at: string };
 
 function SlidesTool({ onBack }: { onBack: () => void }) {
   const [rows, setRows] = useState<DeckRow[] | null>(null);
   const [projects, setProjects] = useState<ProjectStats[]>([]);
   const [filter, setFilter] = useState<string>("all");
+  const [layout, setLayout] = useState<"list" | "tile">(() => (lsGet("yggdrasil:slides-layout") === "list" ? "list" : "tile"));
+  const pickLayout = (l: "list" | "tile") => { setLayout(l); lsSet("yggdrasil:slides-layout", l); };
   const [openDeck, setOpenDeck] = useState<{ slug: string; name: string } | null>(null);
   const [err, setErr] = useState("");
 
@@ -121,13 +123,34 @@ function SlidesTool({ onBack }: { onBack: () => void }) {
         {projects.map((p) => (
           <button key={p.slug} className={`tl-chip${filter === p.slug ? " on" : ""}`} onClick={() => setFilter(p.slug)}>{p.name} <b>{counts.get(p.slug) ?? 0}</b></button>
         ))}
-        {filter !== "all" && <button className="btn" style={{ marginLeft: "auto" }} onClick={() => setOpenDeck({ slug: filter, name: "" })}>Manage {projects.find((p) => p.slug === filter)?.name}…</button>}
+        <div className="tl-layout" role="group" aria-label="Layout">
+          <button className={layout === "tile" ? "on" : ""} onClick={() => pickLayout("tile")} title="Tile view" aria-label="Tile view">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>
+          </button>
+          <button className={layout === "list" ? "on" : ""} onClick={() => pickLayout("list")} title="List view" aria-label="List view">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
+          </button>
+        </div>
+        {filter !== "all" && <button className="btn" onClick={() => setOpenDeck({ slug: filter, name: "" })}>Manage {projects.find((p) => p.slug === filter)?.name}…</button>}
       </div>
       {err && <div className="tl-err">{err}</div>}
       {rows === null ? <div className="tl-empty">Loading decks…</div> : shown.length === 0 ? (
         <div className="tl-empty">No decks{filter !== "all" ? " in this project" : ""} yet. Open a project's Slides to create one.</div>
       ) : (
-        <ul className="tl-decks">
+        layout === "tile" ? (
+          <div className="tl-tiles">
+            {shown.map((r) => (
+              <button key={r.project.slug + "/" + r.name} className="tl-tile" onClick={() => setOpenDeck({ slug: r.project.slug, name: r.name })}>
+                <span className="tl-tile-thumb" style={{ ["--h" as string]: String(hueOf(r.project.slug)) }}>
+                  <span className="tl-tile-mark">{r.name.trim().charAt(0).toUpperCase() || "S"}</span>
+                </span>
+                <span className="tl-tile-name">{r.name}</span>
+                <span className="tl-tile-meta"><span className="tl-deck-proj">{r.project.name}</span><span>{r.updated_at.replace("T", " ").slice(0, 10)}</span></span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <ul className="tl-decks">
           {shown.map((r) => (
             <li key={r.project.slug + "/" + r.name}>
               <button className="tl-deck" onClick={() => setOpenDeck({ slug: r.project.slug, name: r.name })}>
@@ -137,210 +160,9 @@ function SlidesTool({ onBack }: { onBack: () => void }) {
               </button>
             </li>
           ))}
-        </ul>
+          </ul>
+        )
       )}
-    </div>
-  );
-}
-
-// ── PDF → Markdown / LaTeX ───────────────────────────────────────────────────
-
-interface PdfStatus { mineru: { installed: boolean; version: string }; vision: { available: boolean }; tiers: string[]; hint: string }
-interface Job { id: string; status: "running" | "done" | "error" | "cancelled"; done: number; total: number; message: string; error?: string; result?: { text: string; format: "markdown" | "latex"; converter: string; pages: number }; partial?: string }
-
-const TIER_NOTE: Record<string, string> = {
-  flash: "Fastest. Reads the text layer — digital PDFs only.",
-  basic: "CPU-friendly OCR and layout. Good default.",
-  standard: "Adds a vision model: best tables and formulas, slow without a GPU.",
-  advanced: "Highest quality, heaviest.",
-};
-
-function PdfTool() {
-  const [status, setStatus] = useState<PdfStatus | null>(null);
-  const [file, setFile] = useState<File | null>(null);
-  const [output, setOutput] = useState<"markdown" | "latex">("markdown");
-  const [tier, setTier] = useState("basic");
-  const [pages, setPages] = useState("");
-  const [job, setJob] = useState<Job | null>(null);
-  const [err, setErr] = useState("");
-  const [drag, setDrag] = useState(false);
-  const [view, setView] = useState<"text" | "source">("text");
-  const [projects, setProjects] = useState<ProjectStats[]>([]);
-  const [saveTo, setSaveTo] = useState("");
-  const [note, setNote] = useState("");
-  const pollRef = useRef<number | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    fetch("/api/tools/pdf/status").then((r) => r.json()).then(setStatus).catch((e) => setErr(String(e)));
-    api.projects.list().then((r) => { setProjects(r.projects); setSaveTo(r.projects[0]?.slug ?? ""); }).catch(() => { /* optional */ });
-    return () => { if (pollRef.current) window.clearInterval(pollRef.current); };
-  }, []);
-
-  const engines = useMemo(() => activeEnginePayload(loadEngines()), []);
-  const running = job?.status === "running";
-
-  function stopPoll() { if (pollRef.current) { window.clearInterval(pollRef.current); pollRef.current = null; } }
-
-  async function start() {
-    if (!file) return;
-    setErr(""); setNote(""); setJob(null);
-    const form = new FormData();
-    form.append("file", file);
-    form.append("output", output);
-    form.append("tier", tier);
-    form.append("pages", pages);
-    form.append("engines", JSON.stringify(engines));
-    try {
-      const resp = await fetch("/api/tools/pdf/convert", { method: "POST", body: form });
-      const body = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(typeof body.detail === "string" ? body.detail : "Could not start the conversion");
-      const id = body.job_id as string;
-      setJob({ id, status: "running", done: 0, total: 0, message: "Starting" });
-      pollRef.current = window.setInterval(async () => {
-        try {
-          const j: Job = await fetch(`/api/tools/pdf/jobs/${id}`).then((r) => r.json());
-          setJob(j);
-          if (j.status !== "running") stopPoll();
-        } catch { /* keep polling */ }
-      }, 1200);
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
-  }
-
-  async function cancel() {
-    if (!job) return;
-    stopPoll();
-    await fetch(`/api/tools/pdf/jobs/${job.id}`, { method: "DELETE" }).catch(() => { /* ignore */ });
-    setJob({ ...job, status: "cancelled", message: "Cancelled" });
-  }
-
-  const baseName = (file?.name ?? "document.pdf").replace(/\.pdf$/i, "");
-  // MinerU hands back Markdown; LaTeX output converts it here with the same converter Notes uses.
-  const finalText = useMemo(() => {
-    const r = job?.result;
-    if (!r) return "";
-    if (output === "latex" && r.format === "markdown") return markdownToLatexDocument(r.text, baseName);
-    if (output === "latex" && !/\\begin\{document\}/.test(r.text)) {
-      return `\\documentclass{article}\n\\usepackage{amsmath,amssymb,graphicx}\n\\begin{document}\n\n${r.text}\n\n\\end{document}\n`;
-    }
-    return r.text;
-  }, [job?.result, output, baseName]);
-  const ext = output === "latex" ? "tex" : "md";
-
-  function download() {
-    const url = URL.createObjectURL(new Blob([finalText], { type: "text/plain;charset=utf-8" }));
-    const a = document.createElement("a");
-    a.href = url; a.download = `${baseName}.${ext}`; document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
-  }
-  async function copy() {
-    try { await navigator.clipboard.writeText(finalText); setNote("Copied"); } catch { setNote("Copy failed"); }
-  }
-  async function saveToProject() {
-    if (!saveTo) return;
-    try {
-      await api.projects.upload(saveTo, new File([finalText], `${baseName}.${ext}`, { type: "text/plain" }));
-      setNote(`Saved to ${projects.find((p) => p.slug === saveTo)?.name ?? saveTo} as ${baseName}.${ext}`);
-    } catch (e) { setNote(e instanceof Error ? e.message : "Save failed"); }
-  }
-
-  const pct = job && job.total ? Math.round((job.done / job.total) * 100) : 0;
-  const noEngine = status && !status.mineru.installed && engines.length === 0;
-  const preview = job?.result ? finalText : job?.partial ?? "";
-
-  return (
-    <div className="tl-pdf">
-      <div className="tl-pdf-side">
-        <div
-          className={`tl-drop${drag ? " drag" : ""}${file ? " has" : ""}`}
-          onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
-          onDragLeave={() => setDrag(false)}
-          onDrop={(e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files?.[0]; if (f) setFile(f); }}
-          onClick={() => inputRef.current?.click()}
-          role="button" tabIndex={0}
-          onKeyDown={(e) => { if (e.key === "Enter") inputRef.current?.click(); }}
-        >
-          <input ref={inputRef} type="file" accept="application/pdf,.pdf" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) setFile(f); e.target.value = ""; }} />
-          {file ? <><b>{file.name}</b><span>{(file.size / 1048576).toFixed(1)} MB · click to change</span></> : <><b>Drop a PDF here</b><span>or click to choose · up to 100 MB</span></>}
-        </div>
-
-        <label className="tl-lab">Output</label>
-        <div className="theme-mode-toggle">
-          <button className={`theme-mode-btn${output === "markdown" ? " selected" : ""}`} onClick={() => setOutput("markdown")}>Markdown</button>
-          <button className={`theme-mode-btn${output === "latex" ? " selected" : ""}`} onClick={() => setOutput("latex")}>LaTeX</button>
-        </div>
-
-        {status?.mineru.installed && (
-          <>
-            <label className="tl-lab">Quality tier</label>
-            <div className="theme-mode-toggle">
-              {status.tiers.map((t) => <button key={t} className={`theme-mode-btn${tier === t ? " selected" : ""}`} onClick={() => setTier(t)}>{t}</button>)}
-            </div>
-            <div className="tl-help">{TIER_NOTE[tier]}</div>
-          </>
-        )}
-
-        <label className="tl-lab">Pages <span>(optional)</span></label>
-        <input className="tl-input" value={pages} onChange={(e) => setPages(e.target.value)} placeholder="all — or e.g. 1-5, 8" />
-
-        <div className="tl-engine">
-          {status === null ? "Checking converters…" : status.mineru.installed
-            ? <>Converter: <b>MinerU {status.mineru.version}</b></>
-            : <>Converter: <b>vision engines</b>{engines.length ? ` (${engines[0].label || "first enabled engine"})` : ""}</>}
-        </div>
-        {status && !status.mineru.installed && <div className="tl-help">{status.hint}</div>}
-        {noEngine && <div className="tl-warn">No vision engine is enabled. Add LM Studio or a free Gemini key in the Canvas engine settings, then come back.</div>}
-
-        <div className="tl-actions">
-          <button className="btn tl-primary" onClick={() => void start()} disabled={!file || running || !!noEngine}>{running ? "Converting…" : "Convert"}</button>
-          {running && <button className="btn" onClick={() => void cancel()}>Cancel</button>}
-        </div>
-        {err && <div className="tl-err">{err}</div>}
-      </div>
-
-      <div className="tl-pdf-main">
-        {!job ? (
-          <div className="tl-empty">The result appears here. Pick a PDF and press Convert.</div>
-        ) : (
-          <>
-            <div className="tl-prog">
-              <div className="tl-prog-top">
-                <span>{job.status === "error" ? "Failed" : job.status === "cancelled" ? "Cancelled" : job.status === "done" ? `Done · ${job.result?.converter}` : job.message}</span>
-                {job.total > 0 && job.status === "running" && <span>{job.done}/{job.total} pages</span>}
-              </div>
-              <div className="tl-bar-track"><div className={`tl-bar-fill${job.status === "running" && !job.total ? " indet" : ""}`} style={{ width: job.status === "done" ? "100%" : `${pct}%` }} /></div>
-              {job.error && <div className="tl-err">{job.error}</div>}
-            </div>
-            {preview && (
-              <>
-                <div className="tl-res-bar">
-                  <div className="theme-mode-toggle">
-                    <button className={`theme-mode-btn${view === "text" ? " selected" : ""}`} onClick={() => setView("text")}>Text</button>
-                    <button className={`theme-mode-btn${view === "source" ? " selected" : ""}`} onClick={() => setView("source")}>Wrap</button>
-                  </div>
-                  <span className="tl-spacer" />
-                  {job.status === "done" && (
-                    <>
-                      <button className="btn" onClick={() => void copy()}>Copy</button>
-                      <button className="btn" onClick={download}>Download .{ext}</button>
-                      {projects.length > 0 && (
-                        <>
-                          <select value={saveTo} onChange={(e) => setSaveTo(e.target.value)} aria-label="Project">
-                            {projects.map((p) => <option key={p.slug} value={p.slug}>{p.name}</option>)}
-                          </select>
-                          <button className="btn" onClick={() => void saveToProject()}>Save to project</button>
-                        </>
-                      )}
-                    </>
-                  )}
-                </div>
-                {note && <div className="tl-help">{note}</div>}
-                <pre className={`tl-out${view === "source" ? " wrap" : ""}`}>{preview}</pre>
-              </>
-            )}
-          </>
-        )}
-      </div>
     </div>
   );
 }

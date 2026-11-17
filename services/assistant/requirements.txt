@@ -10,5 +10,5 @@ watchdog==4.0.2
 aiofiles==24.1.0
 python-multipart==0.0.12
 mcp==1.30.0
-pypdfium2>=4.30
-pillow>=10
+# PDF → Markdown (Tools). Ships in every build: Docker image and the desktop installers.
+mineru>=4.0,<5

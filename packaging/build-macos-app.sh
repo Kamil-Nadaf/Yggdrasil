@@ -161,6 +161,7 @@ rm -rf "${SP}/PyObjCTest" "${SP}/pip" "${SP}"/pip-*.dist-info \
        "${SP}/setuptools" "${SP}"/setuptools-*.dist-info "${SP}/pkg_resources" "${SP}/_distutils_hack" "${SP}/distutils-precedence.pth"
 "${PYDIR}/bin/python3" -c "import fastapi, uvicorn, webview, numpy, sqlite3; print('→ prune OK')"
 PYTHONPATH="${APPDIR}" "${PYDIR}/bin/python3" -c "import vecstore; print('→ vecstore OK')"
+test -x "${PYDIR}/bin/mineru-kit" && echo "→ MinerU CLI OK" || { echo "MinerU CLI missing from the bundled Python"; exit 1; }
 
 # ── Ad-hoc sign ─────────────────────────────────────────────────────────────
 if command -v codesign >/dev/null 2>&1; then

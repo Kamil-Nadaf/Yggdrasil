@@ -72,7 +72,7 @@ def test_import_dedupes_and_waits_for_books(tmp_path, monkeypatch):
     async def resolve(key, url):
         return src
 
-    monkeypatch.setattr(tools, "mineru_bin", lambda: "/bin/true")
+    monkeypatch.setattr(tools, "mineru_cmd", lambda: ["/bin/true"])
     app = FastAPI()
     app.include_router(tools.make_router(lambda: tmp_path, resolve))
     c = TestClient(app)
@@ -92,3 +92,14 @@ def test_import_rejects_non_pdf(tmp_path):
     app.include_router(tools.make_router(lambda: tmp_path, resolve))
     r = TestClient(app).post("/api/tools/pdf/import", json={"key": "2501.00001", "kind": "paper"})
     assert r.status_code == 400
+
+
+def test_mineru_cmd_uses_running_interpreter(monkeypatch):
+    # A relocated install has a dead shebang on the console script, so we must call the
+    # entry point through sys.executable instead of exec'ing the script.
+    import sys
+
+    monkeypatch.setattr(tools, "_entry_point", lambda: ("pkg.cli", "main"))
+    cmd = tools.mineru_cmd()
+    assert cmd[0] == sys.executable and cmd[1] == "-c"
+    assert "pkg.cli" in cmd[2] and "main" in cmd[2]

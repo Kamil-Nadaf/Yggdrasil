@@ -38,17 +38,49 @@ ID_RE = re.compile(r"^[0-9a-f]{12}$")
 _RUN: dict[str, dict[str, Any]] = {}
 
 
-def mineru_bin() -> Optional[str]:
+def _entry_point() -> Optional[tuple[str, str]]:
+    """(module, attr) of the `mineru-kit` console script, read from package metadata.
+
+    pip writes console scripts with an absolute shebang to the build-time Python. After the
+    bundled interpreter is relocated (macOS .app, Windows/Linux installers) that shebang is
+    dead and exec fails with ENOENT even though the script exists - so we never exec it and
+    call the entry point with the running interpreter instead."""
+    try:
+        from importlib.metadata import entry_points
+
+        for ep in entry_points(group="console_scripts"):
+            if ep.name == "mineru-kit":
+                mod, _, attr = ep.value.partition(":")
+                return mod.strip(), attr.split("[")[0].strip()
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def mineru_cmd() -> Optional[list[str]]:
+    """Argv prefix that runs `mineru-kit`, or None when MinerU isn't installed."""
+    ep = _entry_point()
+    if ep and ep[0] and ep[1]:
+        code = (
+            "import sys, importlib; sys.argv[0] = 'mineru-kit'; "
+            f"sys.exit(getattr(importlib.import_module({ep[0]!r}), {ep[1]!r})())"
+        )
+        return [sys.executable, "-c", code]
     found = shutil.which("mineru-kit")
     if found:
-        return found
+        return [found]
     here = Path(sys.executable).resolve().parent
     for base in (here, here / "Scripts", here / "bin"):
         for name in ("mineru-kit", "mineru-kit.exe"):
             c = base / name
             if c.is_file():
-                return str(c)
+                return [str(c)]
     return None
+
+
+def mineru_bin() -> Optional[str]:
+    cmd = mineru_cmd()
+    return cmd[0] if cmd else None
 
 
 def mineru_version() -> str:
@@ -131,11 +163,14 @@ def make_router(
         out = d / "out" / "result.md"
         shutil.rmtree(d / "out", ignore_errors=True)
         out.parent.mkdir(parents=True, exist_ok=True)
-        cmd = [mineru_bin() or "mineru-kit", "parse", str(d / "input.pdf"), "-o", str(out), "--tier", tier]
+        cmd = [*(mineru_cmd() or ["mineru-kit"]), "parse", str(d / "input.pdf"), "-o", str(out), "--tier", tier]
         if pages:
             cmd += ["--pages", pages]
         try:
-            proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+            try:
+                proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+            except FileNotFoundError as e:
+                raise RuntimeError(f"Couldn't start MinerU ({cmd[0]}): {e.strerror or e}. Reinstall the full installer.") from e
             _RUN[eid]["proc"] = proc
             log, _ = await proc.communicate()
             if _RUN.get(eid, {}).get("cancelled"):
@@ -162,7 +197,7 @@ def make_router(
         return eid not in _RUN
 
     def launch(d: Path, tier: str, pages: str) -> None:
-        if not mineru_bin():
+        if not mineru_cmd():
             raise HTTPException(500, "MinerU isn't part of this install. It comes with the full installer (in-app updates can't add it) - install the latest full installer once to get it.")
         eid = d.name
         if eid in _RUN:
@@ -173,7 +208,7 @@ def make_router(
     @router.get("/status")
     def status():
         return {
-            "mineru": {"installed": bool(mineru_bin()), "version": mineru_version()},
+            "mineru": {"installed": bool(mineru_cmd()), "version": mineru_version()},
             "tiers": list(TIERS),
         }
 

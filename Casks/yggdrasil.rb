@@ -6,6 +6,11 @@ cask "yggdrasil" do
     url "https://github.com/Kamil-Nadaf/Yggdrasil/releases/download/v0.5.2/Yggdrasil-20261117-mac-arm64.dmg"
   end
 
+  on_intel do
+    sha256 "79ce5b94000571f28341ab664e4a50265dfa18e785b131b361fde4240abbb20c"
+    url "https://github.com/Kamil-Nadaf/Yggdrasil/releases/download/v0.5.2/Yggdrasil-20261117-mac-intel.dmg"
+  end
+
   name "Yggdrasil"
   desc "Self-hosted research app: read arXiv papers, notes, LaTeX, slides"
   homepage "https://github.com/Kamil-Nadaf/Yggdrasil"

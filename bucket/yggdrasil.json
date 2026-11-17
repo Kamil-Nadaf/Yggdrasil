@@ -6,7 +6,7 @@
   "architecture": {
     "64bit": {
       "url": "https://github.com/Kamil-Nadaf/Yggdrasil/releases/download/v0.5.2/Yggdrasil-20261117-windows.zip",
-      "hash": "c2342357a99d4e73cb3c96c1b2aa63f1222a97abdce89468aaa21e3c4a60be82"
+      "hash": "5d60bd2a8104079710863da2040b37b07649dfa79f3c28c290014d1fae045860"
     }
   },
   "extract_dir": "Yggdrasil-windows",

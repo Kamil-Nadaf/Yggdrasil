@@ -263,3 +263,67 @@
 .si-msg { font-size: 12px; color: var(--muted); max-width: 320px; }
 .sl-ink-slot { display: contents; }
 .si-tools .si-msg { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* compact header and toolbar when the canvas is docked beside the editor or PDF */
+.cv-bar .btn, .cv-bar .cv-seg-btn { white-space: nowrap; }
+.cv-bar-title { flex-wrap: nowrap; flex: 1 1 auto; min-width: 0; }
+.cv-embedded .cv-bar { gap: 8px; padding: 8px 12px; }
+.cv-embedded .cv-embed-title { font-weight: 700; font-size: 15px; margin-right: 2px; }
+.cv-embedded .cv-page-select { min-width: 0; flex: 1 1 90px; max-width: 200px; }
+.cv-embedded .cv-save { white-space: nowrap; font-size: 11px; }
+@container (max-width: 960px) {
+  .cv-bar { row-gap: 8px; }
+  .cv-bar-title { flex: 1 1 100%; order: 1; }
+  .cv-seg { order: 2; flex: 1 1 auto; }
+  .cv-seg-btn { flex: 1; padding: 0 8px; }
+  .cv-bar > .btn { order: 3; }
+  .cv-embedded .cv-embed-title { order: 0; flex: 1 1 auto; }
+  .cv-embedded .cv-bar > .btn:last-child { order: 0; }
+  .cv-rail { flex-wrap: wrap; overflow-x: visible; overflow-y: visible; row-gap: 6px; }
+  .cv-tool { width: 44px; height: 44px; }
+}
+
+/* very narrow docked panel: one-line header, icon-sized controls */
+@container (max-width: 520px) {
+  .cv-embedded .cv-bar { padding: 6px 8px; gap: 6px; }
+  .cv-embedded .cv-bar .btn, .cv-embedded .cv-input { min-height: 36px; padding: 0 10px; font-size: 12px; }
+  .cv-embedded .cv-seg-btn { min-height: 32px; font-size: 12px; }
+  .cv-embedded .cv-save { display: none; }
+  .cv-embedded .cv-page { min-height: 280px; }
+}
+
+/* tightest docked layout: header in three short rows, one-line compact tools */
+@container (max-width: 520px) {
+  .cv-embedded .cv-embed-title { display: none; }
+  .cv-embedded .cv-bar { row-gap: 6px; }
+  .cv-embedded .cv-bar > .btn { order: 3; flex: 1 1 0; }
+  .cv-embedded .cv-bar > .btn:last-child { order: 4; }
+  .cv-embedded .cv-rail { padding: 6px 8px; gap: 4px; }
+  .cv-embedded .cv-tool { width: 36px; height: 36px; border-radius: 9px; }
+  .cv-embedded .cv-tool svg { width: 18px; height: 18px; }
+  .cv-embedded .cv-color { width: 22px; height: 22px; }
+  .cv-embedded .cv-rail-sep { height: 24px; margin: 0 2px; }
+  .cv-embedded .cv-width, .cv-embedded .cv-width input { width: 64px; padding: 0; }
+}
+
+/* compact controls so the canvas blends in with the rest of the app */
+.cv-shell .cv-bar .btn, .cv-shell .cv-bar .cv-input, .cv-shell .cv-touch, .si-tools .btn,
+.cv-shell .cv-result .btn, .cv-shell .cv-actions .btn { min-height: 28px; padding: 3px 10px; font-size: 12px; }
+.cv-shell .cv-bar { padding: 6px 10px; gap: 6px; }
+.cv-shell .cv-bar-title { gap: 6px; }
+.cv-shell .cv-page-select { min-width: 0; flex: 1 1 100px; max-width: 220px; }
+.cv-shell .cv-embed-title { font-size: 13px; }
+.cv-shell .cv-seg { padding: 2px; border-radius: 8px; }
+.cv-shell .cv-seg-btn, .si-tools .cv-seg-btn { min-height: 24px; padding: 0 10px; font-size: 12px; border-radius: 6px; }
+.cv-shell .cv-rail { padding: 4px 8px; gap: 2px; }
+.cv-shell .cv-rail-sep { height: 18px; margin: 0 4px; }
+.cv-shell .cv-tool { width: 30px; height: 30px; border-radius: 7px; }
+.cv-shell .cv-tool svg { width: 16px; height: 16px; }
+.cv-shell .cv-color { width: 16px; height: 16px; border-width: 2px; margin: 0 3px; }
+.cv-shell .cv-width, .cv-shell .cv-width input { width: 56px; padding: 0; }
+.si-auto { min-height: 28px; font-size: 12px; }
+.si-tools .si-auto input { margin: 0; }
+@container (max-width: 960px) {
+  .cv-shell .cv-bar > .btn { flex: 0 0 auto; }
+  .cv-shell .cv-seg-btn { padding: 0 8px; }
+}

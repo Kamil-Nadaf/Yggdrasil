@@ -837,7 +837,7 @@ export default function LaTeXEditor() {
         break;
       case "ink":
         if (inkDock) setInkDock(false);
-        else { setInkDock(true); if (viewMode === "editor") changeViewMode("split"); }
+        else { setInkDock(true); setFilesOpen(false); if (viewMode === "editor") changeViewMode("split"); }
         break;
       case "label":
         wrapOrInsert("\\label{", "}", "sec:id");
@@ -1878,7 +1878,7 @@ export default function LaTeXEditor() {
       >
         {inkDock && (
           <>
-            <Panel id="latex-ink" defaultSize={viewMode === "split" ? "30" : "45"} minSize="22" className="latex-panel">
+            <Panel id="latex-ink" defaultSize={viewMode === "split" ? "40" : "50"} minSize="25" className="latex-panel">
               <CanvasView
                 embedded
                 title="Canvas"
@@ -1897,7 +1897,7 @@ export default function LaTeXEditor() {
               id="latex-editor"
               defaultSize={
                 viewMode === "split"
-                  ? filesCollapsed ? "55" : "50"
+                  ? inkDock ? "32" : filesCollapsed ? "55" : "50"
                   : filesCollapsed ? "100" : "82"
               }
               minSize="25"
@@ -1914,7 +1914,7 @@ export default function LaTeXEditor() {
             id="latex-preview"
             defaultSize={
               viewMode === "split"
-                ? filesCollapsed ? "45" : "32"
+                ? inkDock ? "28" : filesCollapsed ? "45" : "32"
                 : filesCollapsed ? "100" : "82"
             }
             minSize="25"

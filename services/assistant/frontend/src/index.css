@@ -5851,3 +5851,57 @@ h2 { font-size: 15px; color: var(--accent); }
 .arxiv-panel-list.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; align-content: start; }
 
 .rsb-auto { font-size: 11px; padding: 6px 10px 2px; }
+
+/* ───────── LaTeX workspace: floating card layout ───────── */
+.latex-shell--cards {
+  background:
+    radial-gradient(1100px 420px at 18% -12%, color-mix(in srgb, var(--page-accent) 9%, transparent), transparent 70%),
+    var(--bg);
+}
+.latex-shell--cards .latex-workspace { padding: 2px 8px 8px; box-sizing: border-box; }
+.latex-shell--cards .latex-menubar-wrap { background: transparent; border-bottom: 0; padding: 6px 12px 6px 10px; }
+
+/* each panel becomes its own rounded card */
+.latex-shell--cards .latex-panel { background: transparent; padding: 0; }
+.latex-shell--cards .latex-panel > * {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--surface);
+  transition: border-color 0.15s, box-shadow 0.2s;
+}
+.latex-shell--cards .latex-panel:focus-within > * {
+  border-color: color-mix(in srgb, var(--page-accent) 55%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--page-accent) 25%, transparent), 0 0 38px -16px var(--page-accent);
+}
+.latex-shell--cards .latex-editor-pane, .latex-shell--cards .latex-preview-pane { background: var(--surface); }
+.latex-shell--cards .latex-editor-host { background: var(--surface); }
+
+/* dividers are gaps with a thin line on hover */
+.latex-shell--cards .latex-resize-handle { width: 10px; background: transparent; position: relative; flex: none; }
+.latex-shell--cards .latex-resize-handle::after { content: ""; position: absolute; left: 4px; top: 12px; bottom: 12px; width: 2px; border-radius: 2px; background: transparent; transition: background 0.15s; }
+.latex-shell--cards .latex-resize-handle:hover::after,
+.latex-shell--cards .latex-resize-handle[data-active]::after { background: var(--page-accent); }
+
+/* layout pill (Editor + PDF / Canvas + PDF / Canvas + Editor + PDF) */
+.latex-layout-pill { display: inline-flex; padding: 3px; gap: 2px; border-radius: 12px; background: color-mix(in srgb, var(--bg) 70%, var(--surface)); border: 1px solid var(--border); flex-shrink: 0; }
+.latex-layout-pill button { height: 26px; padding: 0 12px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font-family: var(--font-sans); font-size: 12px; white-space: nowrap; cursor: pointer; }
+.latex-layout-pill button:hover { color: var(--text); }
+.latex-layout-pill button.on { background: color-mix(in srgb, var(--text) 14%, var(--surface)); color: var(--text); font-weight: 600; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 18%, transparent); }
+
+/* file name as a centred pill */
+.latex-shell--cards .latex-filename-label { display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 14px; border-radius: 14px; border: 1px solid var(--border); background: color-mix(in srgb, var(--bg) 70%, var(--surface)); }
+
+/* status line */
+.latex-statusline { flex: none; display: flex; align-items: center; gap: 18px; height: 28px; padding: 0 16px; border-top: 1px solid var(--border); font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); background: color-mix(in srgb, var(--bg) 82%, #000); }
+.lsl-item { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.lsl-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--page-accent); }
+.lsl-warn { background: #F2B35E; }
+.lsl-bad { background: var(--crit, #e5534b); }
+.lsl-busy { background: #F2B35E; animation: lslpulse 1s ease-in-out infinite; }
+@keyframes lslpulse { 50% { opacity: 0.35; } }
+
+/* canvas card header matches the other cards */
+.latex-shell--cards .cv-bar { border-bottom-color: var(--border); }
+.latex-shell--cards .cv-embed-title { font-family: var(--font-title); font-size: 15px; font-weight: 600; }
+.latex-shell--cards .cv-rail { background: transparent; }

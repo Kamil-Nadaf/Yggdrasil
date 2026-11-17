@@ -18,6 +18,8 @@ export function WorkspaceLayout({
   sidebarSize = { default: 22, min: 16, max: 40 },
   children,
   height,
+  variant,
+  footer,
 }: {
   panelGroupId: string;
   menuBar: ReactNode;
@@ -30,9 +32,13 @@ export function WorkspaceLayout({
   children: ReactNode;
   /** Fixed height for the shell when its ancestor isn't already a filling flex column. */
   height?: string;
+  /** "cards" = floating rounded panels (LaTeX). */
+  variant?: "cards";
+  /** Optional status bar under the panels. */
+  footer?: ReactNode;
 }) {
   return (
-    <div className="latex-shell" style={height ? { height } : undefined}>
+    <div className={`latex-shell${variant === "cards" ? " latex-shell--cards" : ""}`} style={height ? { height } : undefined}>
       {menuBar}
       <div className="latex-workspace">
         {sidebarCollapsed && <SidebarRail label={sidebarLabel} onShow={onShowSidebar} />}
@@ -54,6 +60,7 @@ export function WorkspaceLayout({
           {children}
         </PanelGroup>
       </div>
+      {footer}
     </div>
   );
 }

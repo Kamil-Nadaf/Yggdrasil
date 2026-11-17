@@ -37,6 +37,8 @@ import {
   loadCorners,
   saveCorners,
   type Corners,
+  CORNERS_DEFAULT,
+  CORNERS_MAX,
   saveTextScale,
   type TextScale,
   type CustomTheme,
@@ -985,21 +987,23 @@ export default function SettingsPage({ open = true, onClose, firstRun, onDataPat
           <div className="settings-item" style={{ marginTop: 14 }}>
             <label>Corners</label>
             <div className="settings-info" style={{ marginBottom: 8 }}>
-              Round the edges of panels, buttons and cards in every section. Theme keeps each theme's own corners.
+              Softness of panel, button and card corners in every section. 0 is sharp.
             </div>
-            <div className="theme-mode-toggle">
-              {([["theme", "Theme"], ["sharp", "Sharp"], ["soft", "Soft"], ["round", "Round"]] as const).map(([id, name]) => (
-                <button
-                  key={id}
-                  type="button"
-                  className={`theme-mode-btn${corners === id ? " selected" : ""}`}
-                  aria-pressed={corners === id}
-                  onClick={() => pickCorners(id)}
-                >
-                  {name}
-                </button>
-              ))}
-            </div>
+            <label className="font-picker-field" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+              <input
+                type="range"
+                min={0}
+                max={CORNERS_MAX}
+                step={1}
+                value={corners}
+                onChange={(e) => pickCorners(Number(e.target.value))}
+                style={{ flex: 1 }}
+              />
+              <span className="mono" style={{ width: 44, textAlign: "right" }}>{corners}px</span>
+            </label>
+            <button type="button" className="btn" onClick={() => pickCorners(CORNERS_DEFAULT)}>
+              Reset
+            </button>
           </div>
 
           <div className="settings-item" style={{ marginTop: 14 }}>

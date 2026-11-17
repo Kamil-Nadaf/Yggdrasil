@@ -649,33 +649,33 @@ function applyTextScale() {
 }
 
 
-/** Corner style for panels, buttons and cards. "theme" keeps each theme's own corners. */
-export type Corners = "theme" | "sharp" | "soft" | "round";
+/** Corner softness in px (0 = sharp). Default 8 = soft. Card radius scales with it. */
+export type Corners = number;
 const CORNERS_KEY = "yggdrasil:corners";
-const CORNER_PX: Record<Exclude<Corners, "theme">, [number, number]> = { sharp: [0, 0], soft: [8, 14], round: [14, 22] };
+export const CORNERS_DEFAULT = 8;
+export const CORNERS_MAX = 20;
 
 export function loadCorners(): Corners {
   const v = localStorage.getItem(CORNERS_KEY);
-  return v === "sharp" || v === "soft" || v === "round" ? v : "theme";
+  if (v === null) return CORNERS_DEFAULT;
+  // migrate old named presets
+  const legacy: Record<string, number> = { sharp: 0, soft: 8, round: 14, theme: 8 };
+  if (v in legacy) return legacy[v];
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(CORNERS_MAX, Math.max(0, Math.round(n))) : CORNERS_DEFAULT;
 }
 
 export function saveCorners(c: Corners) {
-  localStorage.setItem(CORNERS_KEY, c);
+  localStorage.setItem(CORNERS_KEY, String(c));
   applyCorners();
   notifyTheme();
 }
 
 function applyCorners() {
   const root = document.documentElement.style;
-  const c = loadCorners();
-  if (c === "theme") {
-    root.removeProperty("--radius");
-    root.setProperty("--card-radius", "calc(var(--radius) * 2.667)");
-    return;
-  }
-  const [r, card] = CORNER_PX[c];
+  const r = loadCorners();
   root.setProperty("--radius", `${r}px`);
-  root.setProperty("--card-radius", `${card}px`);
+  root.setProperty("--card-radius", `${Math.round(r * 1.75)}px`);
 }
 
 /** Apply the saved theme to <html>. Call on boot and after any change. */

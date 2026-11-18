@@ -206,13 +206,16 @@ def list_zotero_collections() -> Optional[list[dict]]:
     rows: list[dict] = []
     start = 0
     while True:
-        resp = httpx.get(
-            f"{ZOTERO_API}/users/{user_id}/collections",
-            headers={"Zotero-API-Key": api_key},
-            params={"limit": 100, "start": start},
-            timeout=8.0,
-        )
-        resp.raise_for_status()
+        try:
+            resp = httpx.get(
+                f"{ZOTERO_API}/users/{user_id}/collections",
+                headers={"Zotero-API-Key": api_key},
+                params={"limit": 100, "start": start},
+                timeout=30.0,
+            )
+            resp.raise_for_status()
+        except httpx.HTTPError as e:
+            raise RuntimeError(explain_zotero_error(e)) from e
         batch = resp.json()
         rows.extend(r.get("data", {}) for r in batch)
         if len(batch) < 100:
@@ -228,6 +231,37 @@ def list_zotero_collections() -> Optional[list[dict]]:
 
     out = [{"key": r["key"], "name": path(r)} for r in rows]
     return sorted(out, key=lambda c: c["name"].lower())
+
+
+def explain_zotero_error(e: Exception) -> str:
+    """A message a person can act on, instead of httpx's raw 'Client error 403 ... for url ...'."""
+    if isinstance(e, httpx.HTTPStatusError):
+        code = e.response.status_code
+        if code in (401, 403):
+            return f"Zotero refused the request ({code}). Check the user ID and API key in Settings → Zotero, and that the key has write access (zotero.org/settings/keys → edit the key → Allow write access)."
+        if code == 404:
+            return "Zotero couldn't find that library. Check the user ID in Settings → Zotero (the number on zotero.org/settings/keys)."
+        if code == 429:
+            wait = e.response.headers.get("Retry-After", "a few")
+            return f"Zotero is rate-limiting requests. Try again in {wait} seconds."
+        if code in (409, 412):
+            return "Zotero says the library is locked or changed. Wait a moment and try again."
+        return f"Zotero returned an error ({code}). {e.response.text[:160]}".strip()
+    if isinstance(e, httpx.TimeoutException):
+        return "Zotero took too long to answer (api.zotero.org). Check your connection or VPN and try again."
+    if isinstance(e, httpx.TransportError):
+        return "Couldn't reach Zotero (api.zotero.org). Check your connection or VPN and try again."
+    return str(e) or e.__class__.__name__
+
+
+def explain_failed_item(failed: dict) -> str:
+    """Zotero answers 200 with {"failed": {"0": {"code": 409, "message": "Collection X not found"}}} for a bad item."""
+    first = next(iter(failed.values()), None) if isinstance(failed, dict) else None
+    code = first.get("code") if isinstance(first, dict) else None
+    msg = (first.get("message") if isinstance(first, dict) else "") or str(failed)
+    if "collection" in msg.lower() and ("not found" in msg.lower() or code == 409):
+        return "That Zotero collection no longer exists. Pick another one in the dropdown (or Library) and try again."
+    return f"Zotero rejected the item{f' ({code})' if code else ''}: {msg[:200]}"
 
 
 def add_paper_to_zotero(arxiv_id: str, title: str, authors: list, pdf_url: str = "", collection: str = "") -> Optional[dict]:
@@ -249,26 +283,29 @@ def add_paper_to_zotero(arxiv_id: str, title: str, authors: list, pdf_url: str =
         else:
             creators.append({"creatorType": "author", "name": name.strip()})
 
-    resp = httpx.post(
-        f"{ZOTERO_API}/users/{user_id}/items",
-        headers={"Zotero-API-Key": api_key, "Content-Type": "application/json"},
-        json=[
-            {
-                "itemType": "preprint",
-                "title": title,
-                "creators": creators,
-                "url": pdf_url or f"https://arxiv.org/abs/{arxiv_id}",
-                "archiveID": f"arXiv:{arxiv_id}",
-                "repository": "arXiv",
-                **({"collections": [collection]} if collection else {}),
-            }
-        ],
-        timeout=8.0,
-    )
-    resp.raise_for_status()
+    item = {
+        "itemType": "preprint",
+        "title": title,
+        "creators": creators,
+        "url": pdf_url or f"https://arxiv.org/abs/{arxiv_id}",
+        "archiveID": f"arXiv:{arxiv_id}",
+        "repository": "arXiv",
+    }
+    if collection:
+        item["collections"] = [collection]
+    try:
+        resp = httpx.post(
+            f"{ZOTERO_API}/users/{user_id}/items",
+            headers={"Zotero-API-Key": api_key, "Content-Type": "application/json"},
+            json=[item],
+            timeout=30.0,
+        )
+        resp.raise_for_status()
+    except httpx.HTTPError as e:
+        raise RuntimeError(explain_zotero_error(e)) from e
     data = resp.json()
     if data.get("failed"):
-        raise RuntimeError(str(data["failed"]))
+        raise RuntimeError(explain_failed_item(data["failed"]))
     return {"arxiv_id": arxiv_id, "title": title, "zotero_response": data.get("successful", {})}
 
 

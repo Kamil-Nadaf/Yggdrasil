@@ -69,7 +69,7 @@ const IMG_RE = /!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g;
 
 function imageLatex(src: string, alt: string, ctx: ExportContext): string {
   const file = ctx.images[src];
-  if (!file) return `\\textit{[image: ${escapeLatex(alt || src)}]}`;
+  if (!file) return `\\textit{[image: ${escapeLatex(alt || (src.startsWith("data:") ? "figure" : src))}]}`;
   return `\\includegraphics[width=\\linewidth,height=0.6\\textheight,keepaspectratio]{${file}}`;
 }
 

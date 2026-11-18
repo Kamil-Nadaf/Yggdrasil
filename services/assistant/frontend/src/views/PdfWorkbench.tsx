@@ -6,6 +6,8 @@ import { api } from "../api/client";
 import type { ProjectStats } from "../api/client";
 import AbstractText from "../components/AbstractText";
 import { markdownToLatexDocument } from "../lib/markdownToLatex";
+import { alignBlocks, hideEmbeddedImages, splitBlocks } from "../lib/pdfMdAlign";
+import type { BlockPos, Rect } from "../lib/pdfMdAlign";
 
 interface FileMeta {
   id: string;
@@ -55,9 +57,11 @@ function Popover({ label, children, align = "right", disabled }: { label: ReactN
   );
 }
 
+const NO_MARKS: Rect[] = [];
+
 // ── original PDF, rendered with pdf.js ───────────────────────────────────────
 
-function PdfPage({ pdf, n, width, root }: { pdf: PDFDocumentProxy; n: number; width: number; root: HTMLElement | null }) {
+function PdfPage({ pdf, n, width, root, marks, onPick }: { pdf: PDFDocumentProxy; n: number; width: number; root: HTMLElement | null; marks: Rect[]; onPick: (page: number, x: number, y: number) => void }) {
   const holder = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [ratio, setRatio] = useState(1.3);
@@ -96,13 +100,24 @@ function PdfPage({ pdf, n, width, root }: { pdf: PDFDocumentProxy; n: number; wi
   }, [visible, pdf, n, width]);
 
   return (
-    <div ref={holder} className="pw-page" data-page={n} style={{ width, height: width * ratio }}>
+    <div
+      ref={holder}
+      className="pw-page"
+      data-page={n}
+      style={{ width, height: width * ratio }}
+      onClick={(e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        onPick(n, (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height);
+      }}
+    >
       <canvas ref={canvas} />
+      {marks.map((m, i) => <span key={i} className="pw-mark" style={{ left: `${m.x * 100}%`, top: `${m.y * 100}%`, width: `${m.w * 100}%`, height: `${m.h * 100}%` }} />)}
     </div>
   );
 }
 
-function PdfPane({ url, zoom, goto, onInfo }: { url: string; zoom: number; goto: { page: number; tick: number }; onInfo: (page: number, total: number) => void }) {
+interface Goto { page: number; tick: number; y?: number }
+function PdfPane({ url, zoom, goto, onInfo, marks, onPick, onReady }: { url: string; zoom: number; goto: Goto; onInfo: (page: number, total: number) => void; marks: { page: number; rects: Rect[] } | null; onPick: (page: number, x: number, y: number) => void; onReady: (pdf: PDFDocumentProxy | null) => void }) {
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [err, setErr] = useState("");
   const [box, setBox] = useState<HTMLDivElement | null>(null);
@@ -111,7 +126,7 @@ function PdfPane({ url, zoom, goto, onInfo }: { url: string; zoom: number; goto:
   useEffect(() => {
     let dead = false;
     let doc: PDFDocumentProxy | null = null;
-    setPdf(null); setErr("");
+    setPdf(null); setErr(""); onReady(null);
     (async () => {
       const pdfjs = await import("pdfjs-dist");
       pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
@@ -120,6 +135,7 @@ function PdfPane({ url, zoom, goto, onInfo }: { url: string; zoom: number; goto:
       doc = await pdfjs.getDocument({ data: new Uint8Array(await r.arrayBuffer()) }).promise;
       if (dead) { void doc.destroy(); return; }
       setPdf(doc);
+      onReady(doc);
       onInfo(1, doc.numPages);
     })().catch((e) => { if (!dead) setErr(e instanceof Error ? e.message : "Could not open the PDF"); });
     return () => { dead = true; void doc?.destroy(); };
@@ -136,7 +152,10 @@ function PdfPane({ url, zoom, goto, onInfo }: { url: string; zoom: number; goto:
 
   useEffect(() => {
     if (!box || !goto.page) return;
-    box.querySelector<HTMLElement>(`[data-page="${goto.page}"]`)?.scrollIntoView({ block: "start" });
+    const el = box.querySelector<HTMLElement>(`[data-page="${goto.page}"]`);
+    if (!el) return;
+    const off = el.getBoundingClientRect().top - box.getBoundingClientRect().top;
+    box.scrollTop += off + (goto.y != null ? goto.y * el.clientHeight - 56 : 0);
   }, [goto, box]);
 
   function onScroll() {
@@ -157,7 +176,7 @@ function PdfPane({ url, zoom, goto, onInfo }: { url: string; zoom: number; goto:
       {!pdf && !err && <div className="tl-empty">Loading PDF…</div>}
       {pdf && box && (
         <div className="pw-pages" style={{ width }}>
-          {Array.from({ length: pdf.numPages }, (_, i) => <PdfPage key={i + 1} pdf={pdf} n={i + 1} width={width} root={box} />)}
+          {Array.from({ length: pdf.numPages }, (_, i) => <PdfPage key={i + 1} pdf={pdf} n={i + 1} width={width} root={box} marks={marks && marks.page === i + 1 ? marks.rects : NO_MARKS} onPick={onPick} />)}
         </div>
       )}
     </div>
@@ -179,7 +198,18 @@ export default function PdfWorkbench({ onBack }: { onBack: () => void }) {
   const [drag, setDrag] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [pageInfo, setPageInfo] = useState({ page: 1, total: 0 });
-  const [goto, setGoto] = useState({ page: 0, tick: 0 });
+  const [goto, setGoto] = useState<Goto>({ page: 0, tick: 0 });
+  const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
+  const [pos, setPos] = useState<BlockPos[]>([]);
+  const [aligned, setAligned] = useState<"idle" | "busy" | "ok" | "none">("idle");
+  const [active, setActive] = useState(-1);
+  const [sync, setSync] = useState(true);
+  const [split, setSplit] = useState(() => { try { const v = Number(localStorage.getItem("yggdrasil:pdf-split")); return v >= 0.2 && v <= 0.8 ? v : 0.5; } catch { return 0.5; } });
+  const resultRef = useRef<HTMLDivElement | null>(null);
+  const colsRef = useRef<HTMLDivElement | null>(null);
+  const lockUntil = useRef(0);
+  const lastPdfPage = useRef(0);
+  const raf = useRef(0);
   const [projects, setProjects] = useState<ProjectStats[]>([]);
   const [saveTo, setSaveTo] = useState("");
   const [tickSec, setTickSec] = useState(0);
@@ -272,15 +302,16 @@ export default function PdfWorkbench({ onBack }: { onBack: () => void }) {
     try { return markdownToLatexDocument(md, name); } catch { return "% Could not convert this document to LaTeX"; }
   }, [md, name]);
   const textFor = (fmt: "md" | "tex") => (fmt === "md" ? md : latex);
+  const plainFor = (fmt: "md" | "tex") => (fmt === "md" ? hideEmbeddedImages(md) : latex);
 
-  function download(fmt: "md" | "tex") {
-    const url = URL.createObjectURL(new Blob([textFor(fmt)], { type: "text/plain;charset=utf-8" }));
+  function download(fmt: "md" | "tex", withImages = true) {
+    const url = URL.createObjectURL(new Blob([withImages ? textFor(fmt) : plainFor(fmt)], { type: "text/plain;charset=utf-8" }));
     const a = document.createElement("a");
-    a.href = url; a.download = `${name}.${fmt}`; document.body.appendChild(a); a.click(); a.remove();
+    a.href = url; a.download = `${name}${withImages || fmt === "tex" ? "" : "-text"}.${fmt}`; document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
   async function copy(fmt: "md" | "tex") {
-    try { await navigator.clipboard.writeText(textFor(fmt)); setNote(`Copied ${fmt === "md" ? "Markdown" : "LaTeX"}`); } catch { setNote("Copy failed"); }
+    try { await navigator.clipboard.writeText(plainFor(fmt)); setNote(`Copied ${fmt === "md" ? "Markdown" : "LaTeX"}`); } catch { setNote("Copy failed"); }
   }
   async function saveToProject(fmt: "md" | "tex") {
     if (!saveTo) return;
@@ -291,6 +322,80 @@ export default function PdfWorkbench({ onBack }: { onBack: () => void }) {
   }
 
   const done = current?.status === "done" && !!md;
+  const blocks = useMemo(() => splitBlocks(md), [md]);
+  const interactive = blocks.length > 0 && blocks.length <= 1500;
+  const mdPlain = useMemo(() => hideEmbeddedImages(md), [md]);
+
+  // Where does each Markdown block sit in the PDF? (see lib/pdfMdAlign.ts)
+  useEffect(() => {
+    setPos([]); setActive(-1); lastPdfPage.current = 0;
+    if (!doc || !done || !interactive) { setAligned("idle"); return; }
+    let dead = false;
+    setAligned("busy");
+    alignBlocks(doc, blocks, () => dead)
+      .then((r) => { if (dead) return; if (r) { setPos(r); setAligned("ok"); } else setAligned("none"); })
+      .catch(() => { if (!dead) setAligned("none"); });
+    return () => { dead = true; };
+  }, [doc, blocks, done, interactive]);
+
+  const lock = () => { lockUntil.current = Date.now() + 450; };
+  const locked = () => Date.now() < lockUntil.current;
+  function showBlock(i: number) {
+    const box = resultRef.current;
+    const el = box?.querySelector<HTMLElement>(`[data-b="${i}"]`);
+    if (!box || !el) return;
+    lock();
+    box.scrollTop += el.getBoundingClientRect().top - box.getBoundingClientRect().top - 8;
+  }
+  function showInPdf(i: number) {
+    const p = pos[i];
+    if (!p) return;
+    lock();
+    setGoto({ page: p.page, tick: Date.now(), y: p.rects[0]?.y });
+  }
+  function onResultScroll() {
+    if (!sync || aligned !== "ok" || locked() || raf.current) return;
+    raf.current = requestAnimationFrame(() => {
+      raf.current = 0;
+      const box = resultRef.current;
+      if (!box || locked()) return;
+      const top = box.getBoundingClientRect().top + 8;
+      let idx = -1;
+      for (const el of Array.from(box.querySelectorAll<HTMLElement>("[data-b]"))) {
+        if (el.getBoundingClientRect().bottom > top) { idx = Number(el.dataset.b); break; }
+      }
+      if (idx >= 0 && idx !== active) { setActive(idx); showInPdf(idx); }
+    });
+  }
+  function onPdfPage(page: number, total: number) {
+    setPageInfo({ page, total });
+    if (!sync || aligned !== "ok" || locked() || page === lastPdfPage.current) return;
+    lastPdfPage.current = page;
+    const i = pos.findIndex((p) => p.page === page);
+    if (i >= 0) { setActive(i); showBlock(i); }
+  }
+  function onPdfPick(page: number, x: number, y: number) {
+    if (aligned !== "ok") return;
+    let best = -1;
+    pos.forEach((p, i) => { if (p.page === page && p.rects.some((r) => x >= r.x - 0.01 && x <= r.x + r.w + 0.01 && y >= r.y - 0.005 && y <= r.y + r.h + 0.005)) best = i; });
+    if (best >= 0) { setActive(best); showBlock(best); }
+  }
+  function startDrag(e: React.PointerEvent<HTMLDivElement>) {
+    const box = colsRef.current;
+    if (!box) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const move = (ev: PointerEvent) => {
+      const r = box.getBoundingClientRect();
+      setSplit(Math.min(0.8, Math.max(0.2, (ev.clientX - r.left) / r.width)));
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setSplit((v) => { try { localStorage.setItem("yggdrasil:pdf-split", String(v)); } catch { /* ignore */ } return v; });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
   const running = current?.status === "running";
   const pdfUrl = current ? `/api/tools/pdf/files/${current.id}/pdf` : "";
   const mins = Math.floor((tickSec * 1.5) / 60);
@@ -366,7 +471,8 @@ export default function PdfWorkbench({ onBack }: { onBack: () => void }) {
                 {(close) => (
                   <>
                     <div className="pw-menu-h">Download as</div>
-                    <button className="pw-item" onClick={() => { download("md"); close(); }}>Markdown <i>.md</i></button>
+                    <button className="pw-item" onClick={() => { download("md"); close(); }}>Markdown with images <i>.md</i></button>
+                    <button className="pw-item" onClick={() => { download("md", false); close(); }}>Markdown, text only <i>.md</i></button>
                     <button className="pw-item" onClick={() => { download("tex"); close(); }}>LaTeX <i>.tex</i></button>
                   </>
                 )}
@@ -374,7 +480,7 @@ export default function PdfWorkbench({ onBack }: { onBack: () => void }) {
             </div>
             {(err || note) && <div className={err ? "tl-err pw-msg" : "tl-help pw-msg"}>{err || note}</div>}
 
-            <div className="pw-cols">
+            <div className="pw-cols" ref={colsRef} style={{ "--a": `${split}fr`, "--b": `${1 - split}fr` } as React.CSSProperties}>
               <div className="pw-col">
                 <div className="pw-col-bar">
                   <span className="pw-col-title">Original file</span>
@@ -386,8 +492,10 @@ export default function PdfWorkbench({ onBack }: { onBack: () => void }) {
                   <span className="pw-pg">{Math.round(zoom * 100)}%</span>
                   <button className="pw-ic" onClick={() => setZoom((z) => Math.min(2.5, +(z + 0.15).toFixed(2)))} aria-label="Zoom in">+</button>
                 </div>
-                <PdfPane url={pdfUrl} zoom={zoom} goto={goto} onInfo={(page, total) => setPageInfo({ page, total })} />
+                <PdfPane url={pdfUrl} zoom={zoom} goto={goto} onInfo={onPdfPage} marks={active >= 0 && pos[active] ? { page: pos[active].page, rects: pos[active].rects } : null} onPick={onPdfPick} onReady={setDoc} />
               </div>
+
+              <div className="pw-split" onPointerDown={startDrag} onDoubleClick={() => { setSplit(0.5); try { localStorage.setItem("yggdrasil:pdf-split", "0.5"); } catch { /* ignore */ } }} role="separator" aria-orientation="vertical" aria-label="Drag to resize. Double-click to reset." title="Drag to resize · double-click to reset" />
 
               <div className="pw-col">
                 <div className="pw-col-bar">
@@ -396,8 +504,12 @@ export default function PdfWorkbench({ onBack }: { onBack: () => void }) {
                       <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? "on" : ""} onClick={() => setTab(t)}>{t === "latex" ? "LaTeX" : t === "markdown" ? "Markdown" : "Preview"}</button>
                     ))}
                   </div>
+                  <span className="tl-spacer" />
+                  {aligned === "busy" && <span className="tl-help">Matching to the PDF…</span>}
+                  {aligned === "none" && done && interactive && <span className="tl-help" title="No text layer to match against (scanned PDF)">No position sync</span>}
+                  {aligned === "ok" && <button className={`pw-sync${sync ? " on" : ""}`} onClick={() => setSync((v) => !v)} title="Keep the PDF and the text in step when scrolling">⇄ Sync</button>}
                 </div>
-                <div className="pw-scroll pw-result">
+                <div className="pw-scroll pw-result" ref={resultRef} onScroll={onResultScroll}>
                   {running && (
                     <div className="pw-run">
                       <div className="tl-bar-track"><div className="tl-bar-fill indet" /></div>
@@ -407,8 +519,12 @@ export default function PdfWorkbench({ onBack }: { onBack: () => void }) {
                   {current.status === "error" && <div className="tl-err pw-msg">{current.error || "Conversion failed"}</div>}
                   {current.status === "cancelled" && <div className="tl-empty">Cancelled. Press Convert to try again.</div>}
                   {current.status === "ready" && <div className="tl-empty">Added, not converted yet. Pick a tier and pages above, then press Convert. Long books can take a while.</div>}
-                  {done && tab === "preview" && <AbstractText text={md} className="pw-md" />}
-                  {done && tab === "markdown" && <pre className="tl-out">{md}</pre>}
+                  {done && tab === "preview" && (interactive
+                    ? blocks.map((b, i) => <div key={i} data-b={i} className={`pw-blk${i === active ? " on" : ""}`} onClick={() => { setActive(i); showInPdf(i); }}><AbstractText text={b} className="pw-md" /></div>)
+                    : <AbstractText text={md} className="pw-md" />)}
+                  {done && tab === "markdown" && (interactive
+                    ? blocks.map((b, i) => <div key={i} data-b={i} className={`pw-blk${i === active ? " on" : ""}`} onClick={() => { setActive(i); showInPdf(i); }}><pre className="tl-out">{hideEmbeddedImages(b)}</pre></div>)
+                    : <pre className="tl-out">{mdPlain}</pre>)}
                   {done && tab === "latex" && <pre className="tl-out">{latex}</pre>}
                   {current.status === "done" && !md && <div className="tl-empty">Loading result…</div>}
                 </div>

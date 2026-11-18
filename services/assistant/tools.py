@@ -164,6 +164,15 @@ def _png(rgb: Any) -> bytes:
     return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b"")
 
 
+def pdfium_available() -> bool:
+    """pypdfium2 ships with Docker/dev and fresh installers; older installs get it as an add-on."""
+    import addons
+
+    if importlib.util.find_spec("pypdfium2") is not None:
+        return True
+    return addons.activate("pdfrender") and importlib.util.find_spec("pypdfium2") is not None
+
+
 def render_page_png(pdf_path: Path, number: int, scale: float = 2.0) -> bytes:
     import pypdfium2 as pdfium
 
@@ -313,10 +322,9 @@ def make_router(
         meta.update(status="running", tier="ai", pages=pages, error="", progress="Starting…", started=_now(), updated=_now())
         write_meta(d, meta)
         try:
-            try:
-                import pypdfium2 as pdfium
-            except ImportError:
-                raise RuntimeError("AI conversion needs pypdfium2, which isn't in this install. Update to the latest version.") from None
+            if not pdfium_available():
+                raise RuntimeError("AI conversion needs the PDF page renderer add-on. Install it from Tools → PDF.")
+            import pypdfium2 as pdfium
             doc = pdfium.PdfDocument(str(d / "input.pdf"))
             total = len(doc)
             doc.close()
@@ -379,7 +387,7 @@ def make_router(
         return {
             "mineru": {"installed": bool(mineru_cmd()), "version": mineru_version()},
             "tiers": list(TIERS),
-            "ai": {"available": importlib.util.find_spec("pypdfium2") is not None},
+            "ai": {"available": pdfium_available()},
         }
 
     @router.get("/files")

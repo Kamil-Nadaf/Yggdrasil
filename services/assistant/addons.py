@@ -33,6 +33,14 @@ ADDONS: dict[str, dict[str, Any]] = {
         "entry": "mineru-kit",
         "size_mb": 1000,
     },
+    "pdfrender": {
+        "name": "PDF page renderer",
+        "desc": "Small library that turns PDF pages into images for AI-model conversion (Tools → PDF).",
+        "requirements": ["pypdfium2>=4.30"],
+        "package": "pypdfium2",
+        "entry": None,
+        "size_mb": 6,
+    },
 }
 
 _JOBS: dict[str, dict[str, Any]] = {}
@@ -59,6 +67,16 @@ def _manifest(addon_id: str) -> Optional[dict]:
 def site_path(addon_id: str) -> Optional[str]:
     """The folder to put on sys.path / PYTHONPATH, only when the add-on is fully installed."""
     return str(site_dir(addon_id)) if _manifest(addon_id) and site_dir(addon_id).is_dir() else None
+
+
+def activate(addon_id: str) -> bool:
+    """Put an installed add-on's folder on this process's import path (for libraries used in-process)."""
+    site = site_path(addon_id)
+    if not site:
+        return False
+    if site not in sys.path:
+        sys.path.append(site)  # appended: a library bundled with the app still wins
+    return True
 
 
 def installed_version(addon_id: str) -> str:
@@ -160,7 +178,7 @@ async def _install(addon_id: str) -> None:
         if not ver:
             raise RuntimeError(f"{spec['name']} was downloaded but could not be found afterwards")
         (root / "addon.json").write_text(json.dumps({"version": ver, "installed": int(time.time())}), encoding="utf-8")
-        if not entry_point(addon_id, spec["entry"]):
+        if spec["entry"] and not entry_point(addon_id, spec["entry"]):
             raise RuntimeError(f"{spec['name']} installed but its command is missing")
         job.update(state="done", message="Installed", error="")
     except Exception as e:  # noqa: BLE001

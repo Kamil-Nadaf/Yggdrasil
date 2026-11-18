@@ -55,3 +55,17 @@ def test_refuses_when_disk_too_small(client, monkeypatch):
             break
         time.sleep(0.1)
     assert a["state"] == "error" and "free disk space" in a["error"]
+
+
+def test_activate_puts_an_installed_addon_on_the_path(client):
+    import sys
+
+    assert addons.activate("pdfrender") is False
+    root = addons.addons_root() / "pdfrender"
+    (root / "site").mkdir(parents=True)
+    (root / "addon.json").write_text(json.dumps({"version": "1"}))
+    try:
+        assert addons.activate("pdfrender") is True
+        assert str(root / "site") in sys.path
+    finally:
+        sys.path[:] = [p for p in sys.path if p != str(root / "site")]

@@ -220,7 +220,8 @@ export default function PdfWorkbench({ onBack }: { onBack: () => void }) {
 
   const current = files.find((f) => f.id === sel) ?? null;
   const aiList = pdfEngines();
-  const aiOk = aiList.length > 0 && status?.ai?.available !== false;
+  const needRenderer = status?.ai?.available === false;
+  const aiOk = aiList.length > 0 && !needRenderer;
   const useAi = engine === "ai" && aiOk;
   const pickEngine = (v: "mineru" | "ai") => { setEngine(v); try { localStorage.setItem("yggdrasil:pdf-engine", v); } catch { /* ignore */ } };
   const anyRunning = files.some((f) => f.status === "running");
@@ -439,6 +440,7 @@ export default function PdfWorkbench({ onBack }: { onBack: () => void }) {
           ))}
         </ul>
         {files.length === 0 && <div className="tl-help" style={{ padding: "0 4px" }}>Added files appear here. Drop PDFs anywhere on this page.</div>}
+        {needRenderer && aiList.length > 0 && <AddonCard id="pdfrender" compact onChange={() => { fetch("/api/tools/pdf/status").then((r) => r.json()).then(setStatus).catch(() => { /* ignore */ }); }} />}
         {status !== null && !status.mineru.installed
           ? <AddonCard id="mineru" compact onChange={() => { fetch("/api/tools/pdf/status").then((r) => r.json()).then(setStatus).catch(() => { /* ignore */ }); }} />
           : <div className="pw-foot">{status === null ? "" : `MinerU ${status.mineru.version}`}</div>}

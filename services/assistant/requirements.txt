@@ -10,3 +10,4 @@ watchdog==4.0.2
 aiofiles==24.1.0
 python-multipart>=0.0.18
 mcp==1.30.0
+pypdfium2>=4.30

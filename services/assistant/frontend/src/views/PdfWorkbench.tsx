@@ -6,6 +6,7 @@ import { api } from "../api/client";
 import type { ProjectStats } from "../api/client";
 import AbstractText from "../components/AbstractText";
 import { markdownToLatexDocument } from "../lib/markdownToLatex";
+import { pdfEngines } from "../lib/aiModels";
 import { alignBlocks, hideEmbeddedImages, splitBlocks } from "../lib/pdfMdAlign";
 import type { BlockPos, Rect } from "../lib/pdfMdAlign";
 
@@ -17,9 +18,10 @@ interface FileMeta {
   tier: string;
   pages: string;
   error?: string;
+  progress?: string;
   created?: string;
 }
-interface Status { mineru: { installed: boolean; version: string }; tiers: string[] }
+interface Status { mineru: { installed: boolean; version: string }; tiers: string[]; ai?: { available: boolean } }
 
 const TIERS: { id: string; label: string; note: string }[] = [
   { id: "flash", label: "Flash", note: "Fastest. Reads the text layer, so digital PDFs only." },
@@ -192,6 +194,7 @@ export default function PdfWorkbench({ onBack }: { onBack: () => void }) {
   const [md, setMd] = useState("");
   const [tab, setTab] = useState<"preview" | "markdown" | "latex">("preview");
   const [tier, setTier] = useState("basic");
+  const [engine, setEngine] = useState<"mineru" | "ai">(() => { try { return localStorage.getItem("yggdrasil:pdf-engine") === "ai" ? "ai" : "mineru"; } catch { return "mineru"; } });
   const [pages, setPages] = useState("");
   const [err, setErr] = useState("");
   const [note, setNote] = useState("");
@@ -216,6 +219,10 @@ export default function PdfWorkbench({ onBack }: { onBack: () => void }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const current = files.find((f) => f.id === sel) ?? null;
+  const aiList = pdfEngines();
+  const aiOk = aiList.length > 0 && status?.ai?.available !== false;
+  const useAi = engine === "ai" && aiOk;
+  const pickEngine = (v: "mineru" | "ai") => { setEngine(v); try { localStorage.setItem("yggdrasil:pdf-engine", v); } catch { /* ignore */ } };
   const anyRunning = files.some((f) => f.status === "running");
 
   const refresh = useCallback(async () => {
@@ -280,6 +287,10 @@ export default function PdfWorkbench({ onBack }: { onBack: () => void }) {
     const form = new FormData();
     form.append("tier", tier);
     form.append("pages", pages);
+    if (useAi) {
+      form.append("engine", "ai");
+      form.append("engines", JSON.stringify(aiList)); // from Settings; sent per request, never stored on the server
+    }
     const r = await fetch(`/api/tools/pdf/files/${current.id}/convert`, { method: "POST", body: form });
     if (!r.ok) { setErr(await readError(r, "Could not start the conversion")); return; }
     await refresh();
@@ -420,7 +431,7 @@ export default function PdfWorkbench({ onBack }: { onBack: () => void }) {
                 <span className={`pw-dot pw-dot--${f.status}`} title={f.status} />
                 <span className="pw-file-main">
                   <span className="pw-file-name">{f.name}</span>
-                  <span className="pw-file-meta">{sizeLabel(f.size)} · {f.status === "running" ? "converting…" : f.status === "done" ? f.tier : f.status === "ready" ? "not converted" : f.status}</span>
+                  <span className="pw-file-meta">{sizeLabel(f.size)} · {f.status === "running" ? "converting…" : f.status === "done" ? (f.tier === "ai" ? "AI" : f.tier) : f.status === "ready" ? "not converted" : f.status}</span>
                 </span>
               </button>
               <button className="pw-x" onClick={() => void remove(f.id)} title="Remove this file" aria-label={`Remove ${f.name}`}>×</button>
@@ -447,9 +458,15 @@ export default function PdfWorkbench({ onBack }: { onBack: () => void }) {
             <div className="pw-top">
               <div className="pw-title" title={current.name}>{current.name}</div>
               <span className="tl-spacer" />
-              <select className="pw-sel" value={tier} onChange={(e) => setTier(e.target.value)} aria-label="Quality tier" title={TIERS.find((t) => t.id === tier)?.note}>
-                {TIERS.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+              <select className="pw-sel" value={useAi ? "ai" : "mineru"} onChange={(e) => pickEngine(e.target.value as "mineru" | "ai")} aria-label="Conversion engine" title={aiOk ? "MinerU runs on this computer. AI sends the pages to the models you ticked for PDF in Settings." : "To use AI models, tick PDF → Markdown on a model in Settings → AI models."}>
+                <option value="mineru">MinerU</option>
+                <option value="ai" disabled={!aiOk}>AI model{aiOk ? ` (${aiList.length})` : " (none set up)"}</option>
               </select>
+              {!useAi && (
+                <select className="pw-sel" value={tier} onChange={(e) => setTier(e.target.value)} aria-label="Quality tier" title={TIERS.find((t) => t.id === tier)?.note}>
+                  {TIERS.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                </select>
+              )}
               <input className="pw-pages-in" value={pages} onChange={(e) => setPages(e.target.value)} placeholder="Pages: all" aria-label="Pages to convert" />
               {running
                 ? <button className="btn pw-btn" onClick={() => void cancel()}>Cancel</button>
@@ -513,7 +530,9 @@ export default function PdfWorkbench({ onBack }: { onBack: () => void }) {
                   {running && (
                     <div className="pw-run">
                       <div className="tl-bar-track"><div className="tl-bar-fill indet" /></div>
-                      <div className="tl-help">MinerU ({current.tier}) is reading the document · {mins}:{String(secs).padStart(2, "0")}. The first run downloads models, so it can take a few minutes.</div>
+                      {current.tier === "ai"
+                        ? <div className="tl-help">AI model is reading the pages · {current.progress || "starting"} · {mins}:{String(secs).padStart(2, "0")}. One request per page, so long documents take a while.</div>
+                        : <div className="tl-help">MinerU ({current.tier}) is reading the document · {mins}:{String(secs).padStart(2, "0")}. The first run downloads models, so it can take a few minutes.</div>}
                     </div>
                   )}
                   {current.status === "error" && <div className="tl-err pw-msg">{current.error || "Conversion failed"}</div>}

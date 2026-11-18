@@ -2,20 +2,11 @@ import { describeProgress, restartDesktopApp, runInstall } from "../lib/updateIn
 import { createContext, Fragment, useContext, useEffect, useState, type ReactNode } from "react";
 import AbstractText from "./AbstractText";
 import { api } from "../api/client";
-import EngineSettings from "../views/canvas/EngineSettings";
-import { loadEngines, saveEngines, type Engine } from "../lib/canvasEngines";
+import AiModelsSettings from "./AiModelsSettings";
+import { loadModels, saveModels, type AiModel } from "../lib/aiModels";
 import "../views/canvas/canvas.css";
 
 const colorPickerIcon = "/color-picker-icon.png";
-import {
-  type AiProviderId,
-  type AiProviderConfig,
-  PROVIDER_META,
-  loadProviderStore,
-  saveProviderStore,
-  getActiveProviderId,
-  setActiveProviderId,
-} from "../lib/aiProvider";
 import {
   THEMES,
   THEME_ACCENTS,
@@ -176,7 +167,6 @@ const SETTINGS_SECTIONS: { id: string; title: string; group: string; includes: s
   { id: "tasks", title: "Tasks", group: "Workspace", includes: ["taskStatuses", "taskOptions", "tasksync"] },
   { id: "sync", title: "Sync", group: "Workspace", includes: ["sync"] },
   { id: "ai", title: "AI & integrations", group: "Connect", includes: ["ai", "connections", "webhook"] },
-  { id: "handwriting", title: "Handwriting engines", group: "Connect", includes: ["handwriting"] },
   { id: "data", title: "Backup & data", group: "Data", includes: ["data"] },
   { id: "about", title: "About", group: "Data", includes: ["about", "updates"] },
 ];
@@ -277,7 +267,7 @@ export default function SettingsPage({ open = true, onClose, firstRun, onDataPat
     latexFileCount?: number;
     vaultPath?: string;
   } | null>(null);
-  const [hwEngines, setHwEngines] = useState<Engine[]>(() => loadEngines());
+  const [aiModels, setAiModels] = useState<AiModel[]>(() => loadModels());
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     appearance: true,
     ai: true,
@@ -355,9 +345,6 @@ export default function SettingsPage({ open = true, onClose, firstRun, onDataPat
     chooseTo: string;
   } | null>(null);
 
-  const [providerStore, setProviderStore] = useState(() => loadProviderStore());
-  const [activeProvider, setActiveProvider] = useState<AiProviderId>(() => getActiveProviderId());
-  const [aiMsg, setAiMsg] = useState<string | null>(null);
 
   const [remoteUrl, setRemoteUrl] = useState("");
   const [gitStatus, setGitStatus] = useState<{ is_repo: boolean; remote?: string | null; branch?: string | null; last_commit?: string | null; dirty_files?: number } | null>(null);
@@ -402,8 +389,7 @@ export default function SettingsPage({ open = true, onClose, firstRun, onDataPat
     refreshWebdavStatus();
     refreshAutosyncStatus();
     refreshWebhookStatus();
-    setProviderStore(loadProviderStore());
-    setActiveProvider(getActiveProviderId());
+    setAiModels(loadModels());
     api.analysisTags.get()
       .then((r) => {
         setAnalysisTags(r.analysis_tags);
@@ -720,22 +706,10 @@ export default function SettingsPage({ open = true, onClose, firstRun, onDataPat
     localStorage.setItem(key, String(value));
   };
 
-  function updateProviderField(field: keyof AiProviderConfig, value: string) {
-    setProviderStore((prev) => {
-      const next = {
-        ...prev,
-        [activeProvider]: { ...prev[activeProvider], [field]: value, provider: activeProvider },
-      };
-      return next;
-    });
-  }
-
-  function saveAiProviders() {
-    saveProviderStore(providerStore);
-    setActiveProviderId(activeProvider);
+  function changeModels(next: AiModel[]) {
+    setAiModels(next);
+    saveModels(next);
     flushSettingsNow();
-    setAiMsg("Saved — persisted so it survives app restarts.");
-    setTimeout(() => setAiMsg(null), 4000);
   }
 
   async function persistServerSettings(path = settings.latexDir): Promise<SettingsSaveResult> {
@@ -808,8 +782,6 @@ export default function SettingsPage({ open = true, onClose, firstRun, onDataPat
       } else {
         saveThemeAccent(settings.theme, themeAccent);
       }
-      saveProviderStore(providerStore);
-      setActiveProviderId(activeProvider);
       localStorage.setItem(MCP_KEY, JSON.stringify(mcpConnections));
       applyTheme();
       flushSettingsNow();
@@ -865,9 +837,6 @@ export default function SettingsPage({ open = true, onClose, firstRun, onDataPat
   }
 
   if (!open) return null;
-
-  const cfg = providerStore[activeProvider];
-  const meta = PROVIDER_META[activeProvider];
 
   return (
     <SettingsActiveCtx.Provider value={active}>
@@ -1261,64 +1230,8 @@ export default function SettingsPage({ open = true, onClose, firstRun, onDataPat
           <DriveSyncSettings />
         </CollapsibleSection>
 
-        <CollapsibleSection id="ai" title="AI Providers" open={!!openSections.ai} onToggle={() => toggle("ai")}>
-          <div className="settings-item">
-            <div className="settings-info" style={{ marginBottom: 10 }}>
-              Keys stay in <strong>this browser’s localStorage</strong> only. They are sent with Ask / Examine
-              requests and are never written to the vault or Docker image.
-            </div>
-            <label htmlFor="activeProvider">Active provider</label>
-            <select
-              id="activeProvider"
-              value={activeProvider}
-              onChange={(e) => setActiveProvider(e.target.value as AiProviderId)}
-              style={{ width: "100%" }}
-            >
-              {(Object.keys(PROVIDER_META) as AiProviderId[]).map((id) => (
-                <option key={id} value={id}>{PROVIDER_META[id].label}</option>
-              ))}
-            </select>
-            {meta.needsKey && (
-              <>
-                <label htmlFor="aiKey" style={{ marginTop: 8 }}>API Key</label>
-                <input
-                  id="aiKey"
-                  type="password"
-                  value={cfg.api_key}
-                  onChange={(e) => updateProviderField("api_key", e.target.value)}
-                  placeholder="sk-…"
-                  autoComplete="off"
-                />
-              </>
-            )}
-            <label htmlFor="aiBase" style={{ marginTop: 8 }}>Base URL</label>
-            <input
-              id="aiBase"
-              type="text"
-              value={cfg.base_url}
-              onChange={(e) => updateProviderField("base_url", e.target.value)}
-              placeholder={meta.defaultBase || "(Claude uses Anthropic API)"}
-            />
-            <label htmlFor="aiModel" style={{ marginTop: 8 }}>Model</label>
-            <input
-              id="aiModel"
-              type="text"
-              value={cfg.model}
-              onChange={(e) => updateProviderField("model", e.target.value)}
-              placeholder={meta.defaultModel}
-            />
-            <div style={{ marginTop: 10 }}>
-              <button className="btn btn-primary" onClick={saveAiProviders}>Save AI settings</button>
-            </div>
-            {aiMsg && <div className="ok mono" style={{ fontSize: 12, marginTop: 8 }}>{aiMsg}</div>}
-          </div>
-        </CollapsibleSection>
-
-        <CollapsibleSection id="handwriting" title="Handwriting engines">
-          <div className="cv-muted" style={{ marginBottom: 12 }}>
-            Used by the Canvas panel in LaTeX and the ink box in Slides. Engines are tried in order and the first clean result wins. Keys stay in this browser.
-          </div>
-          <EngineSettings inline engines={hwEngines} onChange={(next) => { setHwEngines(next); saveEngines(next); }} />
+        <CollapsibleSection id="ai" title="AI models" open={!!openSections.ai} onToggle={() => toggle("ai")}>
+          <AiModelsSettings models={aiModels} onChange={changeModels} />
         </CollapsibleSection>
 
         <CollapsibleSection id="account" title="Account" open={!!openSections.account} onToggle={() => toggle("account")}>

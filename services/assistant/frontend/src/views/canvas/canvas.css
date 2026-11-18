@@ -327,3 +327,8 @@
   .cv-shell .cv-bar > .btn { flex: 0 0 auto; }
   .cv-shell .cv-seg-btn { padding: 0 8px; }
 }
+
+/* AI & integrations: per-model "use for" ticks (components/AiModelsSettings.tsx) */
+.cv-engine-uses { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; font-size: 13px; }
+.cv-use { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.cv-use input:disabled + * , .cv-use:has(input:disabled) { opacity: .5; cursor: not-allowed; }

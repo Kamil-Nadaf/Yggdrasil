@@ -1,3 +1,5 @@
+import { lokiPayload } from "./aiModels";
+
 export type AiProviderId = "ollama" | "lmstudio" | "claude" | "deepseek" | "kimi" | "huggingface";
 
 export interface AiProviderConfig {
@@ -68,8 +70,7 @@ export function setActiveProviderId(id: AiProviderId) {
   localStorage.setItem(ACTIVE_KEY, id);
 }
 
-/** Config to send with /ask and /examine — never written to the server permanently. */
+/** Config to send with /ask and /examine — never written to the server permanently. Comes from the model ticked "Loki" (lib/aiModels.ts). */
 export function getActiveProviderPayload(): AiProviderConfig {
-  const id = getActiveProviderId();
-  return loadProviderStore()[id];
+  return lokiPayload() as AiProviderConfig;
 }

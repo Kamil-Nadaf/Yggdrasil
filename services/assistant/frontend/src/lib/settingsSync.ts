@@ -18,6 +18,7 @@ const PERSISTED_KEYS = [
   "yggdrasil:logo-colors",
   "yggdrasil:app-fonts",
   "yggdrasil:ai-providers",
+  "yggdrasil:ai-models",
   "yggdrasil:ai-active-provider",
   "yggdrasil:mcp-connections",
   "yggdrasil:loki-brand",

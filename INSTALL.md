@@ -187,3 +187,7 @@ The installer is the small base app. Heavier engines are downloaded from **Tools
 
 - **MinerU** (PDF → Markdown / LaTeX, about 1 GB): press *Install MinerU*, wait for the download, then convert. No restart needed. *Remove* frees the space again.
 - Docker and dev installs include MinerU through `requirements-mineru.txt`.
+
+## AI models (Settings → AI models)
+
+One list of models, each with its own API key. Tick what each is used for: **Loki** (one model), **Handwriting → LaTeX**, and **PDF → Markdown / LaTeX** (the last two try every ticked model from top to bottom). In Tools → PDF, pick *AI model* instead of MinerU to convert pages with a vision model, with no 1 GB download. Keys stay in the browser and are sent with each request.

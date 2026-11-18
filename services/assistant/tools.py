@@ -16,6 +16,7 @@ Routes live under /api/tools/pdf.
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import json
 import os
 import re
@@ -125,6 +126,103 @@ def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S")
 
 
+# ── AI-vision conversion: one model request per page, engines tried in order ──────────────────────
+
+AI_PROMPT = (
+    "Convert this page of a document to Markdown. Keep the reading order. Write mathematics as LaTeX "
+    "($...$ inline, $$...$$ for display). Keep tables as Markdown tables. Use # headings for section "
+    "titles. Skip running headers, footers and page numbers. For a figure write ![figure](figure) and "
+    "keep its caption as text. Output only the Markdown, with no commentary and no code fence around it."
+)
+
+
+def page_numbers(spec: str, total: int) -> list[int]:
+    """'1-3,7' -> [1, 2, 3, 7] (1-based, clipped to the document)."""
+    if not spec:
+        return list(range(1, total + 1))
+    out: list[int] = []
+    for part in spec.split(","):
+        m = re.fullmatch(r"(\d+)(?:-(\d+))?", part)
+        if not m:
+            continue
+        a, b = int(m.group(1)), int(m.group(2) or m.group(1))
+        out += [n for n in range(a, b + 1) if 1 <= n <= total and n not in out]
+    return out
+
+
+def _png(rgb: Any) -> bytes:
+    """Encode an HxWx3 uint8 array as PNG (no Pillow needed)."""
+    import struct
+    import zlib
+
+    h, w = rgb.shape[0], rgb.shape[1]
+    raw = b"".join(b"\x00" + rgb[y].tobytes() for y in range(h))
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b"")
+
+
+def render_page_png(pdf_path: Path, number: int, scale: float = 2.0) -> bytes:
+    import pypdfium2 as pdfium
+
+    doc = pdfium.PdfDocument(str(pdf_path))
+    try:
+        arr = doc[number - 1].render(scale=scale, rev_byteorder=True).to_numpy()
+        return _png(arr[:, :, :3])
+    finally:
+        doc.close()
+
+
+def _reply_text(data: dict) -> str:
+    msg = (data.get("choices") or [{}])[0].get("message") or {}
+    c = msg.get("content")
+    if isinstance(c, list):
+        c = "".join(part.get("text", "") for part in c if isinstance(part, dict))
+    text = (c or "").strip()
+    m = re.fullmatch(r"```(?:markdown|md)?\s*\n(.*)\n```", text, flags=re.S)
+    return (m.group(1) if m else text).strip()
+
+
+async def ai_page_to_markdown(client: Any, engines: list[dict], png: bytes) -> tuple[str, str, list[str]]:
+    """Try each engine in order. Returns (markdown, engine label, errors from engines that failed first)."""
+    import base64
+
+    errors: list[str] = []
+    image = "data:image/png;base64," + base64.b64encode(png).decode()
+    for eng in engines:
+        body: dict[str, Any] = {
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": AI_PROMPT},
+                {"type": "image_url", "image_url": {"url": image}},
+            ]}],
+            "temperature": 0,
+            "max_tokens": 4096,
+        }
+        if eng.get("model"):
+            body["model"] = eng["model"]
+        headers = {"Authorization": f"Bearer {eng.get('api_key') or 'none'}"}
+        url = eng["base_url"].rstrip("/") + "/chat/completions"
+        try:
+            for attempt in range(4):
+                r = await client.post(url, json=body, headers=headers, timeout=180.0)
+                if r.status_code in (429, 503) and attempt < 3:
+                    await asyncio.sleep(4 * (attempt + 1))
+                    continue
+                r.raise_for_status()
+                break
+            text = _reply_text(r.json())
+            if text:
+                return text, eng.get("label") or eng["base_url"], errors
+            errors.append(f"{eng.get('label')}: empty answer")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"{eng.get('label') or eng['base_url']}: {str(e)[:160] or e.__class__.__name__}")
+    return "", "", errors
+
+
 class ImportRequest(BaseModel):
     key: str            # the reader's own key: an arXiv id, or book-{slug} for the Collection
     url: str = ""       # public PDF URL, used when there is no saved copy
@@ -207,6 +305,63 @@ def make_router(
             if d.is_dir():
                 write_meta(d, meta)
 
+    async def run_ai_conversion(d: Path, engines: list[dict], pages: str) -> None:
+        import httpx
+
+        eid = d.name
+        meta = read_meta(d)
+        meta.update(status="running", tier="ai", pages=pages, error="", progress="Starting…", started=_now(), updated=_now())
+        write_meta(d, meta)
+        try:
+            try:
+                import pypdfium2 as pdfium
+            except ImportError:
+                raise RuntimeError("AI conversion needs pypdfium2, which isn't in this install. Update to the latest version.") from None
+            doc = pdfium.PdfDocument(str(d / "input.pdf"))
+            total = len(doc)
+            doc.close()
+            nums = page_numbers(pages, total)
+            if not nums:
+                raise RuntimeError("No pages to convert in that range")
+            parts: list[str] = []
+            first_error = ""
+            ok = 0
+            async with httpx.AsyncClient() as client:
+                for i, n in enumerate(nums, 1):
+                    if _RUN.get(eid, {}).get("cancelled"):
+                        raise RuntimeError("Cancelled")
+                    meta.update(progress=f"Page {i} of {len(nums)}", updated=_now())
+                    write_meta(d, meta)
+                    png = await asyncio.to_thread(render_page_png, d / "input.pdf", n)
+                    text, label, errs = await ai_page_to_markdown(client, engines, png)
+                    if text:
+                        ok += 1
+                        parts.append(text)
+                    else:
+                        first_error = first_error or " | ".join(errs)
+                        parts.append(f"> [Page {n} could not be read: {errs[0] if errs else 'no answer'}]")
+            if not ok:
+                raise RuntimeError("No model could read the pages. " + first_error)
+            out = "\n\n".join(parts) + "\n"
+            (d / "result.txt").write_text(out, encoding="utf-8")
+            meta.update(status="done", chars=len(out), error="", progress="", finished=_now(), updated=_now())
+        except asyncio.CancelledError:
+            meta.update(status="cancelled", error="", progress="", updated=_now())
+        except Exception as e:  # noqa: BLE001
+            cancelled = _RUN.get(eid, {}).get("cancelled")
+            meta.update(status="cancelled" if cancelled else "error", error="" if cancelled else (str(e) or e.__class__.__name__), progress="", updated=_now())
+        finally:
+            _RUN.pop(eid, None)
+            if d.is_dir():
+                write_meta(d, meta)
+
+    def launch_ai(d: Path, engines: list[dict], pages: str) -> None:
+        eid = d.name
+        if eid in _RUN:
+            raise HTTPException(409, "Already converting")
+        _RUN[eid] = {"proc": None, "cancelled": False, "ai": True}
+        _RUN[eid]["task"] = asyncio.create_task(run_ai_conversion(d, engines, pages))
+
     def eid_free(eid: str) -> bool:
         return eid not in _RUN
 
@@ -224,6 +379,7 @@ def make_router(
         return {
             "mineru": {"installed": bool(mineru_cmd()), "version": mineru_version()},
             "tiers": list(TIERS),
+            "ai": {"available": importlib.util.find_spec("pypdfium2") is not None},
         }
 
     @router.get("/files")
@@ -257,10 +413,13 @@ def make_router(
         d = root() / eid
         d.mkdir(parents=True, exist_ok=True)
         (d / "input.pdf").write_bytes(data)
-        meta = {"id": eid, "name": file.filename or "document.pdf", "size": len(data), "status": "running",
+        # Without MinerU the file just waits: the user can install it, or pick an AI model, then press Convert.
+        start = bool(mineru_cmd())
+        meta = {"id": eid, "name": file.filename or "document.pdf", "size": len(data), "status": "running" if start else "ready",
                 "tier": tier, "pages": pages, "created": _now(), "updated": _now(), "error": ""}
         write_meta(d, meta)
-        launch(d, tier, pages)
+        if start:
+            launch(d, tier, pages)
         return meta
 
     @router.post("/import")
@@ -271,7 +430,7 @@ def make_router(
         key = (req.key or "").strip()
         if not key:
             raise HTTPException(400, "Missing key")
-        auto = req.auto if req.auto is not None else req.kind == "paper"
+        auto = (req.auto if req.auto is not None else req.kind == "paper") and bool(mineru_cmd())
         # The same source is only added once; it may still need converting.
         if root().is_dir():
             for d in root().iterdir():
@@ -313,14 +472,24 @@ def make_router(
         return read_meta(entry_dir(eid))
 
     @router.post("/files/{eid}/convert")
-    async def reconvert(eid: str, tier: str = Form("basic"), pages: str = Form("")):
+    async def reconvert(eid: str, tier: str = Form("basic"), pages: str = Form(""), engine: str = Form("mineru"), engines: str = Form("")):
         d = entry_dir(eid)
-        if tier not in TIERS:
-            raise HTTPException(400, "unknown tier")
         try:
             pages = parse_pages(pages)
         except ValueError as e:
             raise HTTPException(400, str(e)) from None
+        if engine == "ai":
+            # Models come with the request (browser settings) and are never stored here.
+            try:
+                chosen = [e for e in json.loads(engines or "[]") if isinstance(e, dict) and str(e.get("base_url", "")).strip()]
+            except ValueError:
+                chosen = []
+            if not chosen:
+                raise HTTPException(400, "Tick PDF → Markdown on at least one model in Settings → AI & integrations")
+            launch_ai(d, [{**e, "base_url": str(e["base_url"]).strip(), "model": str(e.get("model", "")).strip(), "api_key": str(e.get("api_key", "")).strip()} for e in chosen], pages)
+            return read_meta(d)
+        if tier not in TIERS:
+            raise HTTPException(400, "unknown tier")
         launch(d, tier, pages)
         return read_meta(d)
 
@@ -341,6 +510,9 @@ def make_router(
         run = _RUN.get(eid)
         if run:
             run["cancelled"] = True
+            task = run.get("task")
+            if run.get("ai") and task:
+                task.cancel()
             proc = run.get("proc")
             if proc and proc.returncode is None:
                 proc.terminate()

@@ -194,8 +194,11 @@ function looksLikeBib(t: string): boolean {
 
 function bibIds(text: string): { arxiv: string; doi: string } {
   const a = text.match(/arXiv\s*[:\s]\s*((?:\d{4}\.\d{4,5})|(?:[a-z-]+(?:\.[A-Za-z]{2})?\/\d{7}))/i);
-  const d = text.match(/(10\.\d{4,9}\/[^\s"<>]+)/);
-  return { arxiv: a ? a[1] : "", doi: d ? d[1].replace(/[.,;)\]]+$/, "") : "" };
+  const d = text.match(/(10\.\d{4,9}\/[^\s"<>]+)(?:\s(\d+-\d+)\b)?/);
+  let doi = d ? d[1].replace(/[.,;)\]]+$/, "") : "";
+  // Springer chapter DOIs ("…-0_151-1") lose their underscore in the PDF text and read "…-0 151-1".
+  if (d && d[2] && /-\d{4}-\d$/.test(doi)) doi = `${doi}_${d[2]}`;
+  return { arxiv: a ? a[1] : "", doi };
 }
 
 type Rect = [number, number, number, number];

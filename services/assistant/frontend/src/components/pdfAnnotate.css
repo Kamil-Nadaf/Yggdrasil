@@ -136,3 +136,10 @@
 .pdfv-custom { display: flex; gap: 14px; padding: 4px 9px 8px; font: 500 12px var(--font-sans); color: var(--text); }
 .pdfv-custom label { display: flex; align-items: center; gap: 6px; }
 .pdfv-custom input[type="color"] { width: 34px; height: 24px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: none; cursor: pointer; }
+.pdfv-fail { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 24px 18px; text-align: center; }
+.pdfv-fail p { margin: 0; max-width: 520px; line-height: 1.5; }
+.pdfv-drop { display: flex; flex-direction: column; align-items: center; gap: 10px; width: min(460px, 100%); padding: 18px; border: 2px dashed color-mix(in srgb, var(--text, #ddd) 35%, transparent); border-radius: var(--radius, 8px); font-size: 13px; }
+.pdfv-drop.over { border-color: var(--accent, #6366f1); background: color-mix(in srgb, var(--accent, #6366f1) 12%, transparent); }
+.pdfv-cite.has-preview { width: min(740px, calc(100vw - 16px)); }
+.pdfv-cite-preview { display: block; width: 100%; height: auto; margin: -2px 0 8px; border-radius: calc(var(--radius, 8px) * 0.7); border: 1px solid var(--border); background: #fff; }
+.pdfv-cite-pref { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 11.5px; opacity: 0.75; cursor: pointer; }

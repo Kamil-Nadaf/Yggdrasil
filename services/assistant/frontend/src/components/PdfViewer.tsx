@@ -257,6 +257,68 @@ function bibIds(text: string): { arxiv: string; doi: string } {
 type Rect = [number, number, number, number];
 interface Sel { text: string; page: number; rects: Rect[] }
 
+/** Boxes (0..1 of the page) holding figures: images and coloured vector drawings, so dark themes can leave plots untouched. */
+async function figureBoxes(page: import("pdfjs-dist").PDFPageProxy): Promise<[number, number, number, number][]> {
+  const pdfjs = await import("pdfjs-dist");
+  const O = pdfjs.OPS as Record<string, number>;
+  const vp = page.getViewport({ scale: 1 });
+  const ol = await page.getOperatorList({ intent: "display", annotationMode: 0 } as never);
+  type M = number[];
+  const mul = (a: M, b: M): M => [a[0] * b[0] + a[1] * b[2], a[0] * b[1] + a[1] * b[3], a[2] * b[0] + a[3] * b[2], a[2] * b[1] + a[3] * b[3], a[4] * b[0] + a[5] * b[2] + b[4], a[4] * b[1] + a[5] * b[3] + b[5]];
+  let ctm: M = [1, 0, 0, 1, 0, 0];
+  const stack: M[] = [];
+  const boxes: { r: [number, number, number, number]; img: boolean }[] = [];
+  let fillC = false, strokeC = false, path: [number, number, number, number] | null = null;
+  const colourful = (a: number[]) => { const hi = Math.max(a[0], a[1], a[2]), lo = Math.min(a[0], a[1], a[2]); return hi - lo > (hi > 1 ? 40 : 0.16); };
+  const add = (x0: number, y0: number, x1: number, y1: number, img: boolean) => {
+    const pts = [[x0, y0], [x1, y0], [x0, y1], [x1, y1]].map(([x, y]) => vp.convertToViewportPoint(x * ctm[0] + y * ctm[2] + ctm[4], x * ctm[1] + y * ctm[3] + ctm[5]));
+    const xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1]);
+    boxes.push({ r: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], img });
+  };
+  for (let i = 0; i < ol.fnArray.length; i++) {
+    const fn = ol.fnArray[i], a = ol.argsArray[i] as any;
+    if (fn === O.save) stack.push(ctm);
+    else if (fn === O.restore) { if (stack.length) ctm = stack.pop()!; }
+    else if (fn === O.transform) ctm = mul(a, ctm);
+    else if (fn === O.paintFormXObjectBegin) { stack.push(ctm); if (a?.[0]) ctm = mul(a[0], ctm); }
+    else if (fn === O.paintFormXObjectEnd) { if (stack.length) ctm = stack.pop()!; }
+    else if (fn === O.setFillRGBColor) fillC = colourful(a);
+    else if (fn === O.setStrokeRGBColor) strokeC = colourful(a);
+    else if (fn === O.setFillGray) fillC = false;
+    else if (fn === O.setStrokeGray) strokeC = false;
+    else if (fn === O.paintImageXObject || fn === O.paintInlineImageXObject || fn === O.paintJpegXObject) add(0, 0, 1, 1, true);
+    else if (fn === O.constructPath) {
+      const mm = a?.[2];
+      if (Array.isArray(mm) || (mm && mm.length === 4)) path = [mm[0], mm[1], mm[2], mm[3]];
+      else { const c: number[] = a?.[1] || []; let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (let k = 0; k + 1 < c.length; k += 2) { x0 = Math.min(x0, c[k]); x1 = Math.max(x1, c[k]); y0 = Math.min(y0, c[k + 1]); y1 = Math.max(y1, c[k + 1]); } path = x0 < 1e9 ? [x0, y0, x1, y1] : null; }
+    } else if (fn === O.endPath) path = null;
+    else if (fn === O.fill || fn === O.eoFill || fn === O.fillStroke || fn === O.eoFillStroke || fn === O.closeFillStroke || fn === O.closeEOFillStroke || fn === O.stroke || fn === O.closeStroke) {
+      const paintsFill = fn !== O.stroke && fn !== O.closeStroke, paintsStroke = fn !== O.fill && fn !== O.eoFill;
+      if (path && ((paintsFill && fillC) || (paintsStroke && strokeC))) add(path[0], path[1], path[2], path[3], false);
+      path = null;
+    }
+  }
+  const GAP = 8, W = vp.width, H = vp.height;
+  let cl = boxes.filter((b) => (b.r[2] - b.r[0]) < W * 0.95 || (b.r[3] - b.r[1]) < H * 0.95).map((b) => ({ r: [...b.r] as [number, number, number, number], n: 1, img: b.img }));
+  for (let again = true; again;) {
+    again = false;
+    outer: for (let i = 0; i < cl.length; i++) for (let j = i + 1; j < cl.length; j++) {
+      const a = cl[i].r, b = cl[j].r;
+      if (a[0] - GAP < b[2] && b[0] - GAP < a[2] && a[1] - GAP < b[3] && b[1] - GAP < a[3]) {
+        cl[i] = { r: [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])], n: cl[i].n + cl[j].n, img: cl[i].img || cl[j].img };
+        cl.splice(j, 1); again = true; break outer;
+      }
+    }
+  }
+  const PAD = 16;
+  return cl
+    .filter((c) => (c.r[2] - c.r[0] >= 70 && c.r[3] - c.r[1] >= 55) && (c.img || c.n >= 6))
+    .map((c) => {
+      const x0 = Math.max(0, c.r[0] - PAD), y0 = Math.max(0, c.r[1] - PAD), x1 = Math.min(W, c.r[2] + PAD), y1 = Math.min(H, c.r[3] + PAD);
+      return [x0 / W, y0 / H, (x1 - x0) / W, (y1 - y0) / H] as [number, number, number, number];
+    });
+}
+
 function PdfPage({
   pdf, num, width, ratio, rootEl, anns, onTextError, tool, color, opacity, onCreate, find, findNth, onLink, onLinkHover,
 }: {
@@ -269,6 +331,8 @@ function PdfPage({
   onLinkHover?: (l: PdfLink | null, e?: React.MouseEvent) => void;
 }) {
   const [links, setLinks] = useState<PdfLink[]>([]);
+  const [figs, setFigs] = useState<[number, number, number, number][]>([]);
+  const figEls = useRef<(HTMLCanvasElement | null)[]>([]);
   const [drag, setDrag] = useState<[number, number, number, number] | null>(null);
   const [path, setPath] = useState<Pt[] | null>(null);
   const [draft, setDraft] = useState<Pt | null>(null);
@@ -347,6 +411,7 @@ function PdfPage({
       await task.promise;
       if (cancelled) return;
       setHeight(viewport.height);
+      figureBoxes(page).then((f) => { if (!cancelled) setFigs(f); }).catch(() => { /* no figure detection */ });
       const tl = textBox.current;
       if (!tl || !wrap.current) return;
       tl.innerHTML = "";
@@ -385,6 +450,20 @@ function PdfPage({
     return () => { dead = true; };
   }, [visible, pdf, num]);
 
+  // Figures keep their original pixels: copy them out of the (CSS-filtered) page canvas.
+  useEffect(() => {
+    const src = canvas.current;
+    if (!src || !rendered) return;
+    figs.forEach((f, i) => {
+      const el = figEls.current[i];
+      if (!el) return;
+      const sx = Math.round(f[0] * src.width), sy = Math.round(f[1] * src.height);
+      const sw = Math.max(1, Math.round(f[2] * src.width)), sh = Math.max(1, Math.round(f[3] * src.height));
+      el.width = sw; el.height = sh;
+      el.getContext("2d")?.drawImage(src, sx, sy, sw, sh, 0, 0, sw, sh);
+    });
+  }, [figs, rendered, width]);
+
   // Mark search matches in the text layer (matches that span two text runs are not marked).
   useEffect(() => {
     const tl = textBox.current;
@@ -403,6 +482,9 @@ function PdfPage({
   return (
     <div ref={wrap} className="pdfv-page" data-page={num} style={{ width, height }}>
       <canvas ref={canvas} />
+      {figs.map((f, i) => (
+        <canvas key={i} ref={(el) => { figEls.current[i] = el; }} className="pdfv-fig" style={{ left: `${f[0] * 100}%`, top: `${f[1] * 100}%`, width: `${f[2] * 100}%`, height: `${f[3] * 100}%` }} />
+      ))}
       <div className="pdfv-hl">
         {anns.flatMap((a): ReactNode[] => {
           const k = a.kind || "highlight";
@@ -556,6 +638,8 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
     return DEFAULT_CUSTOM;
   });
   function setCustom(c: CustomTheme) { setCustomState(c); setThemeState("custom"); try { localStorage.setItem("reader-custom", JSON.stringify(c)); localStorage.setItem("reader-theme", "custom"); } catch { /* private mode */ } }
+  const [keepFigs, setKeepFigsState] = useState(() => { try { return localStorage.getItem("reader-keepfigs") !== "0"; } catch { return true; } });
+  function setKeepFigs(v: boolean) { setKeepFigsState(v); try { localStorage.setItem("reader-keepfigs", v ? "1" : "0"); } catch { /* private mode */ } }
   const [scrollMode, setScrollModeState] = useState<ScrollMode>(() => stored("reader-scroll", ["vertical", "wrapped", "horizontal"] as const, "vertical"));
   const [spread, setSpreadState] = useState<SpreadMode>(() => stored("reader-spread", ["none", "odd", "even"] as const, "none"));
   function setScrollMode(m: ScrollMode) { setScrollModeState(m); try { localStorage.setItem("reader-scroll", m); } catch { /* private mode */ } }
@@ -1357,6 +1441,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
               <label>Text <input type="color" value={custom.fg} onChange={(e) => setCustom({ ...custom, fg: e.target.value })} /></label>
             </div>
           )}
+          <label className="pdfv-keepfigs-opt"><input type="checkbox" checked={keepFigs} onChange={(e) => setKeepFigs(e.target.checked)} /> Keep figures &amp; plots in original colours</label>
           <label className="pdfv-warmth">
             <span>Warmth <em>{warmth}%</em></span>
             <input type="range" min={0} max={100} step={1} value={warmth} onChange={(e) => setWarmth(Number(e.target.value))} aria-label="Page warmth" />
@@ -1370,7 +1455,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
   if (embedded) {
     const ib = (on = false) => `pdfv-ib${on ? " on" : ""}`;
     return (
-      <div className={`pdf-viewer pdfv-books pdfv-theme-${theme}${themeDark ? " pdfv-dark" : ""}${fullscreen ? " is-full" : ""}`} style={{ "--pdfv-warm": warmth / 100, "--pdfv-cf": theme === "custom" ? `url(#pdfv-cf-${filterId})` : "none", "--pdfv-bg": custom.bg } as React.CSSProperties}>
+      <div className={`pdf-viewer pdfv-books pdfv-theme-${theme}${themeDark ? " pdfv-dark" : ""}${keepFigs ? " pdfv-keepfigs" : ""}${fullscreen ? " is-full" : ""}`} style={{ "--pdfv-warm": warmth / 100, "--pdfv-cf": theme === "custom" ? `url(#pdfv-cf-${filterId})` : "none", "--pdfv-bg": custom.bg } as React.CSSProperties}>
         <div className="pdfv-topbar" role="toolbar" aria-label="Reader toolbar">
           {fileMenu}
           <button type="button" className={ib(sbOpen)} onClick={toggleSb} aria-pressed={sbOpen} title={sbOpen ? "Hide sidebar" : "Show sidebar (contents, pages, search, notes)"}><BookIcon name="sidebar" size={17} /></button>
@@ -1447,7 +1532,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
   }
 
   return (
-    <div className={`pdf-viewer pdfv-theme-${theme}${themeDark ? " pdfv-dark" : ""}${fullscreen ? " is-full" : ""}`} style={{ "--pdfv-warm": warmth / 100, "--pdfv-cf": theme === "custom" ? `url(#pdfv-cf-${filterId})` : "none", "--pdfv-bg": custom.bg } as React.CSSProperties}>
+    <div className={`pdf-viewer pdfv-theme-${theme}${themeDark ? " pdfv-dark" : ""}${keepFigs ? " pdfv-keepfigs" : ""}${fullscreen ? " is-full" : ""}`} style={{ "--pdfv-warm": warmth / 100, "--pdfv-cf": theme === "custom" ? `url(#pdfv-cf-${filterId})` : "none", "--pdfv-bg": custom.bg } as React.CSSProperties}>
       {!doc.embedded && <ActivityTimer category="papers" />}
       <div className="pdf-viewer-bar">
         {fileMenu}

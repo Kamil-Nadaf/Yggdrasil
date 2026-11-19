@@ -1,14 +1,14 @@
 cask "yggdrasil" do
-  version "0.5.7"
+  version "0.5.8"
 
   on_arm do
-    sha256 "18bd9e984293bd4083b6e6e4e1b80b48a1fbb8a54505fee1ae8a365c5ea41b01"
-    url "https://github.com/Kamil-Nadaf/Yggdrasil/releases/download/v0.5.7/Yggdrasil-20261119-mac-arm64.dmg"
+    sha256 "c5b21b2cb87b960bfbc2bfcfce7e6b785b4d65035c1ae6c703387ee5ab717b24"
+    url "https://github.com/Kamil-Nadaf/Yggdrasil/releases/download/v0.5.8/Yggdrasil-20261119-mac-arm64.dmg"
   end
 
   on_intel do
-    sha256 "09153b6236b974e15aa56bb522a7330b96e9833d9bfae5768372d7092fd8943a"
-    url "https://github.com/Kamil-Nadaf/Yggdrasil/releases/download/v0.5.7/Yggdrasil-20261119-mac-intel.dmg"
+    sha256 "c6c7e96505d41551e1ede083f1bcc8f3bb4a70458b5c16788ca8dd868a82b187"
+    url "https://github.com/Kamil-Nadaf/Yggdrasil/releases/download/v0.5.8/Yggdrasil-20261119-mac-intel.dmg"
   end
 
   name "Yggdrasil"

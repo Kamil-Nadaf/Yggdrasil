@@ -383,3 +383,10 @@
 .cal2-views { border-radius: var(--radius); }
 .cal2-views .btn { border-radius: var(--radius); }
 .cal2-week-col.sel:last-child, .cal2-week-col.today:last-child { border-top-right-radius: 0; }
+
+/* The task list scrolls; it must never squash a project group to fit (that clipped subtasks and rows). */
+.tp-scroll > * { flex-shrink: 0; }
+.tp-scroll .rt-group { flex: 0 0 auto; overflow: visible; }
+.tp-scroll .rt-group-head { position: sticky; top: 0; z-index: 1; }
+.tp-scroll .rt-subs { padding-left: 18px; }
+.tp-scroll .rt-due { white-space: nowrap; flex: 0 0 auto; }

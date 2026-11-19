@@ -98,7 +98,7 @@ function hashStr(s: string): string {
 type Rect4 = [number, number, number, number];
 /** A clickable link from the PDF's own annotations (citations, figure/section refs, URLs), as page fractions. */
 interface PdfLink { r: Rect4; dest?: unknown; url?: string }
-interface Cite { x: number; y: number; page: number; frac: number | null; text: string; busy: boolean; arxiv: string; doi: string; name: string; finding: boolean; pdfUrl: string; landing: string; title: string }
+interface Cite { x: number; y: number; page: number; frac: number | null; text: string; busy: boolean; arxiv: string; doi: string; name: string; finding: boolean; pdfUrl: string; landing: string; title: string; previewUrl: string }
 type ReaderTheme = "original" | "dark" | "black" | "snow" | "sepia" | "custom";
 const THEMES: { id: Exclude<ReaderTheme, "custom">; label: string }[] = [
   { id: "original", label: "Original" },
@@ -142,6 +142,37 @@ async function resolveDest(pdf: PDFDocumentProxy, dest: unknown): Promise<{ page
   } catch {
     return null;
   }
+}
+
+/** A picture of the page area a citation points at (like Zotero's hover preview): a window of the page around the
+ *  destination, with a red dot on the exact spot. Both columns are visible because the full page width is used. */
+async function renderRegion(pdf: PDFDocumentProxy, pageNum: number, top: number | null, left: number | null, w = 720, h = 340): Promise<string> {
+  const page = await pdf.getPage(pageNum);
+  const base = page.getViewport({ scale: 1 });
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const scale = (w / base.width) * dpr;
+  const flat = page.getViewport({ scale });
+  const destY = top == null ? 0 : flat.convertToViewportPoint(0, top)[1];
+  const H = h * dpr;
+  const offset = Math.max(0, Math.min(Math.max(0, flat.height - H), destY - H * 0.3));
+  const vp = page.getViewport({ scale, offsetY: -offset });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.ceil(vp.width);
+  canvas.height = Math.ceil(Math.min(H, flat.height));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return "";
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({ canvasContext: ctx, viewport: vp }).promise;
+  if (top != null) {
+    const x = left == null ? 10 * dpr : Math.max(8 * dpr, vp.convertToViewportPoint(left, 0)[0] - 8 * dpr);
+    const y = destY - offset;
+    ctx.fillStyle = "rgba(240,70,70,0.9)";
+    ctx.beginPath();
+    ctx.arc(x, Math.max(6 * dpr, y), 6 * dpr, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  return canvas.toDataURL("image/jpeg", 0.88);
 }
 
 /** The reference-list entry a citation points at, read from the page text just below the destination. */
@@ -227,7 +258,7 @@ type Rect = [number, number, number, number];
 interface Sel { text: string; page: number; rects: Rect[] }
 
 function PdfPage({
-  pdf, num, width, ratio, rootEl, anns, onTextError, tool, color, opacity, onCreate, find, findNth, onLink,
+  pdf, num, width, ratio, rootEl, anns, onTextError, tool, color, opacity, onCreate, find, findNth, onLink, onLinkHover,
 }: {
   pdf: PDFDocumentProxy; num: number; width: number; ratio: number; rootEl: HTMLElement | null; anns: Ann[]; onTextError?: (m: string) => void;
   tool: Tool; color: string; opacity: number; onCreate: (a: Partial<Ann>) => void;
@@ -235,6 +266,7 @@ function PdfPage({
   find: string; findNth: number | null;
   /** A citation / internal link was clicked (links to the web open normally). */
   onLink: (l: PdfLink, e: React.MouseEvent) => void;
+  onLinkHover?: (l: PdfLink | null, e?: React.MouseEvent) => void;
 }) {
   const [links, setLinks] = useState<PdfLink[]>([]);
   const [drag, setDrag] = useState<[number, number, number, number] | null>(null);
@@ -411,7 +443,7 @@ function PdfPage({
             const st = { left: `${l.r[0] * 100}%`, top: `${l.r[1] * 100}%`, width: `${l.r[2] * 100}%`, height: `${l.r[3] * 100}%` };
             return l.url
               ? <a key={i} className="pdfv-link" style={st} href={l.url} target="_blank" rel="noopener noreferrer" title={l.url} />
-              : <a key={i} className="pdfv-link" style={st} href="#" title="Open reference" onClick={(e) => { e.preventDefault(); onLink(l, e); }} />;
+              : <a key={i} className="pdfv-link" style={st} href="#" title="Open reference" onClick={(e) => { e.preventDefault(); onLink(l, e); }} onMouseEnter={(e) => onLinkHover?.(l, e)} onMouseLeave={() => onLinkHover?.(null)} />;
           })}
         </div>
       )}
@@ -446,6 +478,8 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
   const key = useMemo(() => doc.key || doc.paper?.id || `url-${hashStr(doc.url)}`, [doc.key, doc.paper?.id, doc.url]);
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [err, setErr] = useState("");
+  const [reloadTick, setReloadTick] = useState(0);
+  const [dropOver, setDropOver] = useState(false);
   const [ratio, setRatio] = useState(1.3);
   const [pages, setPages] = useState(0);
   const [anns, setAnns] = useState<Ann[]>([]);
@@ -569,7 +603,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
       .catch(() => { if (!dead) setLoadedAnns(true); });
     return () => { dead = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, doc.url]);
+  }, [key, doc.url, reloadTick]);
 
   useEffect(() => {
     if (!loadedAnns || !dirty.current) return;
@@ -977,10 +1011,15 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
     rootEl.scrollTo({ top: rootEl.scrollTop + (r.top - rootEl.getBoundingClientRect().top) + (frac ?? 0) * r.height - 70, behavior: "smooth" });
   }
 
-  /** Click on a link inside the PDF: citations show their reference entry; other internal links jump there. */
-  async function openLink(l: PdfLink, e: React.MouseEvent) {
+  /** Clicking a citation opens the cited paper right here (when it can be found); otherwise the reference card stays. */
+  const [citeAutoOpen, setCiteAutoOpenState] = useState(() => { try { return localStorage.getItem("reader-cite-open") !== "0"; } catch { return true; } });
+  function setCiteAutoOpen(v: boolean) { setCiteAutoOpenState(v); try { localStorage.setItem("reader-cite-open", v ? "1" : "0"); } catch { /* private mode */ } }
+  const hoverTimer = useRef(0);
+  const leaveTimer = useRef(0);
+  const citeFromHover = useRef(false);
+
+  async function showCite(l: PdfLink, x: number, y: number, hover: boolean) {
     if (!pdf || !l.dest) return;
-    const x = e.clientX, y = e.clientY;
     const d = await resolveDest(pdf, l.dest);
     if (!d) return;
     const name = typeof l.dest === "string" ? l.dest : "";
@@ -990,14 +1029,38 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
     let text = "";
     try { text = await bibEntry(pdf, d.page, d.top, d.left); } catch { /* not a text target */ }
     if (seq !== citeSeq.current) return;
-    if (!named && !looksLikeBib(text)) { goDest(d.page, d.frac); return; }
+    if (!named && !looksLikeBib(text)) { if (!hover) goDest(d.page, d.frac); return; }
     const ids = bibIds(text);
-    setCite({ x, y, page: d.page, frac: d.frac, text, busy: false, ...ids, name, finding: !!text, pdfUrl: "", landing: ids.doi ? `https://doi.org/${ids.doi}` : "", title: "" });
+    citeFromHover.current = hover;
+    setCite({ x, y, page: d.page, frac: d.frac, text, busy: false, ...ids, name, finding: !!text, pdfUrl: "", landing: ids.doi ? `https://doi.org/${ids.doi}` : "", title: "", previewUrl: "" });
+    renderRegion(pdf, d.page, d.top, d.left)
+      .then((url) => { if (seq === citeSeq.current && url) setCite((c) => (c ? { ...c, previewUrl: url } : c)); })
+      .catch(() => { /* the text card is enough */ });
     if (!text) return;
-    // Find the paper itself (arXiv id, DOI via OpenAlex, or journal + volume + page) so "Open paper" can open it here.
+    // Find the paper itself (arXiv id, DOI via OpenAlex, or journal + volume + page) so it can be opened here.
     api.citation.resolve(text, name)
-      .then((r) => { if (seq === citeSeq.current) setCite((c) => (c ? { ...c, finding: false, arxiv: r.arxiv || c.arxiv, doi: r.doi || c.doi, pdfUrl: r.pdf_url, landing: r.landing_url || c.landing, title: r.title } : c)); })
+      .then((r) => {
+        if (seq !== citeSeq.current) return;
+        setCite((c) => (c ? { ...c, finding: false, arxiv: r.arxiv || c.arxiv, doi: r.doi || c.doi, pdfUrl: r.pdf_url, landing: r.landing_url || c.landing, title: r.title } : c));
+        const url = r.pdf_url || (r.arxiv ? `https://arxiv.org/pdf/${r.arxiv}` : "");
+        if (!hover && citeAutoOpen && url && openPdf) { openPdf({ url, title: r.title || (r.arxiv ? `arXiv:${r.arxiv}` : "Cited paper") }); setCite(null); }
+      })
       .catch(() => { if (seq === citeSeq.current) setCite((c) => (c ? { ...c, finding: false } : c)); });
+  }
+
+  async function openLink(l: PdfLink, e: React.MouseEvent) {
+    window.clearTimeout(hoverTimer.current);
+    await showCite(l, e.clientX, e.clientY, false);
+  }
+
+  /** Hovering a citation shows the reference page after a short delay, like Zotero; leaving closes it unless you move onto the card. */
+  function hoverLink(l: PdfLink | null, e?: React.MouseEvent) {
+    window.clearTimeout(hoverTimer.current);
+    window.clearTimeout(leaveTimer.current);
+    if (!l) { leaveTimer.current = window.setTimeout(() => { if (citeFromHover.current) setCite(null); }, 450); return; }
+    if (!l.dest || !e) return;
+    const x = e.clientX, y = e.clientY;
+    hoverTimer.current = window.setTimeout(() => { void showCite(l, x, y, true); }, 350);
   }
 
   function openCitedPaper(c: Cite) {
@@ -1167,9 +1230,14 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
     </div>
   );
 
+  async function importPdf(f: File) {
+    try { await api.pdf.upload(key, f); showToast("PDF imported", true); setReloadTick((t) => t + 1); }
+    catch (e) { showToast(e instanceof Error ? e.message : "Couldn’t import that PDF", false); }
+  }
+
   const renderPage = (n: number) => (
     <PdfPage key={`${key}-${n}`} pdf={pdf!} num={n} width={pageWidth} ratio={ratio} rootEl={rootEl} anns={anns.filter((a) => a.page === n)} onTextError={() => setTextFail(true)} tool={tool} color={toolColor} opacity={prefs.opacity} onCreate={createFromTool}
-      find={findQ} findNth={hits[hitIdx]?.page === n ? hits[hitIdx].nth : null} onLink={(l, e) => void openLink(l, e)} />
+      find={findQ} findNth={hits[hitIdx]?.page === n ? hits[hitIdx].nth : null} onLink={(l, e) => void openLink(l, e)} onLinkHover={hoverLink} />
   );
   /** Spreads: "odd" pairs (1,2)(3,4)…, "even" leaves page 1 alone then pairs (2,3)(4,5)…. */
   const spreadRows = (total: number): number[][] => {
@@ -1199,7 +1267,14 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
     <div ref={setRootEl} className={`pdfv-scroll pdfv-m-${scrollMode}`}>
       {customFilter}
       {err ? (
-        <div className="pdfv-msg">{err}</div>
+        <div className="pdfv-msg pdfv-fail" onDragOver={(e) => { e.preventDefault(); setDropOver(true); }} onDragLeave={() => setDropOver(false)} onDrop={(e) => { e.preventDefault(); setDropOver(false); const f = e.dataTransfer.files?.[0]; if (f) void importPdf(f); }}>
+          <p>{err}</p>
+          <div className={`pdfv-drop${dropOver ? " over" : ""}`}>
+            <span>Open it in your browser (your university access works there), save the PDF, then drop it here</span>
+            <label className="btn">Choose PDF…<input type="file" accept="application/pdf,.pdf" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void importPdf(f); e.target.value = ""; }} /></label>
+            {doc.url && <a className="btn" href={doc.url} target="_blank" rel="noopener noreferrer">Open in browser ↗</a>}
+          </div>
+        </div>
       ) : !pdf ? (
         <div className="pdfv-msg">Loading PDF…</div>
       ) : twoUp ? (
@@ -1225,7 +1300,12 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
         <PdfDefineCard key={defineFor} text={sel.text} below={anchor.below} onClose={() => setDefineFor(null)} />
       )}
       {cite && (
-        <div className="pdfv-cite" role="dialog" aria-label="Reference" style={{ left: Math.max(8, Math.min(cite.x - 20, window.innerWidth - 396)), top: Math.max(8, Math.min(cite.y + 16, window.innerHeight - 250)) }}>
+        <div className={`pdfv-cite${cite.previewUrl ? " has-preview" : ""}`} role="dialog" aria-label="Reference"
+          style={{ left: Math.max(8, Math.min(cite.x - 20, window.innerWidth - (cite.previewUrl ? 756 : 396))), top: Math.max(8, Math.min(cite.y + 16, window.innerHeight - (cite.previewUrl ? 560 : 250))) }}
+          onMouseEnter={() => window.clearTimeout(leaveTimer.current)}
+          onMouseLeave={() => { if (citeFromHover.current) leaveTimer.current = window.setTimeout(() => setCite(null), 300); }}
+          onPointerDown={() => { citeFromHover.current = false; }}>
+          {cite.previewUrl && <img className="pdfv-cite-preview" src={cite.previewUrl} alt="Where this reference is" />}
           <div className="pdfv-cite-text">{cite.busy ? "Reading reference…" : cite.text || "Couldn’t read the reference text — use “Go to reference”."}</div>
           <div className="pdfv-cite-actions">
             {cite.finding && <button type="button" className="btn" disabled>Finding paper…</button>}
@@ -1235,6 +1315,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
             {!cite.busy && cite.text && <button type="button" className="btn" onClick={() => { void navigator.clipboard?.writeText(cite.text); showToast("Reference copied", true); }}>Copy</button>}
             <button type="button" className="btn pdfv-cite-x" onClick={() => setCite(null)} aria-label="Close">×</button>
           </div>
+          <label className="pdfv-cite-pref"><input type="checkbox" checked={citeAutoOpen} onChange={(e) => setCiteAutoOpen(e.target.checked)} /> Clicking a citation opens the paper on the right</label>
         </div>
       )}
       {back !== null && <button type="button" className="btn pdfv-back" onClick={() => { rootEl?.scrollTo({ top: back, behavior: "smooth" }); setBack(null); }}>↩ Back</button>}

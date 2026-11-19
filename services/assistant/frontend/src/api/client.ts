@@ -816,6 +816,12 @@ export const api = {
     saveAnnotations: (key: string, url: string, title: string, annotations: PdfAnnotation[]) =>
       req<{ ok: boolean; saved_copy: boolean }>("PUT", "/api/pdf-annotations", { key, url, title, annotations }),
     saveCopy: (key: string, url: string) => req<{ ok: boolean; path: string }>("POST", "/api/pdf-local/save", { key, url }),
+    /** Store a PDF the user downloaded themselves (university access in their browser) as this paper's local copy. */
+    upload: async (key: string, file: Blob) => {
+      const r = await fetch(`/api/pdf-local/upload?key=${encodeURIComponent(key)}`, { method: "PUT", headers: { "Content-Type": "application/pdf" }, body: file });
+      if (!r.ok) { const j = await r.json().catch(() => null); throw new Error((j && j.detail) || `Upload failed (${r.status})`); }
+      return (await r.json()) as { ok: boolean; path: string };
+    },
   },
 
   citation: {

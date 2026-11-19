@@ -141,6 +141,8 @@ from arxiv_topics import (
 from graph_keywords import cached_keyword_graph, node_for as _kw_node_for
 from note_tags import suggest_tags as _suggest_note_tags
 from reading import make_router as _make_reading_router
+from pdf_fetch import PdfFetchError, fetch_pdf
+from search_query import arxiv_author_query, openalex_author_filter, parse_query
 from graph_links import (
     DEFAULT_SIMILARITY_THRESHOLD,
     cosine,
@@ -1907,6 +1909,23 @@ async def _fetch_openalex_search(query: str, field: str = "all", start: int = 0,
     return [], 0
 
 
+async def _fetch_openalex_citation(pq: Any, start: int = 0, max_results: int = 50) -> tuple[list[dict], int]:
+    """Papers by the given author surnames around a year ("Mészáros & Rees 2000"); exact-year matches first."""
+    headers = {"User-Agent": "Yggdrasil/1.0 (mailto:academic-reader@yggdrasil.local)"}
+    params = {"filter": openalex_author_filter(pq), "per_page": 100}
+    async with httpx.AsyncClient(follow_redirects=True, timeout=25.0) as client:
+        try:
+            resp = await client.get("https://api.openalex.org/works", params=params, headers=headers)
+            if resp.status_code == 200:
+                works = [w for w in (resp.json().get("results") or []) if w.get("title")]
+                works.sort(key=lambda w: (abs((w.get("publication_year") or 0) - (pq.year or 0)), -(w.get("cited_by_count") or 0)))
+                works = works[max(0, start):max(0, start) + max_results]
+                return [_openalex_work_to_paper(w) for w in works], len(works)
+        except Exception as e:
+            logger.warning(f"OpenAlex citation search error: {e}")
+    return [], 0
+
+
 async def _fetch_europepmc_search(query: str, start: int = 0, max_results: int = 50) -> tuple[list[dict], int]:
     page = (start // max_results) + 1 if max_results > 0 else 1
     params = {
@@ -2317,6 +2336,30 @@ async def arxiv_search(
             return {"papers": papers, "total": total, "start": 0}
 
     cats = [c.strip() for c in category.split(",") if re.fullmatch(r"[A-Za-z0-9.\-]{2,30}", c.strip())]
+    if field != "id":
+        # Pasted-from-PDF accents ("M ́esz ́aros") and citation-style queries ("Mészáros & Rees 2000").
+        pq = parse_query(q, field)
+        if pq.citation:
+            jobs = [_fetch_arxiv({"search_query": (f"({' OR '.join(f'cat:{c}*' if c in {'astro-ph', 'cond-mat', 'physics', 'math', 'cs', 'stat', 'q-bio'} else f'cat:{c}' for c in cats)}) AND " if cats else "") + arxiv_author_query(pq), "sortBy": "relevance", "sortOrder": "descending", "start": 0, "max_results": 25})]
+            if not cats:
+                jobs.append(_fetch_openalex_citation(pq, start, max_results))
+            got = await asyncio.gather(*jobs, return_exceptions=True)
+            merged: list[dict] = []
+            seen: set[str] = set()
+            for r in reversed(got) if len(got) > 1 else got:  # OpenAlex first (better metadata), then arXiv
+                if isinstance(r, Exception) or not r:
+                    continue
+                for p in r[0]:
+                    key = re.sub(r"[^a-z0-9]", "", (p.get("title") or "").lower())
+                    if key and key in seen:
+                        continue
+                    seen.add(key)
+                    merged.append(p)
+            if merged:
+                page = merged[:max_results]
+                await _backfill_missing_abstracts(page)
+                return {"papers": page, "total": len(merged), "start": start}
+        q = pq.text or q
     if cats and field != "id":
         wildcard_archives = {"astro-ph", "cond-mat", "physics", "math", "cs", "stat", "q-bio", "q-fin", "eess", "econ"}
         cat_q = " OR ".join(f"cat:{c}*" if c in wildcard_archives else f"cat:{c}" for c in cats)
@@ -2520,29 +2563,12 @@ async def calendar_events_delete(event_id: str):
 
 
 async def _fetch_pdf_bytes(url: str) -> bytes:
-    """Download a public PDF. Redirects are followed manually so every hop is host-checked."""
-    current = _assert_public_url(url)
-    headers = {"User-Agent": "Yggdrasil/1.0 (PDF viewer)", "Accept": "application/pdf,*/*"}
-    async with httpx.AsyncClient(follow_redirects=False, timeout=60.0) as client:
-        resp = None
-        for _ in range(6):
-            try:
-                resp = await client.get(current, headers=headers)
-            except httpx.RequestError as exc:
-                raise HTTPException(status_code=502, detail=f"Could not fetch PDF: {exc}")
-            if resp.status_code in (301, 302, 303, 307, 308) and resp.headers.get("location"):
-                from urllib.parse import urljoin
-                current = _assert_public_url(urljoin(current, resp.headers["location"]))
-                continue
-            break
-    if resp is None or resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"PDF host returned {resp.status_code if resp else 'no response'}")
-    body = resp.content
-    if len(body) > 120 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="PDF is too large to preview")
-    if not body.startswith(b"%PDF") and "pdf" not in resp.headers.get("content-type", "").lower():
-        raise HTTPException(status_code=415, detail="That link is not a PDF — use “Open Paper / DOI” instead")
-    return body
+    """Download a PDF like a browser would (see pdf_fetch.py). Every hop is host-checked."""
+    _assert_public_url(url)
+    try:
+        return await fetch_pdf(url, _assert_public_url)
+    except PdfFetchError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
 
 
 def _pdf_store() -> Path:
@@ -2692,6 +2718,20 @@ async def pdf_local_save(payload: PdfSavePayload):
     local = _pdf_store() / f"{_pdf_key(payload.key)}.pdf"
     if not local.exists():
         local.write_bytes(await _fetch_pdf_bytes(payload.url))
+    return {"ok": True, "path": str(local.relative_to(VAULT))}
+
+
+@app.put("/api/pdf-local/upload")
+async def pdf_local_upload(request: Request, key: str):
+    """Store a PDF the user downloaded themselves (e.g. through their university access in the browser)."""
+    body = await request.body()
+    if len(body) > 120 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="PDF is too large")
+    if not body.startswith(b"%PDF"):
+        raise HTTPException(status_code=415, detail="That file is not a PDF")
+    local, _ = _pdf_locations(key)
+    local.parent.mkdir(parents=True, exist_ok=True)
+    local.write_bytes(body)
     return {"ok": True, "path": str(local.relative_to(VAULT))}
 
 

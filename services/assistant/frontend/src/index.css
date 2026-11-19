@@ -5914,3 +5914,17 @@ h2 { font-size: 15px; color: var(--accent); }
 .loki-input-row textarea:focus,
 .loki-input-row textarea:focus-visible { outline: none !important; box-shadow: none; border-radius: var(--radius); }
 .loki-input-row:focus-within { border-color: var(--accent); }
+
+/* Search history dropdown (Papers → Search) */
+.browser-search-bar { position: relative; }
+.search-history { position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 4px); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,0.4); padding: 4px; max-height: 320px; overflow-y: auto; }
+.search-history-head { display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.search-history-clear { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 11px; }
+.search-history-clear:hover { color: var(--text); }
+.search-history-item { display: flex; align-items: center; border-radius: calc(var(--radius) * 0.8); }
+.search-history-item:hover { background: color-mix(in srgb, var(--text) 8%, transparent); }
+.search-history-run { flex: 1; min-width: 0; display: flex; justify-content: space-between; gap: 10px; align-items: baseline; padding: 6px 8px; background: none; border: 0; color: var(--text); text-align: left; cursor: pointer; font: inherit; }
+.search-history-q { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-history-meta { flex: 0 0 auto; font-size: 11px; color: var(--muted); }
+.search-history-x { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 4px 8px; font-size: 15px; line-height: 1; }
+.search-history-x:hover { color: var(--text); }

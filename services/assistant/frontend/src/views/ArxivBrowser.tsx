@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { usePdfOpener } from "../components/PdfViewer";
 import AddToCollection from "../components/AddToCollection";
 import ConvertButton from "../components/ConvertButton";
@@ -12,6 +12,24 @@ interface ToastMsg { text: string; ok: boolean }
 const PAGE_SIZE = 50;
 
 const CATEGORY_KEY = "yggdrasil:search-category";
+const HISTORY_KEY = "yggdrasil:search-history";
+const HISTORY_MAX = 25;
+
+interface HistoryItem { q: string; field: ArxivSearchField; category: string }
+function loadHistory(): HistoryItem[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+    return Array.isArray(raw) ? raw.filter((h) => h && typeof h.q === "string").slice(0, HISTORY_MAX) : [];
+  } catch { return []; }
+}
+function saveHistory(list: HistoryItem[]) {
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, HISTORY_MAX))); } catch { /* optional */ }
+}
+
+/** The search view moves in the tree when the PDF reader opens beside it, which remounts it. Keeping the last
+ *  search at module level means the results (and where you were scrolled) are still there when you come back. */
+interface SavedSearch { query: string; field: ArxivSearchField; results: ArxivPaper[]; total: number; searched: boolean; expandedIds: Set<string>; expandedAuthors: Set<string>; scroll: number }
+let saved: Partial<SavedSearch> = {};
 
 /** arXiv category presets for the fast, focused search. "" = every source (slower, widest coverage). */
 const SEARCH_CATEGORIES: { group: string; items: { value: string; label: string }[] }[] = [
@@ -87,15 +105,18 @@ export default function ArxivBrowser() {
     setCategory(v);
     try { localStorage.setItem(CATEGORY_KEY, v); } catch { /* ignore */ }
   }
-  const [query, setQuery] = useState("");
-  const [field, setField] = useState<ArxivSearchField>("all");
-  const [results, setResults] = useState<ArxivPaper[]>([]);
-  const [total, setTotal] = useState(0);
-  const [searched, setSearched] = useState(false);
+  const [query, setQuery] = useState(saved.query ?? "");
+  const [field, setField] = useState<ArxivSearchField>(saved.field ?? "all");
+  const [results, setResults] = useState<ArxivPaper[]>(saved.results ?? []);
+  const [total, setTotal] = useState(saved.total ?? 0);
+  const [searched, setSearched] = useState(saved.searched ?? false);
+  const [history, setHistory] = useState<HistoryItem[]>(loadHistory);
+  const [histOpen, setHistOpen] = useState(false);
+  const resultsRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
-  const [expandedAuthors, setExpandedAuthors] = useState<Set<string>>(new Set());
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(saved.expandedIds ?? new Set());
+  const [expandedAuthors, setExpandedAuthors] = useState<Set<string>>(saved.expandedAuthors ?? new Set());
   const [toast, setToast] = useState<ToastMsg | null>(null);
 
   function showToast(text: string, ok: boolean) {
@@ -106,13 +127,49 @@ export default function ArxivBrowser() {
   const { slots, cericStatus, selectedText, selectionPaperId, addingSlot, flashId, handleTextSelect, addSelectionToSlot, refreshCericStatus } =
     useCericAppend(showToast);
 
-  async function handleSearch() {
-    const q = query.trim();
+  useEffect(() => {
+    saved = { ...saved, query, field, results, total, searched, expandedIds, expandedAuthors };
+  }, [query, field, results, total, searched, expandedIds, expandedAuthors]);
+  // Back to where you were scrolled after a remount.
+  useLayoutEffect(() => {
+    if (resultsRef.current && saved.scroll) resultsRef.current.scrollTop = saved.scroll;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searched]);
+
+  function remember(item: HistoryItem) {
+    setHistory((prev) => {
+      const next = [item, ...prev.filter((h) => !(h.q.toLowerCase() === item.q.toLowerCase() && h.field === item.field && h.category === item.category))].slice(0, HISTORY_MAX);
+      saveHistory(next);
+      return next;
+    });
+  }
+  function forget(item: HistoryItem | null) {
+    setHistory((prev) => {
+      const next = item ? prev.filter((h) => h !== item) : [];
+      saveHistory(next);
+      return next;
+    });
+  }
+  function runHistory(h: HistoryItem) {
+    setQuery(h.q);
+    setField(h.field);
+    if (h.category !== category) pickCategory(h.category);
+    setHistOpen(false);
+    void handleSearch(h);
+  }
+
+  async function handleSearch(over?: HistoryItem) {
+    const q = (over?.q ?? query).trim();
+    const f = over?.field ?? field;
+    const cat = over ? over.category : category;
     if (!q) return;
+    setHistOpen(false);
     setLoading(true);
     setSearched(true);
+    remember({ q, field: f, category: cat });
+    saved.scroll = 0;
     try {
-      const r = await api.arxiv.search(q, field, 0, PAGE_SIZE, "all", category);
+      const r = await api.arxiv.search(q, f, 0, PAGE_SIZE, "all", cat);
       setResults(r.papers);
       setTotal(r.total);
     } catch (e) {
@@ -208,13 +265,34 @@ export default function ArxivBrowser() {
             type="text"
             placeholder={activeField.placeholder}
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") handleSearch(); }}
+            onChange={(e) => { setQuery(e.target.value); setHistOpen(true); }}
+            onFocus={() => setHistOpen(true)}
+            onBlur={() => window.setTimeout(() => setHistOpen(false), 150)}
+            onKeyDown={(e) => { if (e.key === "Enter") void handleSearch(); else if (e.key === "Escape") setHistOpen(false); }}
             autoFocus
           />
-          <button className="btn btn-primary" onClick={handleSearch} disabled={loading || !query.trim()}>
+          <button className="btn btn-primary" onClick={() => void handleSearch()} disabled={loading || !query.trim()}>
             {loading ? "Searching…" : "Search"}
           </button>
+          {histOpen && (() => {
+            const typed = query.trim().toLowerCase();
+            const items = history.filter((h) => !typed || h.q.toLowerCase().includes(typed)).slice(0, 8);
+            if (!items.length) return null;
+            return (
+              <div className="search-history" role="listbox" aria-label="Search history">
+                <div className="search-history-head"><span>Recent searches</span><button type="button" className="search-history-clear" onMouseDown={(e) => { e.preventDefault(); forget(null); }}>Clear</button></div>
+                {items.map((h) => (
+                  <div key={`${h.q}|${h.field}|${h.category}`} className="search-history-item" role="option" aria-selected={false}>
+                    <button type="button" className="search-history-run" onMouseDown={(e) => { e.preventDefault(); runHistory(h); }}>
+                      <span className="search-history-q">{h.q}</span>
+                      <span className="search-history-meta">{h.field === "all" ? "Keyword" : h.field === "id" ? "ID" : h.field[0].toUpperCase() + h.field.slice(1)}{h.category ? ` · ${h.category}` : ""}</span>
+                    </button>
+                    <button type="button" className="search-history-x" aria-label={`Remove ${h.q} from history`} onMouseDown={(e) => { e.preventDefault(); forget(h); }}>×</button>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </div>
 
         {searched && !loading && total > 0 && (
@@ -225,7 +303,7 @@ export default function ArxivBrowser() {
         )}
       </div>
 
-      <div className="browser-results">
+      <div className="browser-results" ref={resultsRef} onScroll={(e) => { saved.scroll = (e.currentTarget as HTMLDivElement).scrollTop; }}>
         {!searched ? (
           <div className="arxiv-panel-empty" style={{ lineHeight: 1.6 }}>
             Search millions of papers across all fields of human knowledge — including Psychology, Linguistics, Philosophy, Geography, History, Computer Science, Physics, Medicine, Chinese literature/scholarship, and international open-access archives.

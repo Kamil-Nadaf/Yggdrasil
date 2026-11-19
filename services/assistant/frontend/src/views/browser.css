@@ -1,0 +1,14 @@
+.bw { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); position: relative; }
+.bw-bar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.bw-btn { width: 30px; height: 30px; flex: 0 0 auto; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--text); font-size: 15px; cursor: pointer; }
+.bw-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 8%, transparent); }
+.bw-btn:disabled { opacity: .35; cursor: default; }
+.bw-url { flex: 1; min-width: 0; height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); color: var(--text); font: 500 13px var(--font-sans); }
+.bw-url:focus { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 1px; }
+.bw-load { position: absolute; top: 47px; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, transparent, var(--accent), transparent); background-size: 40% 100%; background-repeat: no-repeat; animation: bw-slide 1s linear infinite; z-index: 2; }
+@keyframes bw-slide { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+.bw-frame { flex: 1; width: 100%; min-height: 0; border: 0; background: #fff; }
+.bw-home { max-width: 520px; margin: 12vh auto 0; padding: 0 24px; text-align: center; }
+.bw-home h2 { margin: 0 0 8px; font: 600 22px var(--font-serif, Georgia, serif); }
+.bw-home p { margin: 0 0 18px; opacity: .7; font-size: 13.5px; line-height: 1.5; }
+.bw-quick { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }

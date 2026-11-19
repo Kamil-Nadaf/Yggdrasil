@@ -10,6 +10,7 @@ import SlidesView from "./views/SlidesView";
 import CERICEditor from "./views/CERICEditor";
 import GraphView from "./views/GraphView";
 import ToolsView from "./views/ToolsView";
+import BrowserView from "./views/BrowserView";
 import AskView from "./views/AskView";
 import ScoresView from "./views/ScoresView";
 import LaTeXEditor from "./views/LaTeXEditor";
@@ -27,14 +28,14 @@ import { applyTheme } from "./lib/theme";
 import { APP_WATERMARK } from "./lib/copyright";
 import { startSettingsSync } from "./lib/settingsSync";
 
-export type View = "editor" | "graph" | "ask" | "scores" | "latex" | "canvas" | "papers" | "books" | "tasks" | "projects" | "calendar" | "slides" | "tools" | "settings";
+export type View = "editor" | "graph" | "ask" | "scores" | "latex" | "canvas" | "papers" | "books" | "tasks" | "projects" | "calendar" | "slides" | "tools" | "browser" | "settings";
 
 const SPLIT_KEY = "yggdrasil:split-view"; // older single-partner key, still read once
 const LAYOUT_KEY = "yggdrasil:split-layout";
 const PANES_KEY = "yggdrasil:split-panes";
 const SPLIT_RATIO_KEY = "yggdrasil:split-ratio";
 /** Every section a pane can show, Settings included, in the order new panes pick their defaults. */
-const ALL_VIEWS: View[] = ["editor", "scores", "tasks", "papers", "books", "latex", "calendar", "projects", "tools", "ask", "settings"];
+const ALL_VIEWS: View[] = ["editor", "scores", "tasks", "papers", "books", "latex", "calendar", "projects", "tools", "ask", "browser", "settings"];
 const LAYOUT_IDS: SplitLayout[] = ["1x2", "2x1", "2x2", "1x3", "3x1", "2x3", "3x2", "1x4"];
 const paneCount = (l: SplitLayout) => { const [r, c] = layoutDims(l); return r * c; };
 
@@ -213,6 +214,11 @@ export default function App() {
       persistSplit({ layout: "1x2", extras: [v] });
       return;
     }
+    if (v === "latex") { // LaTeX lives in Tools now
+      try { localStorage.setItem("yggdrasil:tools-page", "latex"); } catch { /* ignore */ }
+      setView("tools");
+      return;
+    }
     setView(v);
   }
 
@@ -290,6 +296,7 @@ export default function App() {
         {v === "graph" && <GraphView onOpenEditor={openEditor} />}
         {v === "tools" && <ToolsView onOpenEditor={openEditor} />}
         {v === "ask" && <AskView />}
+        {v === "browser" && <BrowserView />}
         {v === "scores" && <ScoresView onOpenTask={openTask} onOpenBooks={() => goView("books")} />}
         {v === "latex" && (
           <>
@@ -303,7 +310,7 @@ export default function App() {
       </>
     );
   }
-  const flushView = (v: View) => v === "latex" || v === "canvas" || v === "ask" || v === "settings" || v === "slides" || v === "tools";
+  const flushView = (v: View) => v === "latex" || v === "canvas" || v === "ask" || v === "settings" || v === "slides" || v === "tools" || v === "browser";
   const settingsPage = (i: number) => (
     <SettingsPage
       firstRun={firstRunData}

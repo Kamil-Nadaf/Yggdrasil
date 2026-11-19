@@ -816,6 +816,8 @@ export const api = {
     saveAnnotations: (key: string, url: string, title: string, annotations: PdfAnnotation[]) =>
       req<{ ok: boolean; saved_copy: boolean }>("PUT", "/api/pdf-annotations", { key, url, title, annotations }),
     saveCopy: (key: string, url: string) => req<{ ok: boolean; path: string }>("POST", "/api/pdf-local/save", { key, url }),
+    publisherAccess: () => req<{ proxy: string; cookies: { domain: string; set: boolean }[] }>("GET", "/api/publisher-access"),
+    savePublisherAccess: (proxy: string, cookies: { domain: string; cookie: string }[]) => req<{ ok: boolean }>("PUT", "/api/publisher-access", { proxy, cookies }),
     /** Store a PDF the user downloaded themselves (university access in their browser) as this paper's local copy. */
     upload: async (key: string, file: Blob) => {
       const r = await fetch(`/api/pdf-local/upload?key=${encodeURIComponent(key)}`, { method: "PUT", headers: { "Content-Type": "application/pdf" }, body: file });

@@ -31,13 +31,42 @@ class PdfFetchError(Exception):
         self.status, self.detail = status, detail
 
 
+_SD_PII = re.compile(r"^(https?://(?:www\.)?sciencedirect\.com/science/article/(?:abs/)?pii/[A-Za-z0-9]+)/?(?:[?#].*)?$", re.I)
+_WILEY = re.compile(r"^(https?://[a-z.]*onlinelibrary\.wiley\.com)/doi/(?:abs|full|epdf|pdf)/(10\.[^?#]+)", re.I)
+_SPRINGER = re.compile(r"^(https?://link\.springer\.com)/(?:article|chapter)/(10\.[^?#]+)", re.I)
+_DOI = re.compile(r"^https?://(?:dx\.)?doi\.org/(10\.[^?#]+)", re.I)
+
+
 def candidates(url: str) -> list[str]:
-    """ADS abstract pages have no PDF themselves: try its link gateway (publisher, then arXiv, then ADS scan)."""
+    """Pages that have no PDF themselves: ADS abstracts go through its link gateway (publisher, then arXiv, then ADS
+    scan); ScienceDirect / Wiley / Springer article pages are tried at their direct PDF address first."""
     m = _ADS_ABS.match(url)
     if m:
         bib = m.group(1)
         return [f"https://ui.adsabs.harvard.edu/link_gateway/{bib}/{k}" for k in ("PUB_PDF", "EPRINT_PDF", "ADS_PDF")]
+    m = _SD_PII.match(url)
+    if m:
+        return [f"{m.group(1)}/pdfft?isDTMRedir=true&download=true", url]
+    m = _WILEY.match(url)
+    if m:
+        return [f"{m.group(1)}/doi/pdfdirect/{m.group(2)}?download=true", url]
+    m = _SPRINGER.match(url)
+    if m:
+        return [f"{m.group(1)}/content/pdf/{m.group(2)}.pdf", url]
     return [url]
+
+
+def _host_matches(host: str, domain: str) -> bool:
+    host, domain = host.lower().split(":")[0], domain.lower().lstrip(".").strip()
+    return bool(domain) and (host == domain or host.endswith("." + domain))
+
+
+def _cookie_for(host: str, access: dict | None) -> str:
+    parts = []
+    for c in (access or {}).get("cookies") or []:
+        if isinstance(c, dict) and _host_matches(host, str(c.get("domain", ""))) and str(c.get("cookie", "")).strip():
+            parts.append(str(c["cookie"]).strip().rstrip(";"))
+    return "; ".join(parts)
 
 
 def pdf_link_from_html(page: str, base: str) -> str:
@@ -56,7 +85,7 @@ def _blocked_message(status: int, host: str) -> str:
     )
 
 
-async def _fetch_one(client: httpx.AsyncClient, url: str, check: Callable[[str], str]) -> bytes:
+async def _fetch_one(client: httpx.AsyncClient, url: str, check: Callable[[str], str], access: dict | None = None) -> bytes:
     current = check(url)
     referer = f"{urlparse(current).scheme}://{urlparse(current).netloc}/"
     tried_html: set[str] = set()
@@ -67,6 +96,9 @@ async def _fetch_one(client: httpx.AsyncClient, url: str, check: Callable[[str],
             "Accept-Language": "en-US,en;q=0.9",
             "Referer": referer,
         }
+        ck = _cookie_for(urlparse(current).netloc, access)
+        if ck:
+            headers["Cookie"] = ck  # only ever sent to the host the user entered it for
         try:
             resp = await client.get(current, headers=headers)
         except httpx.RequestError as exc:
@@ -99,13 +131,15 @@ async def _fetch_one(client: httpx.AsyncClient, url: str, check: Callable[[str],
     raise PdfFetchError(502, "Too many redirects while fetching the PDF")
 
 
-async def fetch_pdf(url: str, check: Callable[[str], str], timeout: float = 60.0) -> bytes:
-    """`check` validates every URL we are about to request (public hosts only) and returns it."""
+async def fetch_pdf(url: str, check: Callable[[str], str], timeout: float = 60.0, access: dict | None = None) -> bytes:
+    """`check` validates every URL we are about to request (public hosts only) and returns it.
+    `access` is the user's institutional setup: {"proxy": "http://proxy.uni.edu:3128", "cookies": [{"domain", "cookie"}]}."""
     last: PdfFetchError | None = None
-    async with httpx.AsyncClient(follow_redirects=False, timeout=timeout, cookies=httpx.Cookies()) as client:
+    proxy = ((access or {}).get("proxy") or "").strip() or None
+    async with httpx.AsyncClient(follow_redirects=False, timeout=timeout, cookies=httpx.Cookies(), proxy=proxy) as client:
         for cand in candidates(url):
             try:
-                return await _fetch_one(client, cand, check)
+                return await _fetch_one(client, cand, check, access)
             except PdfFetchError as e:
                 last = e
     raise last or PdfFetchError(502, "Could not fetch PDF")

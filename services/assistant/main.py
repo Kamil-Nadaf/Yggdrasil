@@ -2562,11 +2562,63 @@ async def calendar_events_delete(event_id: str):
     return {"ok": True}
 
 
+_PUBLISHER_ACCESS_PATH = VAULT / ".ygg-config" / "publisher-access.json"
+
+
+def _publisher_access_load() -> dict:
+    try:
+        d = json.loads(_PUBLISHER_ACCESS_PATH.read_text())
+        return d if isinstance(d, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+class PublisherCookie(BaseModel):
+    domain: str
+    cookie: str
+
+
+class PublisherAccessPayload(BaseModel):
+    proxy: str = ""
+    cookies: list[PublisherCookie] = []
+
+
+@app.get("/api/publisher-access")
+async def publisher_access_get():
+    d = _publisher_access_load()
+    # Cookie values are secrets: report only which sites have one.
+    return {"proxy": d.get("proxy", ""), "cookies": [{"domain": c.get("domain", ""), "set": bool(c.get("cookie"))} for c in d.get("cookies", []) if isinstance(c, dict)]}
+
+
+@app.put("/api/publisher-access")
+async def publisher_access_put(payload: PublisherAccessPayload):
+    proxy = payload.proxy.strip()
+    if proxy and not re.match(r"^(https?|socks5h?)://[^\s]+$", proxy):
+        raise HTTPException(status_code=400, detail="Proxy must look like http://host:port")
+    old = {c.get("domain"): c.get("cookie", "") for c in _publisher_access_load().get("cookies", []) if isinstance(c, dict)}
+    cookies = []
+    for c in payload.cookies:
+        dom = re.sub(r"^https?://|/.*$", "", c.domain.strip().lower()).lstrip(".")
+        if not dom or not re.fullmatch(r"[a-z0-9.-]+", dom):
+            continue
+        # An empty cookie keeps the one already stored (the UI never receives the secret back).
+        val = c.cookie.strip() or old.get(dom, "")
+        if val:
+            cookies.append({"domain": dom, "cookie": val})
+    _PUBLISHER_ACCESS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _PUBLISHER_ACCESS_PATH.write_text(json.dumps({"proxy": proxy, "cookies": cookies}))
+    try:
+        _PUBLISHER_ACCESS_PATH.chmod(0o600)
+    except OSError:
+        pass
+    return {"ok": True}
+
+
 async def _fetch_pdf_bytes(url: str) -> bytes:
     """Download a PDF like a browser would (see pdf_fetch.py). Every hop is host-checked."""
     _assert_public_url(url)
     try:
-        return await fetch_pdf(url, _assert_public_url)
+        return await fetch_pdf(url, _assert_public_url, access=_publisher_access_load())
     except PdfFetchError as e:
         raise HTTPException(status_code=e.status, detail=e.detail)
 

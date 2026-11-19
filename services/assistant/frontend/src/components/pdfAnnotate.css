@@ -163,3 +163,11 @@
 .pdf-viewer.pdfv-keepfigs.pdfv-theme-black .pdfv-fig,
 .pdf-viewer.pdfv-keepfigs.pdfv-theme-custom.pdfv-dark .pdfv-fig { display: block; }
 .pdfv-keepfigs-opt { display: flex; align-items: center; gap: 8px; padding: 6px 4px; font: 500 12px var(--font-sans); cursor: pointer; }
+
+/* Institutional access (publisher PDFs) */
+.pdfv-access { margin-top: 14px; max-width: 460px; width: 100%; }
+.pdfv-access-body { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; text-align: left; font-size: 12.5px; }
+.pdfv-access-body p { margin: 0; opacity: .75; }
+.pdfv-access-body label { display: flex; flex-direction: column; gap: 3px; font-weight: 600; }
+.pdfv-access-body input, .pdfv-access-body textarea { font: 400 12.5px var(--font-sans); padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); resize: vertical; }
+.pdfv-access-row { display: flex; align-items: center; gap: 10px; }

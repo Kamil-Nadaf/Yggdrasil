@@ -29,6 +29,26 @@ export default function BrowserView() {
   const [loading, setLoading] = useState(false);
   const frame = useRef<HTMLIFrameElement>(null);
   const [tick, setTick] = useState(0);
+  const wrap = useRef<HTMLDivElement>(null);
+  const [dark, setDark] = useState(false);
+
+  // Follow the app theme: dark themes invert the page (images are flipped back inside it), light/tinted themes
+  // multiply it over the theme colour.
+  useEffect(() => {
+    const read = () => {
+      const m = (wrap.current ? getComputedStyle(wrap.current).backgroundColor : "").match(/[\d.]+/g);
+      if (!m || m.length < 3) return;
+      const [r, g, b] = m.slice(0, 3).map(Number);
+      setDark(0.2126 * r + 0.7152 * g + 0.0722 * b < 128);
+    };
+    read();
+    const mo = new MutationObserver(read);
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style", "data-theme"] });
+    mo.observe(document.body, { attributes: true, attributeFilter: ["class", "style", "data-theme"] });
+    return () => mo.disconnect();
+  }, []);
+  const tell = useCallback(() => frame.current?.contentWindow?.postMessage({ ygg: 2, dark }, "*"), [dark]);
+  useEffect(() => { tell(); }, [tell]);
 
   useEffect(() => { try { localStorage.setItem(KEY, JSON.stringify({ stack, i })); } catch { /* private mode */ } }, [stack, i]);
   useEffect(() => { setInput(url); setTitle(""); setLoading(!!url); }, [url, tick]);
@@ -45,13 +65,13 @@ export default function BrowserView() {
       if (e.source !== frame.current?.contentWindow) return;
       const m = e.data as { ygg?: number; type?: string; url?: string; title?: string; newTab?: boolean };
       if (!m || m.ygg !== 1) return;
-      if (m.type === "loaded") { setLoading(false); setTitle(m.title || ""); }
+      if (m.type === "loaded") { setLoading(false); setTitle(m.title || ""); tell(); }
       else if (m.type === "nav" && m.url) { if (m.newTab) window.open(m.url, "_blank", "noopener,noreferrer"); else go(m.url); }
       else if (m.type === "pdf" && m.url) window.open(`/api/pdf-proxy?url=${encodeURIComponent(m.url)}`, "_blank", "noopener");
     }
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [go]);
+  }, [go, tell]);
 
   const back = () => setNav((s) => ({ ...s, i: Math.max(0, s.i - 1) }));
   const fwd = () => setNav((s) => ({ ...s, i: Math.min(s.stack.length - 1, s.i + 1) }));
@@ -59,7 +79,7 @@ export default function BrowserView() {
   const src = url ? `/api/browse?${isUrl ? "url" : "q"}=${encodeURIComponent(url)}&_=${tick}` : "";
 
   return (
-    <div className="bw">
+    <div className={`bw${dark ? " bw-dark" : ""}`} ref={wrap}>
       <form className="bw-bar" onSubmit={(e) => { e.preventDefault(); go(input); }}>
         <button type="button" className="bw-btn" onClick={back} disabled={i <= 0} title="Back" aria-label="Back">←</button>
         <button type="button" className="bw-btn" onClick={fwd} disabled={i >= stack.length - 1} title="Forward" aria-label="Forward">→</button>

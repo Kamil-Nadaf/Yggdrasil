@@ -12,3 +12,7 @@
 .bw-home h2 { margin: 0 0 8px; font: 600 22px var(--font-serif, Georgia, serif); }
 .bw-home p { margin: 0 0 18px; opacity: .7; font-size: 13.5px; line-height: 1.5; }
 .bw-quick { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+
+/* Page colours follow the theme */
+.bw-frame { background: transparent; mix-blend-mode: multiply; }
+.bw.bw-dark .bw-frame { mix-blend-mode: normal; background: #fff; filter: invert(0.92) hue-rotate(180deg) contrast(0.92); }

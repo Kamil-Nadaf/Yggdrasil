@@ -42,13 +42,16 @@ def test_normalize():
     assert bp.normalize("gamma ray bursts").startswith(bp.SEARCH_URL + "gamma+ray")
     assert bp.normalize("  ") == ""
     assert bp.unwrap_redirect("https://duckduckgo.com/l/?uddg=https%3A%2F%2Fa.org%2Fp&rut=1") == "https://a.org/p"
+    import base64
+    tok = "a1" + base64.urlsafe_b64encode(b"https://example.org/page?x=1").decode().rstrip("=")
+    assert bp.unwrap_redirect(f"https://www.bing.com/ck/a?!&&p=abc&u={tok}&ntb=1") == "https://example.org/page?x=1"
 
 
 def test_fetch_and_render_is_inert(base):
     final, kind, text = asyncio.run(bp.fetch_page(base + "/r", lambda u: u))
     assert final.endswith("/p") and kind == "html"
     page, nonce = bp.render(text, final)
-    assert "<base href=" in page and f'nonce="{nonce}"' in page
+    assert "ygg-dark" in page and "<base href=" in page and f'nonce="{nonce}"' in page
     assert "http-equiv" not in page  # the page's own CSP/refresh meta is dropped
     policy = bp.csp(nonce)
     assert f"script-src 'nonce-{nonce}'" in policy and "connect-src 'none'" in policy and "sandbox" in policy

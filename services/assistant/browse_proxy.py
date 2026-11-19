@@ -20,7 +20,7 @@ import httpx
 from pdf_fetch import BROWSER_UA, PdfFetchError
 
 MAX_BYTES = 8 * 1024 * 1024
-SEARCH_URL = "https://html.duckduckgo.com/html/?q="
+SEARCH_URL = "https://www.bing.com/search?q="  # DuckDuckGo/Mojeek show a bot challenge to server-side requests; Bing and Brave answer
 
 _META_CSP = re.compile(r"<meta[^>]+http-equiv=[\"']?(?:content-security-policy|refresh)[\"']?[^>]*>", re.I)
 _HEAD_OPEN = re.compile(r"<head(?:\s[^>]*)?>", re.I)
@@ -40,13 +40,24 @@ def normalize(q: str) -> str:
 
 
 def unwrap_redirect(url: str) -> str:
-    """DuckDuckGo result links go through /l/?uddg=<real url>; go straight to the real one."""
+    """Search result links go through a tracking redirect (Bing /ck/a?u=a1<base64>, DuckDuckGo /l/?uddg=); go straight
+    to the real page, because those redirects are done by script, which the browser pane does not run."""
+    import base64
     from urllib.parse import parse_qs
     u = urlparse(url)
     if u.netloc.endswith("duckduckgo.com") and u.path.startswith("/l/"):
         real = parse_qs(u.query).get("uddg", [""])[0]
         if real:
             return real
+    if u.netloc.endswith("bing.com") and u.path.startswith("/ck/"):
+        tok = parse_qs(u.query).get("u", [""])[0]
+        if tok.startswith("a1"):
+            try:
+                real = base64.urlsafe_b64decode(tok[2:] + "=" * (-len(tok[2:]) % 4)).decode()
+                if real.startswith(("http://", "https://")):
+                    return real
+            except (ValueError, UnicodeDecodeError):
+                pass
     return url
 
 
@@ -59,6 +70,7 @@ def _script(nonce: str) -> str:
         'document.addEventListener("submit",function(e){var f=e.target;e.preventDefault();var u=new URL(f.action||location.href,document.baseURI);'
         'var d=new FormData(f);var q=new URLSearchParams();d.forEach(function(v,k){if(typeof v==="string")q.append(k,v)});'
         'if((f.method||"get").toLowerCase()==="get"){u.search=q.toString();P({type:"nav",url:u.href})}else{P({type:"nav",url:u.href,post:q.toString()})}},true);'
+        'addEventListener("message",function(e){var d=e.data;if(d&&d.ygg===2)document.documentElement.classList.toggle("ygg-dark",!!d.dark)});'
         'P({type:"loaded",title:document.title})})();</script>'
     )
 
@@ -67,7 +79,9 @@ def render(page: str, final_url: str) -> tuple[str, str]:
     """(html to serve, nonce). Adds <base> so relative images/styles resolve, and our single script."""
     nonce = secrets.token_urlsafe(12)
     page = _META_CSP.sub("", page)
-    inject = f'<base href="{_html.escape(final_url, quote=True)}"><meta name="referrer" content="no-referrer">' + _script(nonce)
+    inject = (f'<base href="{_html.escape(final_url, quote=True)}"><meta name="referrer" content="no-referrer">'
+              "<style>html.ygg-dark img,html.ygg-dark video,html.ygg-dark picture,html.ygg-dark canvas,html.ygg-dark svg image{filter:invert(1) hue-rotate(180deg)}</style>"
+              + _script(nonce))
     m = _HEAD_OPEN.search(page)
     page = (page[: m.end()] + inject + page[m.end():]) if m else (inject + page)
     return page, nonce

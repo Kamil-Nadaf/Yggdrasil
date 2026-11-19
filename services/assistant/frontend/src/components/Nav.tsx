@@ -38,6 +38,7 @@ export const ITEMS: { id: View; label: string; icon: ReactNode }[] = [
   { id: "editor", label: "Notes", icon: svg(<><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></>) },
   { id: "ask", label: "Loki", icon: svg(<path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />) },
   { id: "latex", label: "LaTeX", icon: svg(<path d="M8 9l-4 3 4 3M16 9l4 3-4 3M14 5l-4 14" />) },
+  { id: "browser", label: "Browser", icon: svg(<><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></>) },
   { id: "tools", label: "Tools", icon: svg(<><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z" /></>) },
 ];
 
@@ -122,7 +123,7 @@ export default function Nav({ current, onNavigate, split, onSplitToggle, subs, o
         </button>}
       </div>
       <div className="side-items">
-        {ITEMS.map((item) => {
+        {ITEMS.filter((i) => i.id !== "latex").map((item) => { // LaTeX lives under Tools (still available as a split pane)
           const active = current === item.id || !!split?.includes(item.id);
           const sub = SUBS[item.id];
           return (

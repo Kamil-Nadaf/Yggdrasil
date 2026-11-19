@@ -80,7 +80,8 @@ from typing import Optional, Any
 import frontmatter
 import httpx
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File
-from fastapi.responses import FileResponse, JSONResponse, Response
+import html as _html
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -142,6 +143,7 @@ from graph_keywords import cached_keyword_graph, node_for as _kw_node_for
 from note_tags import suggest_tags as _suggest_note_tags
 from reading import make_router as _make_reading_router
 from pdf_fetch import PdfFetchError, fetch_pdf
+import browse_proxy
 from search_query import arxiv_author_query, openalex_author_filter, parse_query
 from graph_links import (
     DEFAULT_SIMILARITY_THRESHOLD,
@@ -2560,6 +2562,29 @@ async def calendar_events_delete(event_id: str):
         raise HTTPException(status_code=404, detail="Event not found")
     _cal_save(kept)
     return {"ok": True}
+
+
+@app.get("/api/browse")
+async def browse(url: str = "", q: str = ""):
+    """Split-screen browser: serve a web page inert and frameable (see browse_proxy.py)."""
+    target = browse_proxy.normalize(q or url)
+    if not target:
+        page, nonce = browse_proxy.note_page("Browser", "<p>Type an address or a search in the bar above.</p>")
+        return HTMLResponse(page, headers={"Content-Security-Policy": browse_proxy.csp(nonce), "Cache-Control": "no-store"})
+    target = browse_proxy.unwrap_redirect(target)
+    try:
+        final, kind, text = await browse_proxy.fetch_page(target, _assert_public_url, _publisher_access_load())
+    except HTTPException as e:
+        page, nonce = browse_proxy.note_page("Can't open", f"<h3>Can't open this page</h3><p>{_html.escape(str(e.detail))}</p>")
+        return HTMLResponse(page, status_code=200, headers={"Content-Security-Policy": browse_proxy.csp(nonce), "X-Browse-Final": target})
+    except PdfFetchError as e:
+        page, nonce = browse_proxy.note_page("Can't open", f"<h3>Can't open this page</h3><p>{_html.escape(e.detail)}</p>")
+        return HTMLResponse(page, status_code=200, headers={"Content-Security-Policy": browse_proxy.csp(nonce), "X-Browse-Final": target})
+    if kind == "pdf":
+        page, nonce = browse_proxy.note_page("PDF", f"<h3>This is a PDF</h3><p>It opens in a PDF tab.</p><p><a href=\"ygg-pdf:{_html.escape(final, quote=True)}\">Open the PDF</a></p>")
+        return HTMLResponse(page, headers={"Content-Security-Policy": browse_proxy.csp(nonce), "X-Browse-Final": final, "X-Browse-Kind": "pdf"})
+    page, nonce = browse_proxy.render(text, final)
+    return HTMLResponse(page, headers={"Content-Security-Policy": browse_proxy.csp(nonce), "Cache-Control": "no-store", "X-Browse-Final": final, "Referrer-Policy": "no-referrer"})
 
 
 _PUBLISHER_ACCESS_PATH = VAULT / ".ygg-config" / "publisher-access.json"

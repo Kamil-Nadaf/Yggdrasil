@@ -61,3 +61,33 @@
 .pdfv-define-m em { font-size: 11px; color: var(--accent); }
 .pdfv-define-m ol { margin: 2px 0 6px; padding-left: 18px; }
 .pdfv-define-src { font-size: 11px; }
+
+/* PDF reader: page themes (the page canvas is recoloured; the text layer and highlights stay on top). */
+.pdf-viewer.pdfv-theme-dark .pdfv-scroll { background: #101114; }
+.pdf-viewer.pdfv-theme-dark .pdfv-page { background: #16171b; box-shadow: 0 1px 8px rgba(0,0,0,0.7); }
+.pdf-viewer.pdfv-theme-dark .pdfv-page canvas { filter: invert(0.9) hue-rotate(180deg) contrast(0.92); }
+.pdf-viewer.pdfv-theme-dark .pdfv-hl { mix-blend-mode: normal; }
+.pdf-viewer.pdfv-theme-dark .pdfv-find { background: rgba(255,200,40,0.35); }
+.pdf-viewer.pdfv-theme-warm .pdfv-scroll { background: #3a3429; }
+.pdf-viewer.pdfv-theme-warm .pdfv-page { background: #f2e7cf; }
+.pdf-viewer.pdfv-theme-warm .pdfv-page canvas { filter: sepia(0.38) saturate(0.85) brightness(0.96) contrast(0.98); }
+/* Links inside the PDF (citations, figure/section references). */
+.pdfv-links { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.pdfv-link { position: absolute; display: block; pointer-events: auto; cursor: pointer; border-radius: 2px; }
+.pdfv-link:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); outline: 1px solid color-mix(in srgb, var(--accent) 60%, transparent); }
+.pdfv-cite { position: fixed; z-index: 70; width: min(380px, calc(100vw - 16px)); padding: 10px 12px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 8px 28px rgba(0,0,0,0.45); font-family: var(--font-sans); font-size: 12.5px; }
+.pdfv-cite-text { line-height: 1.45; max-height: 150px; overflow: auto; word-break: break-word; }
+.pdfv-cite-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+.pdfv-cite-actions .btn { padding: 4px 9px; font-size: 12px; text-decoration: none; }
+.pdfv-cite-x { margin-left: auto; }
+.pdfv-back { position: absolute; z-index: 9; left: 50%; transform: translateX(-50%); bottom: 18px; box-shadow: 0 4px 14px rgba(0,0,0,0.4); }
+.pdfv-theme { position: relative; display: inline-flex; }
+.pdfv-theme-menu { position: absolute; z-index: 80; top: calc(100% + 6px); right: 0; min-width: 210px; padding: 4px; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 8px 28px rgba(0,0,0,0.45); }
+.pdfv-theme-menu button { display: flex; align-items: center; gap: 10px; padding: 7px 9px; border: 0; border-radius: calc(var(--radius) * 0.8); background: transparent; color: var(--text); text-align: left; cursor: pointer; font: 500 13px var(--font-sans); }
+.pdfv-theme-menu button:hover { background: color-mix(in srgb, var(--text) 8%, transparent); }
+.pdfv-theme-menu button.on { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.pdfv-theme-menu small { display: block; font-weight: 400; font-size: 11px; opacity: 0.65; }
+.pdfv-theme-menu .sw { width: 18px; height: 18px; border-radius: 50%; border: 1px solid rgba(128,128,128,0.6); flex: 0 0 auto; }
+.pdfv-theme-menu .sw.light { background: #fff; }
+.pdfv-theme-menu .sw.dark { background: #16171b; }
+.pdfv-theme-menu .sw.warm { background: #f2e7cf; }

@@ -32,6 +32,7 @@ const P: Record<string, ReactNode> = {
   download: <path d="M12 4v11M7.5 11L12 15.5 16.5 11M5 20h14" />,
   quote: <><path d="M5 17.5V12a6 6 0 0 1 4.5-5.8" /><path d="M5 12h4.5v5.5H5zM14 12h4.5v5.5H14z" /><path d="M14 17.5V12a6 6 0 0 1 4.5-5.8" /></>,
   contents: <><path d="M9 6h11M9 12h11M9 18h11" /><circle cx="4.8" cy="6" r="1" /><circle cx="4.8" cy="12" r="1" /><circle cx="4.8" cy="18" r="1" /></>,
+  theme: <><circle cx="12" cy="12" r="8.5" /><path d="M12 3.5v17a8.5 8.5 0 0 1 0-17z" fill="currentColor" /></>,
   fit: <path d="M4 12h16M7.5 8.5L4 12l3.5 3.5M16.5 8.5L20 12l-3.5 3.5" />,
   convert: <><path d="M4 8h14M14 4l4 4-4 4" /><path d="M20 16H6M10 12l-4 4 4 4" /></>,
   rows: <><rect x="4" y="5" width="16" height="5" rx="1" /><rect x="4" y="14" width="16" height="5" rx="1" /></>,

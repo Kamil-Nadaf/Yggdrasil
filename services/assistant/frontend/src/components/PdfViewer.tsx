@@ -94,17 +94,124 @@ function hashStr(s: string): string {
   return (h >>> 0).toString(36);
 }
 
+
+type Rect4 = [number, number, number, number];
+/** A clickable link from the PDF's own annotations (citations, figure/section refs, URLs), as page fractions. */
+interface PdfLink { r: Rect4; dest?: unknown; url?: string }
+interface Cite { x: number; y: number; page: number; frac: number | null; text: string; busy: boolean; arxiv: string; doi: string }
+type ReaderTheme = "light" | "dark" | "warm";
+const THEMES: { id: ReaderTheme; label: string; hint: string }[] = [
+  { id: "light", label: "Light", hint: "Paper white" },
+  { id: "dark", label: "Dark", hint: "Inverted, easy on big screens" },
+  { id: "warm", label: "Warm", hint: "Soft sepia" },
+];
+
+/** Where a PDF destination (named or explicit) points: page, and how far down it (0..1) and how far across (pdf units). */
+async function resolveDest(pdf: PDFDocumentProxy, dest: unknown): Promise<{ page: number; frac: number | null; top: number | null; left: number | null } | null> {
+  try {
+    const d: unknown = typeof dest === "string" ? await pdf.getDestination(dest) : dest;
+    if (!Array.isArray(d) || !d.length) return null;
+    const ref = d[0];
+    const idx = typeof ref === "number" ? ref : await pdf.getPageIndex(ref as { num: number; gen: number });
+    const kind = (d[1] as { name?: string } | null)?.name;
+    const n = (v: unknown) => (typeof v === "number" ? v : null);
+    let left: number | null = null, top: number | null = null;
+    if (kind === "XYZ") { left = n(d[2]); top = n(d[3]); }
+    else if (kind === "FitH" || kind === "FitBH") top = n(d[2]);
+    else if (kind === "FitR") { left = n(d[2]); top = n(d[5]); }
+    const page = await pdf.getPage(idx + 1);
+    const [, y0, , y1] = page.view;
+    return { page: idx + 1, top, left, frac: top == null ? null : Math.min(1, Math.max(0, (y1 - top) / Math.max(1, y1 - y0))) };
+  } catch {
+    return null;
+  }
+}
+
+/** The reference-list entry a citation points at, read from the page text just below the destination. */
+async function bibEntry(pdf: PDFDocumentProxy, pageNum: number, top: number | null, left: number | null): Promise<string> {
+  const page = await pdf.getPage(pageNum);
+  const [x0, , x1] = page.view;
+  const mid = (x0 + x1) / 2;
+  const tc = await page.getTextContent();
+  type It = { s: string; x: number; y: number; w: number; h: number };
+  let items: It[] = [];
+  for (const raw of tc.items) {
+    const it = raw as { str?: string; transform?: number[]; width?: number; height?: number };
+    if (!it.str || !it.str.trim() || !it.transform) continue;
+    items.push({ s: it.str, x: it.transform[4], y: it.transform[5], w: it.width || 0, h: it.height || 10 });
+  }
+  // Two-column pages share y values across columns, so keep only the column the entry is in.
+  const rowsRight = new Set(items.filter((i) => i.x > mid - 8 && i.x < mid + 40).map((i) => Math.round(i.y)));
+  if (rowsRight.size >= 8 && left != null) {
+    const right = left >= mid - 20;
+    items = items.filter((i) => (right ? i.x >= mid - 20 : i.x < mid - 20));
+  }
+  items.sort((a, b) => b.y - a.y || a.x - b.x);
+  type Ln = { y: number; x: number; s: string };
+  const lines: Ln[] = [];
+  let cur: It[] = [];
+  const flush = () => {
+    if (!cur.length) return;
+    cur.sort((a, b) => a.x - b.x);
+    let s = "";
+    cur.forEach((it, i) => {
+      const prev = cur[i - 1];
+      if (prev && it.x - (prev.x + prev.w) > 0.15 * it.h && !s.endsWith(" ")) s += " ";
+      s += it.s;
+    });
+    lines.push({ y: cur[0].y, x: cur[0].x, s: s.replace(/\s+/g, " ").trim() });
+    cur = [];
+  };
+  for (const it of items) {
+    if (cur.length && Math.abs(it.y - cur[0].y) > 2.5) flush();
+    cur.push(it);
+  }
+  flush();
+  if (!lines.length) return "";
+  let start = top == null ? 0 : lines.findIndex((l) => l.y <= top - 2);
+  if (start < 0) start = lines.length - 1;
+  const first = lines[start];
+  const out = [first];
+  let hanging: boolean | null = null;
+  for (let i = start + 1; i < lines.length && out.length < 7; i++) {
+    const ln = lines[i], prev = out[out.length - 1];
+    if (NUM_REF.test(first.s) && NUM_REF.test(ln.s)) break; // "4. Next entry" after "3. …"
+    if (prev.y - ln.y > 2.2 * Math.max(10, out.length > 1 ? out[out.length - 2].y - prev.y : 12)) break;
+    if (ln.x <= first.x + 1.5) {
+      if (hanging === true) break;
+      if (hanging === null && /[.\d\])]$/.test(prev.s) && /^[A-Z\[\d]/.test(ln.s)) break;
+    } else hanging = true;
+    out.push(ln);
+  }
+  return out.reduce((acc, l) => (acc.endsWith("-") ? acc.slice(0, -1) + l.s : acc ? `${acc} ${l.s}` : l.s), "");
+}
+
+const NUM_REF = /^\[?\d{1,3}[.\]]\s/;
+/** Does this text read like a reference-list entry (years, authors) rather than a caption or a heading? */
+function looksLikeBib(t: string): boolean {
+  return t.length > 25 && /\b(1[89]|20)\d{2}[a-z]?\b/.test(t) && !/^(fig|figure|table|extended data|supplementary|section|eq)/i.test(t);
+}
+
+function bibIds(text: string): { arxiv: string; doi: string } {
+  const a = text.match(/arXiv\s*[:\s]\s*((?:\d{4}\.\d{4,5})|(?:[a-z-]+(?:\.[A-Za-z]{2})?\/\d{7}))/i);
+  const d = text.match(/(10\.\d{4,9}\/[^\s"<>]+)/);
+  return { arxiv: a ? a[1] : "", doi: d ? d[1].replace(/[.,;)\]]+$/, "") : "" };
+}
+
 type Rect = [number, number, number, number];
 interface Sel { text: string; page: number; rects: Rect[] }
 
 function PdfPage({
-  pdf, num, width, ratio, rootEl, anns, onTextError, tool, color, opacity, onCreate, find, findNth,
+  pdf, num, width, ratio, rootEl, anns, onTextError, tool, color, opacity, onCreate, find, findNth, onLink,
 }: {
   pdf: PDFDocumentProxy; num: number; width: number; ratio: number; rootEl: HTMLElement | null; anns: Ann[]; onTextError?: (m: string) => void;
   tool: Tool; color: string; opacity: number; onCreate: (a: Partial<Ann>) => void;
   /** Search term to mark in the text layer, and which marked span (on this page) is the current hit. */
   find: string; findNth: number | null;
+  /** A citation / internal link was clicked (links to the web open normally). */
+  onLink: (l: PdfLink, e: React.MouseEvent) => void;
 }) {
+  const [links, setLinks] = useState<PdfLink[]>([]);
   const [drag, setDrag] = useState<[number, number, number, number] | null>(null);
   const [path, setPath] = useState<Pt[] | null>(null);
   const [draft, setDraft] = useState<Pt | null>(null);
@@ -200,6 +307,27 @@ function PdfPage({
     return () => { cancelled = true; task?.cancel(); };
   }, [visible, width, pdf, num]);
 
+  // The PDF's own link annotations: citations, "Figure 1", "Section 2", URLs.
+  useEffect(() => {
+    if (!visible) return;
+    let dead = false;
+    (async () => {
+      const page = await pdf.getPage(num);
+      const vp = page.getViewport({ scale: 1 });
+      const raw = (await page.getAnnotations({ intent: "display" })) as { subtype?: string; rect?: number[]; dest?: unknown; url?: string; unsafeUrl?: string }[];
+      const out: PdfLink[] = [];
+      for (const a of raw) {
+        if (a.subtype !== "Link" || !a.rect) continue;
+        const url = a.url || a.unsafeUrl;
+        if (!a.dest && !url) continue;
+        const [x1, y1, x2, y2] = vp.convertToViewportRectangle(a.rect as Rect4);
+        out.push({ r: [Math.min(x1, x2) / vp.width, Math.min(y1, y2) / vp.height, Math.abs(x2 - x1) / vp.width, Math.abs(y2 - y1) / vp.height], dest: a.dest, url });
+      }
+      if (!dead) setLinks(out);
+    })().catch(() => { /* a page without annotations */ });
+    return () => { dead = true; };
+  }, [visible, pdf, num]);
+
   // Mark search matches in the text layer (matches that span two text runs are not marked).
   useEffect(() => {
     const tl = textBox.current;
@@ -252,6 +380,16 @@ function PdfPage({
         />
       )}
       <div ref={textBox} className="textLayer" />
+      {tool === "select" && links.length > 0 && (
+        <div className="pdfv-links">
+          {links.map((l, i) => {
+            const st = { left: `${l.r[0] * 100}%`, top: `${l.r[1] * 100}%`, width: `${l.r[2] * 100}%`, height: `${l.r[3] * 100}%` };
+            return l.url
+              ? <a key={i} className="pdfv-link" style={st} href={l.url} target="_blank" rel="noopener noreferrer" title={l.url} />
+              : <a key={i} className="pdfv-link" style={st} href="#" title="Open reference" onClick={(e) => { e.preventDefault(); onLink(l, e); }} />;
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -340,6 +478,13 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
   const [toast, setToast] = useState<{ text: string; ok: boolean } | null>(null);
   const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
   const [boxW, setBoxW] = useState(0);
+  const [cite, setCite] = useState<Cite | null>(null);
+  const [back, setBack] = useState<number | null>(null);
+  const [theme, setThemeState] = useState<ReaderTheme>(() => { try { const t = localStorage.getItem("reader-theme"); return t === "dark" || t === "warm" ? t : "light"; } catch { return "light"; } });
+  const [themeMenu, setThemeMenu] = useState(false);
+  const citeSeq = useRef(0);
+  const openPdf = usePdfOpener();
+  function setTheme(t: ReaderTheme) { setThemeState(t); setThemeMenu(false); try { localStorage.setItem("reader-theme", t); } catch { /* private mode */ } }
   const dirty = useRef(false);
   const { zoom, zoomIn, zoomOut, atMinZoom, atMaxZoom, resetZoom } = useZoom(1);
   const { fullscreen, setFullscreen } = useFullscreenPane();
@@ -758,6 +903,57 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  /** Scroll to a destination, remembering where we were so the "Back" chip can return. */
+  function goDest(page: number, frac: number | null) {
+    if (!rootEl) return;
+    const el = rootEl.querySelector<HTMLElement>(`.pdfv-page[data-page="${page}"]`);
+    if (!el) return;
+    setBack(rootEl.scrollTop);
+    window.setTimeout(() => setBack(null), 20000);
+    const r = el.getBoundingClientRect();
+    rootEl.scrollTo({ top: rootEl.scrollTop + (r.top - rootEl.getBoundingClientRect().top) + (frac ?? 0) * r.height - 70, behavior: "smooth" });
+  }
+
+  /** Click on a link inside the PDF: citations show their reference entry; other internal links jump there. */
+  async function openLink(l: PdfLink, e: React.MouseEvent) {
+    if (!pdf || !l.dest) return;
+    const x = e.clientX, y = e.clientY;
+    const d = await resolveDest(pdf, l.dest);
+    if (!d) return;
+    const name = typeof l.dest === "string" ? l.dest : "";
+    const named = /^(cite|bib|ref\b|reference|b\d)/i.test(name);
+    const seq = ++citeSeq.current;
+    // Link names differ between journals ("cite.X", "bib12", or the whole entry text), so we also judge by what the target says.
+    let text = "";
+    try { text = await bibEntry(pdf, d.page, d.top, d.left); } catch { /* not a text target */ }
+    if (seq !== citeSeq.current) return;
+    if (!named && !looksLikeBib(text)) { goDest(d.page, d.frac); return; }
+    setCite({ x, y, page: d.page, frac: d.frac, text, busy: false, ...bibIds(text) });
+  }
+
+  function openCitedPaper(c: Cite) {
+    if (c.arxiv) {
+      const url = `https://arxiv.org/pdf/${c.arxiv}`;
+      if (openPdf) { openPdf({ url, title: `arXiv:${c.arxiv}` }); setCite(null); }
+      else window.open(`https://arxiv.org/abs/${c.arxiv}`, "_blank", "noopener");
+    } else if (c.doi) window.open(`https://doi.org/${c.doi}`, "_blank", "noopener");
+  }
+
+  useEffect(() => {
+    if (!cite && !themeMenu) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (cite && !t?.closest(".pdfv-cite") && !t?.closest(".pdfv-link")) setCite(null);
+      if (themeMenu && !t?.closest(".pdfv-theme")) setThemeMenu(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { setCite(null); setThemeMenu(false); } };
+    const onWheel = () => setCite(null);
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    rootEl?.addEventListener("wheel", onWheel, { passive: true });
+    return () => { document.removeEventListener("pointerdown", onDown); document.removeEventListener("keydown", onKey); rootEl?.removeEventListener("wheel", onWheel); };
+  }, [cite, themeMenu, rootEl]);
+
   function jumpTo(page: number) {
     rootEl?.querySelector(`.pdfv-page[data-page="${page}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" });
   }
@@ -911,7 +1107,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
       ) : (
         Array.from({ length: pdf.numPages }, (_, i) => (
           <PdfPage key={`${key}-${i + 1}`} pdf={pdf} num={i + 1} width={pageWidth} ratio={ratio} rootEl={rootEl} anns={anns.filter((a) => a.page === i + 1)} onTextError={() => setTextFail(true)} tool={tool} color={toolColor} opacity={prefs.opacity} onCreate={createFromTool}
-            find={findQ} findNth={hits[hitIdx]?.page === i + 1 ? hits[hitIdx].nth : null} />
+            find={findQ} findNth={hits[hitIdx]?.page === i + 1 ? hits[hitIdx].nth : null} onLink={(l, e) => void openLink(l, e)} />
         ))
       )}
     </div>
@@ -931,15 +1127,45 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
       {sel && anchor && defineFor === sel.text && lookupTerm(sel.text) && (
         <PdfDefineCard key={defineFor} text={sel.text} below={anchor.below} onClose={() => setDefineFor(null)} />
       )}
+      {cite && (
+        <div className="pdfv-cite" role="dialog" aria-label="Reference" style={{ left: Math.max(8, Math.min(cite.x - 20, window.innerWidth - 396)), top: Math.max(8, Math.min(cite.y + 16, window.innerHeight - 250)) }}>
+          <div className="pdfv-cite-text">{cite.busy ? "Reading reference…" : cite.text || "Couldn’t read the reference text — use “Go to reference”."}</div>
+          <div className="pdfv-cite-actions">
+            {(cite.arxiv || cite.doi) && <button type="button" className="btn btn-primary" onClick={() => openCitedPaper(cite)}>{cite.arxiv ? "Open paper" : "Open DOI"}</button>}
+            {!cite.busy && cite.text && <a className="btn" href={`https://scholar.google.com/scholar?q=${encodeURIComponent(cite.text.slice(0, 220))}`} target="_blank" rel="noopener noreferrer">Search</a>}
+            <button type="button" className="btn" onClick={() => { goDest(cite.page, cite.frac); setCite(null); }}>Go to reference</button>
+            {!cite.busy && cite.text && <button type="button" className="btn" onClick={() => { void navigator.clipboard?.writeText(cite.text); showToast("Reference copied", true); }}>Copy</button>}
+            <button type="button" className="btn pdfv-cite-x" onClick={() => setCite(null)} aria-label="Close">×</button>
+          </div>
+        </div>
+      )}
+      {back !== null && <button type="button" className="btn pdfv-back" onClick={() => { rootEl?.scrollTo({ top: back, behavior: "smooth" }); setBack(null); }}>↩ Back</button>}
       {textFail && <div className="pdfv-warn">Text selection isn’t available for this PDF (see the console for details). You can still add a page note from the Notes list.</div>}
       {toast && <div className={`pdfv-toast ${toast.ok ? "ok" : "error"}`}>{toast.text}</div>}
     </>
   );
 
+  const themeCtl = (btnClass: string) => (
+    <span className="pdfv-theme">
+      <button type="button" className={`${btnClass}${themeMenu ? " on" : ""}`} onClick={() => setThemeMenu((v) => !v)} aria-haspopup="menu" aria-expanded={themeMenu} title={`Page theme: ${THEMES.find((t) => t.id === theme)?.label}`}>
+        <BookIcon name="theme" size={16} />
+      </button>
+      {themeMenu && (
+        <div className="pdfv-theme-menu" role="menu">
+          {THEMES.map((t) => (
+            <button key={t.id} type="button" role="menuitemradio" aria-checked={theme === t.id} className={theme === t.id ? "on" : ""} onClick={() => setTheme(t.id)}>
+              <i className={`sw ${t.id}`} /><span>{t.label}<small>{t.hint}</small></span>
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  );
+
   if (embedded) {
     const ib = (on = false) => `pdfv-ib${on ? " on" : ""}`;
     return (
-      <div className={`pdf-viewer pdfv-books${fullscreen ? " is-full" : ""}`}>
+      <div className={`pdf-viewer pdfv-books pdfv-theme-${theme}${fullscreen ? " is-full" : ""}`}>
         <div className="pdfv-topbar" role="toolbar" aria-label="Reader toolbar">
           {fileMenu}
           <button type="button" className={ib(sbOpen)} onClick={toggleSb} aria-pressed={sbOpen} title={sbOpen ? "Hide sidebar" : "Show sidebar (contents, pages, search, notes)"}><BookIcon name="sidebar" size={17} /></button>
@@ -975,6 +1201,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
           <button type="button" className={ib()} onClick={zoomIn} disabled={atMaxZoom} title="Zoom in"><BookIcon name="zoomin" size={17} /></button>
           <button type="button" className={ib()} onClick={() => setFullscreen(!fullscreen)} title={fullscreen ? "Exit full screen (Esc)" : "Full screen"}><BookIcon name="expand" size={16} /></button>
           <button type="button" className={ib()} onClick={download} title="Download PDF"><BookIcon name="download" size={16} /></button>
+          {themeCtl(ib())}
           <span className="pdfv-tb-sep" />
           <span className="pdfv-tb-tools">{toolButtons}</span>
           {tool !== "select" && <span className="pdfv-hint">Esc</span>}
@@ -1015,7 +1242,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
   }
 
   return (
-    <div className={`pdf-viewer${fullscreen ? " is-full" : ""}`}>
+    <div className={`pdf-viewer pdfv-theme-${theme}${fullscreen ? " is-full" : ""}`}>
       {!doc.embedded && <ActivityTimer category="papers" />}
       <div className="pdf-viewer-bar">
         {fileMenu}
@@ -1023,6 +1250,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
           {slim ? "▾ Tools" : "▴ Tools"}
         </button>
         <span className="pdf-viewer-title" title={doc.title}>{doc.title}</span>
+        {themeCtl("btn")}
         {!savedCopy && <button type="button" className="btn" onClick={keepCopy} title="Keep a copy of this PDF in your vault">Keep copy</button>}
         {savedCopy && <span className="muted mono" style={{ fontSize: 11 }} title="Stored in your vault: 10-Papers/pdfs">saved locally ✓</span>}
         <button type="button" className={`btn${notesOpen ? " btn-primary" : ""}`} onClick={() => setNotesOpen((v) => !v)} title="Highlights and notes">

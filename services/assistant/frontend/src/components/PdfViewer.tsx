@@ -666,6 +666,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
     } catch { return "original"; }
   });
   const [themeMenu, setThemeMenu] = useState(false);
+  const [themePos, setThemePos] = useState<{ top: number; right: number }>({ top: 44, right: 8 });
   /** 0-100: how warm (sepia) the page looks, on top of the chosen theme. */
   const [warmth, setWarmthState] = useState(() => { try { const w = Number(localStorage.getItem("reader-warmth")); return Number.isFinite(w) ? Math.min(100, Math.max(0, w)) : 0; } catch { return 0; } });
   function setWarmth(w: number) { setWarmthState(w); try { localStorage.setItem("reader-warmth", String(w)); } catch { /* private mode */ } }
@@ -1447,11 +1448,11 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
 
   const themeCtl = (btnClass: string) => (
     <span className="pdfv-theme">
-      <button type="button" className={`${btnClass}${themeMenu ? " on" : ""}`} onClick={() => setThemeMenu((v) => !v)} aria-haspopup="menu" aria-expanded={themeMenu} title="Reading mode: scrolling, spreads, theme">
+      <button type="button" className={`${btnClass}${themeMenu ? " on" : ""}`} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setThemePos({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) }); setThemeMenu((v) => !v); }} aria-haspopup="menu" aria-expanded={themeMenu} title="Reading mode: scrolling, spreads, theme">
         <BookIcon name="theme" size={16} />
       </button>
       {themeMenu && (
-        <div className="pdfv-theme-menu" role="menu" aria-label="Reading mode">
+        <div className="pdfv-theme-menu" role="menu" aria-label="Reading mode" style={{ position: "fixed", top: themePos.top, right: themePos.right, left: "auto", maxHeight: `min(78vh, ${Math.max(240, window.innerHeight - themePos.top - 12)}px)` }}>
           <div className="pdfv-rm-title">Reading Mode</div>
           <div className="pdfv-rm-row"><span>Scrolling</span>
             <div className="pdfv-seg" role="radiogroup" aria-label="Scrolling">

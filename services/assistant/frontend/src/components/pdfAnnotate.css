@@ -62,17 +62,35 @@
 .pdfv-define-m ol { margin: 2px 0 6px; padding-left: 18px; }
 .pdfv-define-src { font-size: 11px; }
 
-/* PDF reader: page themes (the page canvas is recoloured; the text layer and highlights stay on top).
+/* PDF reader: page themes. Light themes tint the page with a multiply blend, dark themes invert the canvas, and
+   "custom" maps black->text colour and white->page colour with an SVG filter (--pdfv-cf).
    --pdfv-warm (0..1, set by the Warmth slider) adds a sepia tint on top of every theme. */
-.pdf-viewer { --pdfv-warm: 0; }
+.pdf-viewer { --pdfv-warm: 0; --pdfv-cf: none; }
+.pdf-viewer .pdfv-page { isolation: isolate; background: color-mix(in srgb, #f2e7cf calc(var(--pdfv-warm) * 100%), #fff); }
 .pdf-viewer .pdfv-page canvas { filter: sepia(calc(var(--pdfv-warm) * 0.9)) brightness(calc(1 - var(--pdfv-warm) * 0.08)); }
-.pdf-viewer .pdfv-page { background: color-mix(in srgb, #f2e7cf calc(var(--pdfv-warm) * 100%), #fff); }
+.pdf-viewer.pdfv-theme-snow .pdfv-page { background: color-mix(in srgb, #f2e7cf calc(var(--pdfv-warm) * 100%), #e4eaf2); }
+.pdf-viewer.pdfv-theme-sepia .pdfv-page { background: color-mix(in srgb, #e6d3a6 calc(var(--pdfv-warm) * 100%), #f1e6cc); }
+.pdf-viewer.pdfv-theme-snow .pdfv-page canvas, .pdf-viewer.pdfv-theme-sepia .pdfv-page canvas { mix-blend-mode: multiply; }
 .pdf-viewer.pdfv-theme-dark .pdfv-scroll { background: #101114; }
 .pdf-viewer.pdfv-theme-dark .pdfv-page { background: #16171b; box-shadow: 0 1px 8px rgba(0,0,0,0.7); }
 .pdf-viewer.pdfv-theme-dark .pdfv-page canvas { filter: invert(0.9) hue-rotate(180deg) contrast(0.92) sepia(calc(var(--pdfv-warm) * 0.7)); }
-.pdf-viewer.pdfv-theme-dark .pdfv-hl { mix-blend-mode: normal; }
-.pdf-viewer.pdfv-theme-dark .pdfv-find { background: rgba(255,200,40,0.35); }
-.pdf-viewer.pdfv-theme-warm .pdfv-scroll { background: #3a3429; }
+.pdf-viewer.pdfv-theme-black .pdfv-scroll { background: #000; }
+.pdf-viewer.pdfv-theme-black .pdfv-page { background: #000; box-shadow: 0 0 0 1px #222; }
+.pdf-viewer.pdfv-theme-black .pdfv-page canvas { filter: invert(1) hue-rotate(180deg) sepia(calc(var(--pdfv-warm) * 0.6)); }
+.pdf-viewer.pdfv-theme-custom .pdfv-page { background: var(--pdfv-bg, #1f2b24); }
+.pdf-viewer.pdfv-theme-custom .pdfv-page canvas { filter: var(--pdfv-cf) sepia(calc(var(--pdfv-warm) * 0.6)); }
+.pdf-viewer.pdfv-theme-custom.pdfv-dark .pdfv-scroll { background: color-mix(in srgb, var(--pdfv-bg, #1f2b24) 55%, #000); }
+.pdf-viewer.pdfv-dark .pdfv-hl { mix-blend-mode: normal; }
+.pdf-viewer.pdfv-dark .pdfv-find { background: rgba(255,200,40,0.35); }
+.pdf-viewer.pdfv-theme-sepia .pdfv-scroll { background: #3a3429; }
+/* Scrolling modes and spreads. */
+.pdfv-scroll.pdfv-m-wrapped { display: flex; flex-wrap: wrap; justify-content: center; align-content: flex-start; gap: 12px; }
+.pdfv-scroll.pdfv-m-wrapped .pdfv-page { margin: 0; }
+.pdfv-scroll.pdfv-m-horizontal { display: flex; flex-wrap: nowrap; align-items: flex-start; gap: 12px; overflow-x: auto; }
+.pdfv-scroll.pdfv-m-horizontal .pdfv-page { margin: 0; flex: 0 0 auto; }
+.pdfv-scroll .pdfv-msg { flex: 1 1 100%; }
+.pdfv-spread { display: flex; justify-content: center; gap: 12px; margin-bottom: 12px; }
+.pdfv-spread .pdfv-page { margin: 0; flex: 0 0 auto; }
 /* Links inside the PDF (citations, figure/section references). */
 .pdfv-links { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
 .pdfv-link { position: absolute; display: block; pointer-events: auto; cursor: pointer; border-radius: 2px; }
@@ -84,7 +102,7 @@
 .pdfv-cite-x { margin-left: auto; }
 .pdfv-back { position: absolute; z-index: 9; left: 50%; transform: translateX(-50%); bottom: 18px; box-shadow: 0 4px 14px rgba(0,0,0,0.4); }
 .pdfv-theme { position: relative; display: inline-flex; }
-.pdfv-theme-menu { position: absolute; z-index: 80; top: calc(100% + 6px); right: 0; min-width: 210px; padding: 4px; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 8px 28px rgba(0,0,0,0.45); }
+.pdfv-theme-menu { position: absolute; z-index: 80; top: calc(100% + 6px); right: 0; width: 280px; max-width: calc(100vw - 16px); padding: 4px; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 8px 28px rgba(0,0,0,0.45); }
 .pdfv-theme-menu button { display: flex; align-items: center; gap: 10px; padding: 7px 9px; border: 0; border-radius: calc(var(--radius) * 0.8); background: transparent; color: var(--text); text-align: left; cursor: pointer; font: 500 13px var(--font-sans); }
 .pdfv-theme-menu button:hover { background: color-mix(in srgb, var(--text) 8%, transparent); }
 .pdfv-theme-menu button.on { background: color-mix(in srgb, var(--accent) 20%, transparent); }
@@ -98,3 +116,23 @@
 .pdfv-warmth input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
 .pdfv-warmth-ends { display: flex; justify-content: space-between; }
 .pdfv-warmth-ends small { font-size: 10.5px; opacity: 0.6; }
+
+.pdfv-rm-title { padding: 6px 9px 4px; font: 600 13px var(--font-sans); }
+.pdfv-rm-row { padding: 6px 9px; display: flex; flex-direction: column; gap: 5px; border-top: 1px solid var(--border); font: 500 12px var(--font-sans); color: var(--text); }
+.pdfv-rm-row > span { opacity: 0.7; }
+.pdfv-theme-menu .pdfv-seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; }
+.pdfv-theme-menu .pdfv-seg button { justify-content: center; padding: 6px 4px; border: 1px solid var(--border); font: 500 12px var(--font-sans); }
+.pdfv-theme-menu .pdfv-seg button:disabled { opacity: 0.4; cursor: not-allowed; }
+.pdfv-theme-menu .pdfv-swatches { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.pdfv-theme-menu .pdfv-swatch { justify-content: center; padding: 9px 4px; border: 2px solid transparent; font: 600 12.5px var(--font-serif, Georgia, serif); color: #222; }
+.pdfv-theme-menu .pdfv-swatch.original { background: #fff; }
+.pdfv-theme-menu .pdfv-swatch.dark { background: #2a2e3a; color: #e8e8ee; }
+.pdfv-theme-menu .pdfv-swatch.black { background: #000; color: #eee; }
+.pdfv-theme-menu .pdfv-swatch.snow { background: #e4eaf2; }
+.pdfv-theme-menu .pdfv-swatch.sepia { background: #f1e6cc; }
+.pdfv-theme-menu .pdfv-swatch.custom { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); font-size: 16px; }
+.pdfv-theme-menu .pdfv-swatch:hover { border-color: color-mix(in srgb, var(--accent) 50%, transparent); background-blend-mode: normal; }
+.pdfv-theme-menu .pdfv-swatch.on { border-color: var(--accent); }
+.pdfv-custom { display: flex; gap: 14px; padding: 4px 9px 8px; font: 500 12px var(--font-sans); color: var(--text); }
+.pdfv-custom label { display: flex; align-items: center; gap: 6px; }
+.pdfv-custom input[type="color"] { width: 34px; height: 24px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: none; cursor: pointer; }

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import ActivityTimer from "./ActivityTimer";
 import BookIcon from "./BookIcons";
 import ReaderSidebar, { type FindHit, type SidebarTab } from "./ReaderSidebar";
@@ -99,12 +99,29 @@ type Rect4 = [number, number, number, number];
 /** A clickable link from the PDF's own annotations (citations, figure/section refs, URLs), as page fractions. */
 interface PdfLink { r: Rect4; dest?: unknown; url?: string }
 interface Cite { x: number; y: number; page: number; frac: number | null; text: string; busy: boolean; arxiv: string; doi: string; name: string; finding: boolean; pdfUrl: string; landing: string; title: string }
-type ReaderTheme = "light" | "dark" | "warm";
-const THEMES: { id: ReaderTheme; label: string; hint: string }[] = [
-  { id: "light", label: "Light", hint: "Paper white" },
-  { id: "dark", label: "Dark", hint: "Inverted, easy on big screens" },
-  { id: "warm", label: "Warm", hint: "Soft sepia" },
+type ReaderTheme = "original" | "dark" | "black" | "snow" | "sepia" | "custom";
+const THEMES: { id: Exclude<ReaderTheme, "custom">; label: string }[] = [
+  { id: "original", label: "Original" },
+  { id: "dark", label: "Dark" },
+  { id: "black", label: "Black" },
+  { id: "snow", label: "Snow" },
+  { id: "sepia", label: "Sepia" },
 ];
+type ScrollMode = "vertical" | "wrapped" | "horizontal";
+type SpreadMode = "none" | "odd" | "even";
+interface CustomTheme { bg: string; fg: string }
+const DEFAULT_CUSTOM: CustomTheme = { bg: "#1f2b24", fg: "#d8e4d2" };
+const SCROLL_MODES: { id: ScrollMode; label: string }[] = [{ id: "vertical", label: "Vertical" }, { id: "wrapped", label: "Wrapped" }, { id: "horizontal", label: "Horizontal" }];
+const SPREADS: { id: SpreadMode; label: string }[] = [{ id: "none", label: "None" }, { id: "odd", label: "Odd" }, { id: "even", label: "Even" }];
+function hexRgb(h: string): [number, number, number] {
+  const m = /^#?([0-9a-f]{6})$/i.exec(h);
+  const n = parseInt(m ? m[1] : "000000", 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+const isDarkHex = (h: string) => { const [r, g, b] = hexRgb(h); return 0.2126 * r + 0.7152 * g + 0.0722 * b < 128; };
+function stored<T extends string>(k: string, ok: readonly T[], d: T): T {
+  try { const v = localStorage.getItem(k) as T | null; return v && ok.includes(v) ? v : d; } catch { return d; }
+}
 
 /** Where a PDF destination (named or explicit) points: page, and how far down it (0..1) and how far across (pdf units). */
 async function resolveDest(pdf: PDFDocumentProxy, dest: unknown): Promise<{ page: number; frac: number | null; top: number | null; left: number | null } | null> {
@@ -488,14 +505,32 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
   const [boxW, setBoxW] = useState(0);
   const [cite, setCite] = useState<Cite | null>(null);
   const [back, setBack] = useState<number | null>(null);
-  const [theme, setThemeState] = useState<ReaderTheme>(() => { try { const t = localStorage.getItem("reader-theme"); return t === "dark" || t === "warm" ? t : "light"; } catch { return "light"; } });
+  const [theme, setThemeState] = useState<ReaderTheme>(() => {
+    try {
+      const t = localStorage.getItem("reader-theme");
+      if (t === "light") return "original";
+      if (t === "warm") return "sepia";
+      return t && ["original", "dark", "black", "snow", "sepia", "custom"].includes(t) ? (t as ReaderTheme) : "original";
+    } catch { return "original"; }
+  });
   const [themeMenu, setThemeMenu] = useState(false);
   /** 0-100: how warm (sepia) the page looks, on top of the chosen theme. */
   const [warmth, setWarmthState] = useState(() => { try { const w = Number(localStorage.getItem("reader-warmth")); return Number.isFinite(w) ? Math.min(100, Math.max(0, w)) : 0; } catch { return 0; } });
   function setWarmth(w: number) { setWarmthState(w); try { localStorage.setItem("reader-warmth", String(w)); } catch { /* private mode */ } }
+  const [custom, setCustomState] = useState<CustomTheme>(() => {
+    try { const c = JSON.parse(localStorage.getItem("reader-custom") || "null"); if (c && /^#[0-9a-f]{6}$/i.test(c.bg) && /^#[0-9a-f]{6}$/i.test(c.fg)) return c; } catch { /* ignore */ }
+    return DEFAULT_CUSTOM;
+  });
+  function setCustom(c: CustomTheme) { setCustomState(c); setThemeState("custom"); try { localStorage.setItem("reader-custom", JSON.stringify(c)); localStorage.setItem("reader-theme", "custom"); } catch { /* private mode */ } }
+  const [scrollMode, setScrollModeState] = useState<ScrollMode>(() => stored("reader-scroll", ["vertical", "wrapped", "horizontal"] as const, "vertical"));
+  const [spread, setSpreadState] = useState<SpreadMode>(() => stored("reader-spread", ["none", "odd", "even"] as const, "none"));
+  function setScrollMode(m: ScrollMode) { setScrollModeState(m); try { localStorage.setItem("reader-scroll", m); } catch { /* private mode */ } }
+  function setSpread(m: SpreadMode) { setSpreadState(m); try { localStorage.setItem("reader-spread", m); } catch { /* private mode */ } }
+  const themeDark = theme === "dark" || theme === "black" || (theme === "custom" && isDarkHex(custom.bg));
+  const filterId = useId().replace(/:/g, "");
   const citeSeq = useRef(0);
   const openPdf = usePdfOpener();
-  function setTheme(t: ReaderTheme) { setThemeState(t); setThemeMenu(false); setWarmth(t === "warm" ? (warmth >= 10 ? warmth : 40) : 0); try { localStorage.setItem("reader-theme", t); } catch { /* private mode */ } }
+  function setTheme(t: ReaderTheme) { setThemeState(t); try { localStorage.setItem("reader-theme", t); } catch { /* private mode */ } }
   const dirty = useRef(false);
   const { zoom, zoomIn, zoomOut, atMinZoom, atMaxZoom, resetZoom } = useZoom(1);
   const { fullscreen, setFullscreen } = useFullscreenPane();
@@ -553,7 +588,11 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
     return () => ro.disconnect();
   }, [rootEl]);
 
-  const pageWidth = Math.max(200, boxW - 28) * zoom;
+  const GAP = 12;
+  const avail = Math.max(200, boxW - 28);
+  const twoUp = scrollMode === "vertical" && spread !== "none";
+  const basePage = scrollMode === "wrapped" ? (avail - 2 * GAP) / 3 : twoUp ? (avail - GAP) / 2 : avail;
+  const pageWidth = Math.max(120, basePage) * zoom;
 
   function commit(next: Ann[]) {
     dirty.current = true;
@@ -658,9 +697,11 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
 
   function currentPage(): number {
     if (!rootEl) return 1;
-    const top = rootEl.getBoundingClientRect().top;
+    const box = rootEl.getBoundingClientRect();
+    const horiz = scrollMode === "horizontal";
     for (const el of Array.from(rootEl.querySelectorAll<HTMLElement>(".pdfv-page"))) {
-      if (el.getBoundingClientRect().bottom > top + 40) return Number(el.dataset.page);
+      const r = el.getBoundingClientRect();
+      if (horiz ? r.right > box.left + 40 : r.bottom > box.top + 40) return Number(el.dataset.page);
     }
     return 1;
   }
@@ -686,7 +727,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
       if (!el) return;
       const r = el.getBoundingClientRect();
       const delta = a.frac * r.height - (rootEl.getBoundingClientRect().top - r.top);
-      if (Math.abs(delta) > 1) rootEl.scrollTop += delta;
+      if (scrollMode !== "horizontal" && Math.abs(delta) > 1) rootEl.scrollTop += delta;
     };
     apply();
     let n = 0;
@@ -694,6 +735,16 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
     return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageWidth, ratio]);
+
+  // Changing the scroll mode or spreads re-lays out every page: keep the current page in view.
+  const curPageRef = useRef(1);
+  curPageRef.current = curPage;
+  const modeSeen = useRef(false);
+  useEffect(() => {
+    if (!modeSeen.current) { modeSeen.current = true; return; }
+    const t = window.setTimeout(() => rootEl?.querySelector(`.pdfv-page[data-page="${curPageRef.current}"]`)?.scrollIntoView({ block: "start", inline: "start" }), 120);
+    return () => window.clearTimeout(t);
+  }, [scrollMode, spread, rootEl]);
 
   // Reading position: jump to the saved page once, then report scrolling back to the host.
   const onPageRef = useRef(doc.onPage);
@@ -921,6 +972,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
     if (!el) return;
     setBack(rootEl.scrollTop);
     window.setTimeout(() => setBack(null), 20000);
+    if (scrollMode === "horizontal") { el.scrollIntoView({ block: "nearest", inline: "start", behavior: "smooth" }); return; }
     const r = el.getBoundingClientRect();
     rootEl.scrollTo({ top: rootEl.scrollTop + (r.top - rootEl.getBoundingClientRect().top) + (frac ?? 0) * r.height - 70, behavior: "smooth" });
   }
@@ -972,7 +1024,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
   }, [cite, themeMenu, rootEl]);
 
   function jumpTo(page: number) {
-    rootEl?.querySelector(`.pdfv-page[data-page="${page}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" });
+    rootEl?.querySelector(`.pdfv-page[data-page="${page}"]`)?.scrollIntoView({ block: "start", inline: "start", behavior: "smooth" });
   }
 
   function copyMarkdown() {
@@ -1115,17 +1167,45 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
     </div>
   );
 
+  const renderPage = (n: number) => (
+    <PdfPage key={`${key}-${n}`} pdf={pdf!} num={n} width={pageWidth} ratio={ratio} rootEl={rootEl} anns={anns.filter((a) => a.page === n)} onTextError={() => setTextFail(true)} tool={tool} color={toolColor} opacity={prefs.opacity} onCreate={createFromTool}
+      find={findQ} findNth={hits[hitIdx]?.page === n ? hits[hitIdx].nth : null} onLink={(l, e) => void openLink(l, e)} />
+  );
+  /** Spreads: "odd" pairs (1,2)(3,4)…, "even" leaves page 1 alone then pairs (2,3)(4,5)…. */
+  const spreadRows = (total: number): number[][] => {
+    const rows: number[][] = [];
+    let i = 1;
+    if (spread === "even" && total >= 1) { rows.push([1]); i = 2; }
+    for (; i <= total; i += 2) rows.push(i + 1 <= total ? [i, i + 1] : [i]);
+    return rows;
+  };
+  const customFilter = theme === "custom" ? (() => {
+    const [fr, fg, fb] = hexRgb(custom.fg), [br, bgc, bb] = hexRgb(custom.bg);
+    const t = (a: number, b: number) => `${(a / 255).toFixed(4)} ${(b / 255).toFixed(4)}`;
+    return (
+      <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden="true" focusable="false">
+        <filter id={`pdfv-cf-${filterId}`} colorInterpolationFilters="sRGB">
+          <feComponentTransfer>
+            <feFuncR type="table" tableValues={t(fr, br)} />
+            <feFuncG type="table" tableValues={t(fg, bgc)} />
+            <feFuncB type="table" tableValues={t(fb, bb)} />
+          </feComponentTransfer>
+        </filter>
+      </svg>
+    );
+  })() : null;
+
   const pagesEl = (
-    <div ref={setRootEl} className="pdfv-scroll">
+    <div ref={setRootEl} className={`pdfv-scroll pdfv-m-${scrollMode}`}>
+      {customFilter}
       {err ? (
         <div className="pdfv-msg">{err}</div>
       ) : !pdf ? (
         <div className="pdfv-msg">Loading PDF…</div>
+      ) : twoUp ? (
+        spreadRows(pdf.numPages).map((row) => <div key={row[0]} className="pdfv-spread">{row.map(renderPage)}</div>)
       ) : (
-        Array.from({ length: pdf.numPages }, (_, i) => (
-          <PdfPage key={`${key}-${i + 1}`} pdf={pdf} num={i + 1} width={pageWidth} ratio={ratio} rootEl={rootEl} anns={anns.filter((a) => a.page === i + 1)} onTextError={() => setTextFail(true)} tool={tool} color={toolColor} opacity={prefs.opacity} onCreate={createFromTool}
-            find={findQ} findNth={hits[hitIdx]?.page === i + 1 ? hits[hitIdx].nth : null} onLink={(l, e) => void openLink(l, e)} />
-        ))
+        Array.from({ length: pdf.numPages }, (_, i) => renderPage(i + 1))
       )}
     </div>
   );
@@ -1165,16 +1245,37 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
 
   const themeCtl = (btnClass: string) => (
     <span className="pdfv-theme">
-      <button type="button" className={`${btnClass}${themeMenu ? " on" : ""}`} onClick={() => setThemeMenu((v) => !v)} aria-haspopup="menu" aria-expanded={themeMenu} title={`Page theme: ${THEMES.find((t) => t.id === theme)?.label}`}>
+      <button type="button" className={`${btnClass}${themeMenu ? " on" : ""}`} onClick={() => setThemeMenu((v) => !v)} aria-haspopup="menu" aria-expanded={themeMenu} title="Reading mode: scrolling, spreads, theme">
         <BookIcon name="theme" size={16} />
       </button>
       {themeMenu && (
-        <div className="pdfv-theme-menu" role="menu">
-          {THEMES.map((t) => (
-            <button key={t.id} type="button" role="menuitemradio" aria-checked={theme === t.id} className={theme === t.id ? "on" : ""} onClick={() => setTheme(t.id)}>
-              <i className={`sw ${t.id}`} /><span>{t.label}<small>{t.hint}</small></span>
-            </button>
-          ))}
+        <div className="pdfv-theme-menu" role="menu" aria-label="Reading mode">
+          <div className="pdfv-rm-title">Reading Mode</div>
+          <div className="pdfv-rm-row"><span>Scrolling</span>
+            <div className="pdfv-seg" role="radiogroup" aria-label="Scrolling">
+              {SCROLL_MODES.map((m) => <button key={m.id} type="button" role="radio" aria-checked={scrollMode === m.id} className={scrollMode === m.id ? "on" : ""} onClick={() => setScrollMode(m.id)}>{m.label}</button>)}
+            </div>
+          </div>
+          <div className="pdfv-rm-row"><span>Spreads</span>
+            <div className="pdfv-seg" role="radiogroup" aria-label="Spreads">
+              {SPREADS.map((m) => <button key={m.id} type="button" role="radio" aria-checked={spread === m.id} className={spread === m.id ? "on" : ""} disabled={scrollMode !== "vertical"} title={scrollMode !== "vertical" ? "Spreads need vertical scrolling" : undefined} onClick={() => setSpread(m.id)}>{m.label}</button>)}
+            </div>
+          </div>
+          <div className="pdfv-rm-row"><span>Themes</span>
+            <div className="pdfv-swatches" role="radiogroup" aria-label="Themes">
+              {THEMES.map((t) => (
+                <button key={t.id} type="button" role="radio" aria-checked={theme === t.id} className={`pdfv-swatch ${t.id}${theme === t.id ? " on" : ""}`} onClick={() => setTheme(t.id)}>{t.label}</button>
+              ))}
+              <button type="button" role="radio" aria-checked={theme === "custom"} className={`pdfv-swatch custom${theme === "custom" ? " on" : ""}`} title="Custom colours" aria-label="Custom theme"
+                style={theme === "custom" ? { background: custom.bg, color: custom.fg } : undefined} onClick={() => setCustom(custom)}>{theme === "custom" ? "Aa" : "+"}</button>
+            </div>
+          </div>
+          {theme === "custom" && (
+            <div className="pdfv-custom">
+              <label>Page <input type="color" value={custom.bg} onChange={(e) => setCustom({ ...custom, bg: e.target.value })} /></label>
+              <label>Text <input type="color" value={custom.fg} onChange={(e) => setCustom({ ...custom, fg: e.target.value })} /></label>
+            </div>
+          )}
           <label className="pdfv-warmth">
             <span>Warmth <em>{warmth}%</em></span>
             <input type="range" min={0} max={100} step={1} value={warmth} onChange={(e) => setWarmth(Number(e.target.value))} aria-label="Page warmth" />
@@ -1188,7 +1289,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
   if (embedded) {
     const ib = (on = false) => `pdfv-ib${on ? " on" : ""}`;
     return (
-      <div className={`pdf-viewer pdfv-books pdfv-theme-${theme}${fullscreen ? " is-full" : ""}`} style={{ "--pdfv-warm": warmth / 100 } as React.CSSProperties}>
+      <div className={`pdf-viewer pdfv-books pdfv-theme-${theme}${themeDark ? " pdfv-dark" : ""}${fullscreen ? " is-full" : ""}`} style={{ "--pdfv-warm": warmth / 100, "--pdfv-cf": theme === "custom" ? `url(#pdfv-cf-${filterId})` : "none", "--pdfv-bg": custom.bg } as React.CSSProperties}>
         <div className="pdfv-topbar" role="toolbar" aria-label="Reader toolbar">
           {fileMenu}
           <button type="button" className={ib(sbOpen)} onClick={toggleSb} aria-pressed={sbOpen} title={sbOpen ? "Hide sidebar" : "Show sidebar (contents, pages, search, notes)"}><BookIcon name="sidebar" size={17} /></button>
@@ -1265,7 +1366,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
   }
 
   return (
-    <div className={`pdf-viewer pdfv-theme-${theme}${fullscreen ? " is-full" : ""}`} style={{ "--pdfv-warm": warmth / 100 } as React.CSSProperties}>
+    <div className={`pdf-viewer pdfv-theme-${theme}${themeDark ? " pdfv-dark" : ""}${fullscreen ? " is-full" : ""}`} style={{ "--pdfv-warm": warmth / 100, "--pdfv-cf": theme === "custom" ? `url(#pdfv-cf-${filterId})` : "none", "--pdfv-bg": custom.bg } as React.CSSProperties}>
       {!doc.embedded && <ActivityTimer category="papers" />}
       <div className="pdf-viewer-bar">
         {fileMenu}

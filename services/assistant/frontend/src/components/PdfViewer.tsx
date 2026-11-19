@@ -98,7 +98,7 @@ function hashStr(s: string): string {
 type Rect4 = [number, number, number, number];
 /** A clickable link from the PDF's own annotations (citations, figure/section refs, URLs), as page fractions. */
 interface PdfLink { r: Rect4; dest?: unknown; url?: string }
-interface Cite { x: number; y: number; page: number; frac: number | null; text: string; busy: boolean; arxiv: string; doi: string }
+interface Cite { x: number; y: number; page: number; frac: number | null; text: string; busy: boolean; arxiv: string; doi: string; name: string; finding: boolean; pdfUrl: string; landing: string; title: string }
 type ReaderTheme = "light" | "dark" | "warm";
 const THEMES: { id: ReaderTheme; label: string; hint: string }[] = [
   { id: "light", label: "Light", hint: "Paper white" },
@@ -176,9 +176,12 @@ async function bibEntry(pdf: PDFDocumentProxy, pageNum: number, top: number | nu
   for (let i = start + 1; i < lines.length && out.length < 7; i++) {
     const ln = lines[i], prev = out[out.length - 1];
     if (NUM_REF.test(first.s) && NUM_REF.test(ln.s)) break; // "4. Next entry" after "3. …"
+    const acc = out.map((l) => l.s).join(" ");
     if (prev.y - ln.y > 2.2 * Math.max(10, out.length > 1 ? out[out.length - 2].y - prev.y : 12)) break;
     if (ln.x <= first.x + 1.5) {
       if (hanging === true) break;
+      // No hanging indent (A&A style): a flush line that opens like "Rees, M. J." after a dated entry starts the next one.
+      if (YEAR_RE.test(acc) && AUTHOR_START.test(ln.s)) break;
       if (hanging === null && /[.\d\])]$/.test(prev.s) && /^[A-Z\[\d]/.test(ln.s)) break;
     } else hanging = true;
     out.push(ln);
@@ -186,6 +189,8 @@ async function bibEntry(pdf: PDFDocumentProxy, pageNum: number, top: number | nu
   return out.reduce((acc, l) => (acc.endsWith("-") ? acc.slice(0, -1) + l.s : acc ? `${acc} ${l.s}` : l.s), "");
 }
 
+const YEAR_RE = /\b(1[89]|20)\d{2}[a-z]?\b/;
+const AUTHOR_START = /^(?:[—–-]+\.|\p{Lu}[\p{L}'’-]+(?:\s\p{Lu}[\p{L}'’-]+)?,\s+\p{Lu}\.)/u;
 const NUM_REF = /^\[?\d{1,3}[.\]]\s/;
 /** Does this text read like a reference-list entry (years, authors) rather than a caption or a heading? */
 function looksLikeBib(t: string): boolean {
@@ -485,9 +490,12 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
   const [back, setBack] = useState<number | null>(null);
   const [theme, setThemeState] = useState<ReaderTheme>(() => { try { const t = localStorage.getItem("reader-theme"); return t === "dark" || t === "warm" ? t : "light"; } catch { return "light"; } });
   const [themeMenu, setThemeMenu] = useState(false);
+  /** 0-100: how warm (sepia) the page looks, on top of the chosen theme. */
+  const [warmth, setWarmthState] = useState(() => { try { const w = Number(localStorage.getItem("reader-warmth")); return Number.isFinite(w) ? Math.min(100, Math.max(0, w)) : 0; } catch { return 0; } });
+  function setWarmth(w: number) { setWarmthState(w); try { localStorage.setItem("reader-warmth", String(w)); } catch { /* private mode */ } }
   const citeSeq = useRef(0);
   const openPdf = usePdfOpener();
-  function setTheme(t: ReaderTheme) { setThemeState(t); setThemeMenu(false); try { localStorage.setItem("reader-theme", t); } catch { /* private mode */ } }
+  function setTheme(t: ReaderTheme) { setThemeState(t); setThemeMenu(false); setWarmth(t === "warm" ? (warmth >= 10 ? warmth : 40) : 0); try { localStorage.setItem("reader-theme", t); } catch { /* private mode */ } }
   const dirty = useRef(false);
   const { zoom, zoomIn, zoomOut, atMinZoom, atMaxZoom, resetZoom } = useZoom(1);
   const { fullscreen, setFullscreen } = useFullscreenPane();
@@ -931,15 +939,21 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
     try { text = await bibEntry(pdf, d.page, d.top, d.left); } catch { /* not a text target */ }
     if (seq !== citeSeq.current) return;
     if (!named && !looksLikeBib(text)) { goDest(d.page, d.frac); return; }
-    setCite({ x, y, page: d.page, frac: d.frac, text, busy: false, ...bibIds(text) });
+    const ids = bibIds(text);
+    setCite({ x, y, page: d.page, frac: d.frac, text, busy: false, ...ids, name, finding: !!text, pdfUrl: "", landing: ids.doi ? `https://doi.org/${ids.doi}` : "", title: "" });
+    if (!text) return;
+    // Find the paper itself (arXiv id, DOI via OpenAlex, or journal + volume + page) so "Open paper" can open it here.
+    api.citation.resolve(text, name)
+      .then((r) => { if (seq === citeSeq.current) setCite((c) => (c ? { ...c, finding: false, arxiv: r.arxiv || c.arxiv, doi: r.doi || c.doi, pdfUrl: r.pdf_url, landing: r.landing_url || c.landing, title: r.title } : c)); })
+      .catch(() => { if (seq === citeSeq.current) setCite((c) => (c ? { ...c, finding: false } : c)); });
   }
 
   function openCitedPaper(c: Cite) {
-    if (c.arxiv) {
-      const url = `https://arxiv.org/pdf/${c.arxiv}`;
-      if (openPdf) { openPdf({ url, title: `arXiv:${c.arxiv}` }); setCite(null); }
-      else window.open(`https://arxiv.org/abs/${c.arxiv}`, "_blank", "noopener");
-    } else if (c.doi) window.open(`https://doi.org/${c.doi}`, "_blank", "noopener");
+    const url = c.pdfUrl || (c.arxiv ? `https://arxiv.org/pdf/${c.arxiv}` : "");
+    if (url && openPdf) { openPdf({ url, title: c.title || (c.arxiv ? `arXiv:${c.arxiv}` : "Cited paper") }); setCite(null); }
+    else if (c.arxiv) window.open(`https://arxiv.org/abs/${c.arxiv}`, "_blank", "noopener");
+    else if (c.landing) window.open(c.landing, "_blank", "noopener");
+    else if (url) window.open(url, "_blank", "noopener");
   }
 
   useEffect(() => {
@@ -1134,7 +1148,8 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
         <div className="pdfv-cite" role="dialog" aria-label="Reference" style={{ left: Math.max(8, Math.min(cite.x - 20, window.innerWidth - 396)), top: Math.max(8, Math.min(cite.y + 16, window.innerHeight - 250)) }}>
           <div className="pdfv-cite-text">{cite.busy ? "Reading reference…" : cite.text || "Couldn’t read the reference text — use “Go to reference”."}</div>
           <div className="pdfv-cite-actions">
-            {(cite.arxiv || cite.doi) && <button type="button" className="btn btn-primary" onClick={() => openCitedPaper(cite)}>{cite.arxiv ? "Open paper" : "Open DOI"}</button>}
+            {cite.finding && <button type="button" className="btn" disabled>Finding paper…</button>}
+            {!cite.finding && (cite.pdfUrl || cite.arxiv || cite.landing) && <button type="button" className="btn btn-primary" onClick={() => openCitedPaper(cite)}>{cite.pdfUrl || cite.arxiv ? "Open paper" : "Open DOI"}</button>}
             {!cite.busy && cite.text && <a className="btn" href={`https://scholar.google.com/scholar?q=${encodeURIComponent(cite.text.slice(0, 220))}`} target="_blank" rel="noopener noreferrer">Search</a>}
             <button type="button" className="btn" onClick={() => { goDest(cite.page, cite.frac); setCite(null); }}>Go to reference</button>
             {!cite.busy && cite.text && <button type="button" className="btn" onClick={() => { void navigator.clipboard?.writeText(cite.text); showToast("Reference copied", true); }}>Copy</button>}
@@ -1160,6 +1175,11 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
               <i className={`sw ${t.id}`} /><span>{t.label}<small>{t.hint}</small></span>
             </button>
           ))}
+          <label className="pdfv-warmth">
+            <span>Warmth <em>{warmth}%</em></span>
+            <input type="range" min={0} max={100} step={1} value={warmth} onChange={(e) => setWarmth(Number(e.target.value))} aria-label="Page warmth" />
+            <span className="pdfv-warmth-ends"><small>Cool</small><small>Warm</small></span>
+          </label>
         </div>
       )}
     </span>
@@ -1168,7 +1188,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
   if (embedded) {
     const ib = (on = false) => `pdfv-ib${on ? " on" : ""}`;
     return (
-      <div className={`pdf-viewer pdfv-books pdfv-theme-${theme}${fullscreen ? " is-full" : ""}`}>
+      <div className={`pdf-viewer pdfv-books pdfv-theme-${theme}${fullscreen ? " is-full" : ""}`} style={{ "--pdfv-warm": warmth / 100 } as React.CSSProperties}>
         <div className="pdfv-topbar" role="toolbar" aria-label="Reader toolbar">
           {fileMenu}
           <button type="button" className={ib(sbOpen)} onClick={toggleSb} aria-pressed={sbOpen} title={sbOpen ? "Hide sidebar" : "Show sidebar (contents, pages, search, notes)"}><BookIcon name="sidebar" size={17} /></button>
@@ -1245,7 +1265,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
   }
 
   return (
-    <div className={`pdf-viewer pdfv-theme-${theme}${fullscreen ? " is-full" : ""}`}>
+    <div className={`pdf-viewer pdfv-theme-${theme}${fullscreen ? " is-full" : ""}`} style={{ "--pdfv-warm": warmth / 100 } as React.CSSProperties}>
       {!doc.embedded && <ActivityTimer category="papers" />}
       <div className="pdf-viewer-bar">
         {fileMenu}

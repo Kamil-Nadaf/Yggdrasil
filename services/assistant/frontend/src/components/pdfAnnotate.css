@@ -62,15 +62,17 @@
 .pdfv-define-m ol { margin: 2px 0 6px; padding-left: 18px; }
 .pdfv-define-src { font-size: 11px; }
 
-/* PDF reader: page themes (the page canvas is recoloured; the text layer and highlights stay on top). */
+/* PDF reader: page themes (the page canvas is recoloured; the text layer and highlights stay on top).
+   --pdfv-warm (0..1, set by the Warmth slider) adds a sepia tint on top of every theme. */
+.pdf-viewer { --pdfv-warm: 0; }
+.pdf-viewer .pdfv-page canvas { filter: sepia(calc(var(--pdfv-warm) * 0.9)) brightness(calc(1 - var(--pdfv-warm) * 0.08)); }
+.pdf-viewer .pdfv-page { background: color-mix(in srgb, #f2e7cf calc(var(--pdfv-warm) * 100%), #fff); }
 .pdf-viewer.pdfv-theme-dark .pdfv-scroll { background: #101114; }
 .pdf-viewer.pdfv-theme-dark .pdfv-page { background: #16171b; box-shadow: 0 1px 8px rgba(0,0,0,0.7); }
-.pdf-viewer.pdfv-theme-dark .pdfv-page canvas { filter: invert(0.9) hue-rotate(180deg) contrast(0.92); }
+.pdf-viewer.pdfv-theme-dark .pdfv-page canvas { filter: invert(0.9) hue-rotate(180deg) contrast(0.92) sepia(calc(var(--pdfv-warm) * 0.7)); }
 .pdf-viewer.pdfv-theme-dark .pdfv-hl { mix-blend-mode: normal; }
 .pdf-viewer.pdfv-theme-dark .pdfv-find { background: rgba(255,200,40,0.35); }
 .pdf-viewer.pdfv-theme-warm .pdfv-scroll { background: #3a3429; }
-.pdf-viewer.pdfv-theme-warm .pdfv-page { background: #f2e7cf; }
-.pdf-viewer.pdfv-theme-warm .pdfv-page canvas { filter: sepia(0.38) saturate(0.85) brightness(0.96) contrast(0.98); }
 /* Links inside the PDF (citations, figure/section references). */
 .pdfv-links { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
 .pdfv-link { position: absolute; display: block; pointer-events: auto; cursor: pointer; border-radius: 2px; }
@@ -91,3 +93,8 @@
 .pdfv-theme-menu .sw.light { background: #fff; }
 .pdfv-theme-menu .sw.dark { background: #16171b; }
 .pdfv-theme-menu .sw.warm { background: #f2e7cf; }
+.pdfv-warmth { display: flex; flex-direction: column; gap: 4px; padding: 8px 9px 6px; margin-top: 2px; border-top: 1px solid var(--border); font: 500 12px var(--font-sans); color: var(--text); }
+.pdfv-warmth em { font-style: normal; opacity: 0.65; margin-left: 4px; }
+.pdfv-warmth input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
+.pdfv-warmth-ends { display: flex; justify-content: space-between; }
+.pdfv-warmth-ends small { font-size: 10.5px; opacity: 0.6; }

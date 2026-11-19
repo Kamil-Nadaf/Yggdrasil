@@ -84,7 +84,7 @@ async def resolve(text: str, name: str = "") -> dict[str, Any]:
             if work is None and info["year"] and info["volume"] and info["page"] and info["surname"]:
                 r = await c.get(f"{OPENALEX}/works", params={
                     "filter": f"publication_year:{info['year']},biblio.volume:{info['volume']},biblio.first_page:{info['page']}",
-                    "search": info["surname"], "per_page": 5,
+                    "per_page": 25,  # no `search`: OpenAlex searches titles, not authors; match the surname below
                 })
                 if r.status_code == 200:
                     sur = info["surname"].lower()

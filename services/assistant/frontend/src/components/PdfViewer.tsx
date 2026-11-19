@@ -1343,11 +1343,11 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
             </div>
           </div>
           <div className="pdfv-rm-row"><span>Themes</span>
-            <div className="pdfv-swatches" role="radiogroup" aria-label="Themes">
+            <div className="pdfv-themegrid" role="radiogroup" aria-label="Themes">
               {THEMES.map((t) => (
-                <button key={t.id} type="button" role="radio" aria-checked={theme === t.id} className={`pdfv-swatch ${t.id}${theme === t.id ? " on" : ""}`} onClick={() => setTheme(t.id)}>{t.label}</button>
+                <button key={t.id} type="button" role="radio" aria-checked={theme === t.id} className={`pdfv-themesw ${t.id}${theme === t.id ? " on" : ""}`} onClick={() => setTheme(t.id)}>{t.label}</button>
               ))}
-              <button type="button" role="radio" aria-checked={theme === "custom"} className={`pdfv-swatch custom${theme === "custom" ? " on" : ""}`} title="Custom colours" aria-label="Custom theme"
+              <button type="button" role="radio" aria-checked={theme === "custom"} className={`pdfv-themesw custom${theme === "custom" ? " on" : ""}`} title="Custom colours" aria-label="Custom theme"
                 style={theme === "custom" ? { background: custom.bg, color: custom.fg } : undefined} onClick={() => setCustom(custom)}>{theme === "custom" ? "Aa" : "+"}</button>
             </div>
           </div>

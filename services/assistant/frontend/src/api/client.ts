@@ -818,6 +818,12 @@ export const api = {
     saveCopy: (key: string, url: string) => req<{ ok: boolean; path: string }>("POST", "/api/pdf-local/save", { key, url }),
   },
 
+  citation: {
+    resolve: (text: string, name = "") =>
+      req<{ ok: boolean; arxiv: string; doi: string; pdf_url: string; landing_url: string; title: string; source: string }>(
+        "GET", `/api/citation/resolve?text=${encodeURIComponent(text)}&name=${encodeURIComponent(name)}`),
+  },
+
   zotero: {
     search: (q: string) => req<PaperFrontmatter>("GET", `/api/zotero/search?q=${encodeURIComponent(q)}`),
     ensure: (arxivId: string) => req<PaperFrontmatter>("POST", `/api/zotero/ensure/${arxivId}`),

@@ -156,3 +156,10 @@
 .pdfv-theme-menu .pdfv-themesw.on { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
 .pdfv-custom { padding: 2px 8px 10px; }
 .pdfv-warmth { padding: 10px 8px 6px; }
+
+/* Figures and plots keep their real colours on dark / custom themes */
+.pdfv-fig { position: absolute; display: none; pointer-events: none; background: #fff; border-radius: 2px; }
+.pdf-viewer.pdfv-keepfigs.pdfv-theme-dark .pdfv-fig,
+.pdf-viewer.pdfv-keepfigs.pdfv-theme-black .pdfv-fig,
+.pdf-viewer.pdfv-keepfigs.pdfv-theme-custom.pdfv-dark .pdfv-fig { display: block; }
+.pdfv-keepfigs-opt { display: flex; align-items: center; gap: 8px; padding: 6px 4px; font: 500 12px var(--font-sans); cursor: pointer; }

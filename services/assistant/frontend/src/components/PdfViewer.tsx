@@ -319,6 +319,42 @@ async function figureBoxes(page: import("pdfjs-dist").PDFPageProxy): Promise<[nu
     });
 }
 
+/** Institutional access for publisher PDFs: a campus proxy, and/or the browser's cookies for one publisher. */
+function AccessSettings({ onSaved }: { onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [proxy, setProxy] = useState("");
+  const [domain, setDomain] = useState("sciencedirect.com");
+  const [cookie, setCookie] = useState("");
+  const [have, setHave] = useState<string[]>([]);
+  const [msg, setMsg] = useState("");
+  useEffect(() => {
+    if (!open) return;
+    api.pdf.publisherAccess().then((a) => { setProxy(a.proxy); setHave(a.cookies.filter((c) => c.set).map((c) => c.domain)); }).catch(() => { /* older backend */ });
+  }, [open]);
+  async function save() {
+    try {
+      const keep = have.filter((d) => d !== domain.trim().toLowerCase()).map((d) => ({ domain: d, cookie: "" }));
+      await api.pdf.savePublisherAccess(proxy, cookie.trim() ? [...keep, { domain, cookie }] : keep);
+      setCookie(""); setMsg("Saved — retrying…"); onSaved();
+    } catch (e) { setMsg(e instanceof Error ? e.message : "Could not save"); }
+  }
+  return (
+    <div className="pdfv-access">
+      <button type="button" className="btn small" onClick={() => setOpen((o) => !o)}>{open ? "Hide" : "Set up"} institutional access</button>
+      {open && (
+        <div className="pdfv-access-body">
+          <p>The app downloads from the computer it runs on. If that computer is not on campus, give it a way in:</p>
+          <label>Campus proxy <input value={proxy} placeholder="http://proxy.university.edu:3128" onChange={(e) => setProxy(e.target.value)} /></label>
+          <label>Publisher site <input value={domain} placeholder="sciencedirect.com" onChange={(e) => setDomain(e.target.value)} /></label>
+          <label>Cookie header <textarea value={cookie} rows={2} placeholder={have.includes(domain.trim().toLowerCase()) ? "(saved — paste a new one to replace)" : "Copy the Cookie request header from your browser's dev tools (Network tab) while signed in via your institution"} onChange={(e) => setCookie(e.target.value)} /></label>
+          <div className="pdfv-access-row"><button type="button" className="btn" onClick={() => void save()}>Save &amp; retry</button>{msg && <span>{msg}</span>}</div>
+          {have.length > 0 && <small>Cookies saved for: {have.join(", ")}</small>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PdfPage({
   pdf, num, width, ratio, rootEl, anns, onTextError, tool, color, opacity, onCreate, find, findNth, onLink, onLinkHover,
 }: {
@@ -1358,6 +1394,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
             <label className="btn">Choose PDF…<input type="file" accept="application/pdf,.pdf" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void importPdf(f); e.target.value = ""; }} /></label>
             {doc.url && <a className="btn" href={doc.url} target="_blank" rel="noopener noreferrer">Open in browser ↗</a>}
           </div>
+          <AccessSettings onSaved={() => setReloadTick((n) => n + 1)} />
         </div>
       ) : !pdf ? (
         <div className="pdfv-msg">Loading PDF…</div>

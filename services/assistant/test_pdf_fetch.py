@@ -81,3 +81,15 @@ def test_ads_abstract_page_uses_link_gateway():
 def test_pdf_link_patterns():
     assert pdf_link_from_html('<meta content="https://x.org/a.pdf" name="citation_pdf_url">', "https://x.org/") == "https://x.org/a.pdf"
     assert pdf_link_from_html('<a class="pdf" href="/science/article/pii/S1/pdfft?md5=1&amp;pid=2">', "https://www.sciencedirect.com/") == "https://www.sciencedirect.com/science/article/pii/S1/pdfft?md5=1&pid=2"
+
+
+def test_publisher_candidates_and_cookie_scoping():
+    from pdf_fetch import _cookie_for
+    c = candidates("https://www.sciencedirect.com/science/article/pii/S0370269320308236")
+    assert c[0].endswith("/pdfft?isDTMRedir=true&download=true") and c[1].endswith("S0370269320308236")
+    assert "pdfdirect/10.1002/x" in candidates("https://onlinelibrary.wiley.com/doi/full/10.1002/x")[0]
+    assert candidates("https://link.springer.com/article/10.1007/s1")[0].endswith("/content/pdf/10.1007/s1.pdf")
+    acc = {"cookies": [{"domain": "sciencedirect.com", "cookie": "a=1; "}]}
+    assert _cookie_for("www.sciencedirect.com", acc) == "a=1"
+    assert _cookie_for("evilsciencedirect.com", acc) == ""
+    assert _cookie_for("pdf.sciencedirectassets.com", acc) == ""

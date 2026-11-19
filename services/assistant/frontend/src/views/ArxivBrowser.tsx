@@ -71,11 +71,11 @@ const SEARCH_CATEGORIES: { group: string; items: { value: string; label: string 
   },
 ];
 
-const FIELD_OPTIONS: { value: ArxivSearchField; label: string; placeholder: string }[] = [
-  { value: "all", label: "Keyword", placeholder: "Search title, abstract, keyword (any discipline, multilingual)…" },
-  { value: "author", label: "Author", placeholder: "e.g. Noam Chomsky, Jean Piaget, or Bin-Bin Zhang" },
-  { value: "title", label: "Title", placeholder: "Exact or partial title…" },
-  { value: "id", label: "DOI / arXiv ID / URL", placeholder: "e.g. 10.1016/… or 2401.12345 or openalex.org/W…" },
+const FIELD_OPTIONS: { value: ArxivSearchField; label: string; short: string; placeholder: string }[] = [
+  { value: "all", label: "Keyword", short: "Keyword", placeholder: "Search title, abstract, keyword (any discipline, multilingual)…" },
+  { value: "author", label: "Author", short: "Author", placeholder: "e.g. Noam Chomsky, Jean Piaget, or Bin-Bin Zhang" },
+  { value: "title", label: "Title", short: "Title", placeholder: "Exact or partial title…" },
+  { value: "id", label: "DOI / arXiv ID / URL", short: "ID", placeholder: "e.g. 10.1016/… or 2401.12345 or openalex.org/W…" },
 ];
 
 function resolvePdfUrl(paper: ArxivPaper): string {
@@ -237,7 +237,7 @@ export default function ArxivBrowser() {
               className={`btn${field === f.value ? " btn-primary" : ""}`}
               onClick={() => setField(f.value)}
             >
-              {f.label}
+              <span className="long">{f.label}</span><span className="short">{f.short}</span>
             </button>
           ))}
         </div>

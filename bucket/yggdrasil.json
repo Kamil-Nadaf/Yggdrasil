@@ -1,12 +1,12 @@
 {
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "Self-hosted research app: read arXiv papers, notes, LaTeX, slides",
   "homepage": "https://github.com/Kamil-Nadaf/Yggdrasil",
   "license": "MIT",
   "architecture": {
     "64bit": {
-      "url": "https://github.com/Kamil-Nadaf/Yggdrasil/releases/download/v0.5.4/Yggdrasil-20261118-windows.zip",
-      "hash": "0dea776b50840ace6f7cd936efbcb6e6303e124db363e4b6db76c29fe0c7cc62"
+      "url": "https://github.com/Kamil-Nadaf/Yggdrasil/releases/download/v0.5.5/Yggdrasil-20261119-windows.zip",
+      "hash": "93a55fd8e769c7c25b0533a74e9494431d93361e794c7aa47877d7474a2a6754"
     }
   },
   "extract_dir": "Yggdrasil-windows",

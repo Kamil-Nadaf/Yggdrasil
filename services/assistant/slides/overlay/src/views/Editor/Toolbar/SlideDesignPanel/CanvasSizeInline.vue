@@ -46,7 +46,7 @@ const apply = () => {
 .canvas-size-inline { width: 100%; }
 .lbl { font-size: 12px; margin-bottom: 6px; opacity: .75; }
 .fields { display: flex; align-items: center; gap: 8px; }
-.fields input { flex: 1; min-width: 0; padding: 4px 6px; font: inherit; border: 1px solid #d9d9d9; border-radius: 4px; background: #fff; color: inherit; }
+.fields input { flex: 1; min-width: 0; padding: 4px 6px; font: inherit; border: 1px solid #d9d9d9; border-radius: 4px; background: #fff !important; color: #222 !important; -webkit-text-fill-color: #222 !important; opacity: 1 !important; }
 .x { opacity: .6; }
 .hint { font-size: 11px; opacity: .6; margin-top: 4px; }
 </style>

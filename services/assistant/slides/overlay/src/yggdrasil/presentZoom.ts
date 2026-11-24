@@ -60,7 +60,7 @@ function ensureBar() {
 
 export function startPresentZoom() {
   const style = document.createElement('style')
-  style.textContent = `.ygg-present-zoom{position:fixed;top:10px;right:10px;z-index:50;display:flex;align-items:center;gap:4px;padding:4px 6px;border-radius:6px;background:rgba(20,20,20,.75);color:#fff;font:12px system-ui,sans-serif;opacity:.18;transition:opacity .2s}
+  style.textContent = `.ygg-present-zoom{position:fixed;top:10px;right:10px;z-index:50;display:flex;align-items:center;gap:4px;padding:4px 6px;border-radius:6px;background:rgba(20,20,20,.75);color:#fff;font:12px system-ui,sans-serif;opacity:.5;transition:opacity .2s}
 .ygg-present-zoom:hover,.ygg-present-zoom.zoomed{opacity:1}
 .ygg-present-zoom button{background:transparent;border:1px solid rgba(255,255,255,.35);color:#fff;border-radius:4px;padding:1px 8px;cursor:pointer;font:inherit}
 .ygg-present-zoom button:hover{background:rgba(255,255,255,.2)}

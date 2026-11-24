@@ -54,6 +54,22 @@ export interface ReadingNote {
 }
 
 export interface SavedSearch { id: string; name: string; q: string }
+/** Automatic two-way library sync with Zotero (items, collections, PDFs). */
+export interface ZoteroLibrarySync {
+  running: boolean;
+  ok: boolean;
+  error: string;
+  errors: string[];
+  last_run: string;
+  pushed_items: number;
+  linked_items: number;
+  pushed_collections: number;
+  pushed_files: number;
+  pulled: boolean;
+  unsynced: number;
+  /** epoch seconds; changes whenever a pass brought something new in or pushed something out */
+  changed_at: number;
+}
 export interface AnnotationSyncStatus {
   running: boolean;
   phase: string;
@@ -286,6 +302,8 @@ export const reading = {
   latexBib: (project: string, slugs: string[]) =>
     call<{ ok: boolean; keys: Record<string, string>; added: number; path: string }>("POST", "/api/reading/latex-bib", { project, slugs }),
   importZotero: (withPdfs: boolean) => call<ZoteroImportStatus & { ok: boolean; started: boolean }>("POST", "/api/reading/import-zotero", { with_pdfs: withPdfs }),
+  zoteroSync: () => call<ZoteroLibrarySync & { ok: boolean }>("POST", "/api/reading/zotero-sync"),
+  zoteroSyncStatus: () => call<ZoteroLibrarySync>("GET", "/api/reading/zotero-sync/status"),
   zoteroStatus: () => call<ZoteroImportStatus>("GET", "/api/reading/import-zotero/status"),
   syncAnnotations: () => call<AnnotationSyncStatus & { ok: boolean; started: boolean }>("POST", "/api/reading/sync-annotations"),
   annotationSyncStatus: () => call<AnnotationSyncStatus>("GET", "/api/reading/sync-annotations/status"),

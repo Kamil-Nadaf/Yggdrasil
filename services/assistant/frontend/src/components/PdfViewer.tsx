@@ -1287,6 +1287,9 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
   }, [embedded]);
 
   const sorted = useMemo(() => [...anns].sort((a, b) => a.page - b.page || a.created.localeCompare(b.created)), [anns]);
+  // The Notes list shows real notes only: pinned/page notes and highlights you wrote a comment on (or are writing one on right now).
+  // A plain highlight stays on the page; it becomes a note when you choose "+ Note" or write a comment.
+  const shown = useMemo(() => sorted.filter((a) => a.kind === "note" || a.kind === "text" || !!(a.note || "").trim() || a.id === focusId), [sorted, focusId]);
 
   const toolButtons = (
     <>
@@ -1321,8 +1324,8 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
         {anns.length > 0 && <button type="button" className="btn" onClick={copyMarkdown}>Copy Markdown</button>}
         {!embedded && <button type="button" className="btn" onClick={() => setNotesOpen(false)}>×</button>}
       </div>
-      {sorted.length === 0 && <div className="muted" style={{ padding: 10, fontSize: 13 }}>Nothing yet. Select text in the PDF, then choose a highlight colour or “+ Note”.</div>}
-      {sorted.map((a) => (
+      {shown.length === 0 && <div className="muted" style={{ padding: 10, fontSize: 13 }}>No notes yet. Select text in the PDF and choose “+ Note” (plain highlights stay on the page).</div>}
+      {shown.map((a) => (
         <div key={a.id} className={`pdfv-note${a.id === focusId ? " focus" : ""}`}>
           <div className="pdfv-note-top">
             <button type="button" className="btn" onClick={() => jumpTo(a.page)}>p. {a.page}</button>
@@ -1537,7 +1540,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
           <span className="pdfv-tb-sep" />
           {trail}
           <button type="button" className={ib(rsOpen)} onClick={() => setRsOpen((v) => !v)} aria-pressed={rsOpen} title={rsOpen ? "Hide notes panel" : "Show notes panel (highlights and my notes)"}>
-            <BookIcon name="annot" size={17} />{anns.length > 0 && <em className="pdfv-badge">{anns.length}</em>}
+            <BookIcon name="annot" size={17} />{shown.length > 0 && <em className="pdfv-badge">{shown.length}</em>}
           </button>
         </div>
         <div className="pdfv-body">
@@ -1555,7 +1558,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
           {rsOpen && (
             <aside className="pdfv-rside" aria-label="Notes panel">
               <div className="pdfv-rside-tabs" role="tablist">
-                <button type="button" role="tab" aria-selected={rsTab === "paper"} className={rsTab === "paper" ? "on" : ""} onClick={() => setRsTab("paper")}>This paper{anns.length > 0 && <em>{anns.length}</em>}</button>
+                <button type="button" role="tab" aria-selected={rsTab === "paper"} className={rsTab === "paper" ? "on" : ""} onClick={() => setRsTab("paper")}>This paper{shown.length > 0 && <em>{shown.length}</em>}</button>
                 <button type="button" role="tab" aria-selected={rsTab === "mine"} className={rsTab === "mine" ? "on" : ""} onClick={() => { setRnOpen(true); setRsTab("mine"); }}>My notes</button>
               </div>
               <div className="pdfv-rside-body" style={{ display: rsTab === "paper" ? "flex" : "none" }}>{notesList}</div>
@@ -1582,7 +1585,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
         {!savedCopy && <button type="button" className="btn" onClick={keepCopy} title="Keep a copy of this PDF in your vault">Keep copy</button>}
         {savedCopy && <span className="muted mono" style={{ fontSize: 11 }} title="Stored in your vault: 10-Papers/pdfs">saved locally ✓</span>}
         <button type="button" className={`btn${notesOpen ? " btn-primary" : ""}`} onClick={() => setNotesOpen((v) => !v)} title="Highlights and notes">
-          Notes{anns.length ? ` (${anns.length})` : ""}
+          Notes{shown.length ? ` (${shown.length})` : ""}
         </button>
         <button type="button" className={`btn${rnOpen ? " btn-primary" : ""}`} onClick={() => setRnOpen((v) => !v)} title="Write your own notes next to the PDF">My notes</button>
         <a className="btn" href={doc.url} target="_blank" rel="noopener noreferrer" title="Open in your browser">↗</a>

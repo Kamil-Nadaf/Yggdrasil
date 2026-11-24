@@ -21,6 +21,7 @@ done
 
 # English pass over data the runtime translator cannot reach (chart defaults, template slide text).
 node "$HERE/translate-source.mjs" "$WORK/pptist"
+node "$HERE/patch-source.mjs" "$WORK/pptist"
 
 cd "$WORK/pptist"
 npm ci --no-audit --no-fund

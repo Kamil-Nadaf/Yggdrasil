@@ -7,11 +7,10 @@ import GraphView from "./GraphView";
 import PdfWorkbench from "./PdfWorkbench";
 import LaTeXEditor from "./LaTeXEditor";
 import ActivityTimer from "../components/ActivityTimer";
-import BrowserView from "./BrowserView";
 import AddonCard from "../components/AddonCard";
 import "./tools.css";
 
-type Page = "hub" | "latex" | "pdf" | "slides" | "graph" | "browser";
+type Page = "hub" | "latex" | "pdf" | "slides" | "graph";
 const PAGE_KEY = "yggdrasil:tools-page";
 
 function lsGet(k: string): string | null { try { return localStorage.getItem(k); } catch { return null; } }
@@ -25,7 +24,7 @@ interface Props {
 export default function ToolsView({ onOpenEditor }: Props) {
   const [page, setPage] = useState<Page>(() => {
     const p = lsGet(PAGE_KEY) as Page | null;
-    return p === "latex" || p === "pdf" || p === "slides" || p === "graph" || p === "browser" ? p : "hub";
+    return p === "latex" || p === "pdf" || p === "slides" || p === "graph" ? p : "hub";
   });
   const go = (p: Page) => { setPage(p); lsSet(PAGE_KEY, p); };
 
@@ -45,14 +44,6 @@ export default function ToolsView({ onOpenEditor }: Props) {
       </div>
     );
   }
-  if (page === "browser") {
-    return (
-      <div className="tl-wrap tl-wrap--full">
-        <TopBar title="Browser" onBack={() => go("hub")} />
-        <div className="tl-fill"><BrowserView /></div>
-      </div>
-    );
-  }
   if (page === "slides") return <SlidesTool onBack={() => go("hub")} />;
   if (page === "pdf") {
     return (
@@ -66,7 +57,6 @@ export default function ToolsView({ onOpenEditor }: Props) {
     { id: "latex", title: "LaTeX", desc: "Write and compile papers with an Overleaf-style editor and live PDF preview.", tag: "Write", icon: <path d="M8 9l-4 3 4 3M16 9l4 3-4 3M14 5l-4 14" /> },
     { id: "slides", title: "Slides", desc: "Every deck from every project in one place. Filter by project, open, present.", tag: "Decks", icon: <><rect x="3" y="4" width="18" height="12" rx="1.5" /><path d="M8 20h8M12 16v4" /></> },
     { id: "pdf", title: "PDF → Markdown / LaTeX", desc: "Turn papers and scans into clean Markdown or LaTeX with MinerU. Original and result side by side.", tag: "MinerU", icon: <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h4" /> },
-    { id: "browser", title: "Browser", desc: "Search and read the web for a quick check. Also opens beside any page in split view.", tag: "Web", icon: <><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></> },
     { id: "graph", title: "Graph", desc: "The knowledge graph of your notes, papers and keywords.", tag: "Explore", icon: <><circle cx="6" cy="6" r="2.5" /><circle cx="18" cy="8" r="2.5" /><circle cx="12" cy="18" r="2.5" /><path d="M8 7l8 1M7 8l4 8M17 10l-4 6" /></> },
   ];
   return (

@@ -102,6 +102,25 @@ export default function BooksView({ requestSection }: { requestSection?: "all" |
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
 
+  // Zotero syncs in the background (server side); reload when a pass brought something in or pushed something out.
+  const zSeen = useRef<{ at: number; err: string } | null>(null);
+  useEffect(() => {
+    let live = true;
+    const tick = async () => {
+      try {
+        const s = await reading.zoteroSyncStatus();
+        if (!live) return;
+        const prev = zSeen.current;
+        zSeen.current = { at: s.changed_at, err: s.error };
+        if (prev && s.changed_at > prev.at) void refresh();
+        if (prev && s.error && s.error !== prev.err) setNotice(`Zotero sync: ${s.error}`);
+      } catch { /* offline or not connected: stay quiet */ }
+    };
+    void tick();
+    const id = window.setInterval(tick, 8000);
+    return () => { live = false; window.clearInterval(id); };
+  }, [refresh]);
+
   async function saveCollections(next: BookCollection[]) {
     const prev = collections;
     setCollections(next);
@@ -268,7 +287,7 @@ export default function BooksView({ requestSection }: { requestSection?: "all" |
         <div className="ab-sidehead">Tools</div>
         <nav className="ab-nav">
           <button type="button" className="ab-item" onClick={() => setZoteroOpen(true)}><BookIcon name="plus" size={16} /><span>Import from Zotero…</span></button>
-          <button type="button" className="ab-item" onClick={() => setSyncOpen(true)} title="Two-way sync of highlights, underlines, notes and drawings with Zotero"><BookIcon name="sync" size={16} /><span>Sync with Zotero</span></button>
+          <button type="button" className="ab-item" onClick={() => { void reading.zoteroSync().catch(() => undefined); setSyncOpen(true); }} title="Two-way sync with Zotero: items, collections and PDFs, then highlights, underlines, notes and drawings"><BookIcon name="sync" size={16} /><span>Sync with Zotero</span></button>
         </nav>
       </aside>
 

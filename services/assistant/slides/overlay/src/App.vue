@@ -17,6 +17,7 @@ import { LOCALSTORAGE_KEY_DISCARDED_DB } from '@/configs/storage'
 import { deleteDiscardedDB } from '@/utils/database'
 import { isPC } from '@/utils/common'
 import api from '@/services'
+import message from '@/utils/message'
 import { loadDeck, saveDeck, tell, hasDeck, viewOnly, autoPresent } from '@/yggdrasil/bridge'
 import useImport from '@/hooks/useImport'
 import { hfmath } from '@/components/LaTeXEditor/hfmath'
@@ -41,8 +42,9 @@ const { screening } = storeToRefs(screenStore)
 const isAudienceMode = new URLSearchParams(window.location.search).get('mode') === 'audience'
 
 let loaded = false
+let notifySaved = false
 const save = debounce(async () => {
-  if (!loaded || !hasDeck || viewOnly) return
+  if (!loaded || !hasDeck || viewOnly) { notifySaved = false; return }
   try {
     await saveDeck({
       title: title.value,
@@ -52,8 +54,10 @@ const save = debounce(async () => {
       viewportRatio: viewportRatio.value,
     })
     tell('saved')
+    if (notifySaved) message.success('Saved')
+    notifySaved = false
   }
-  catch (e) { tell('error', { message: String(e) }) }
+  catch (e) { notifySaved = false; message.error('Could not save: ' + String(e)); tell('error', { message: String(e) }) }
 }, 1500)
 
 onMounted(async () => {
@@ -153,12 +157,13 @@ onMounted(async () => {
 
 // Cmd/Ctrl+S: save the deck right now (it also autosaves 1.5 s after every change).
 function saveNow() {
-  if (!loaded) return
+  if (!loaded || !hasDeck || viewOnly) return
+  notifySaved = true
   save()
   save.flush()
 }
 window.addEventListener('keydown', (e: KeyboardEvent) => {
-  if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's') {
+  if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && (e.key.toLowerCase() === 's' || e.code === 'KeyS')) {
     e.preventDefault()
     saveNow()
   }

@@ -795,6 +795,7 @@ def make_router(get_vault: Callable[[], Path], write_habits: Callable[[str, dict
                 for p in staging.glob("*"):
                     p.unlink()
                 staging.rmdir()
+        kick_zotero_sync()
         return {"ok": True, "book": result}
 
     # ── Collections & goals (static paths first, before /{slug}) ──
@@ -813,6 +814,8 @@ def make_router(get_vault: Callable[[], Path], write_habits: Callable[[str, dict
             raise HTTPException(status_code=400, detail="Too many collections")
         clean: list[dict[str, Any]] = []
         seen: set[str] = set()
+        old_cols = _json_read(collections_path(), [])
+        old_members = {c.get("id"): set(c.get("slugs") or []) for c in old_cols if isinstance(c, dict)} if isinstance(old_cols, list) else {}
         for c in payload.collections:
             name = str(c.get("name") or "").strip()[:80]
             if not name:
@@ -828,6 +831,8 @@ def make_router(get_vault: Callable[[], Path], write_habits: Callable[[str, dict
                 entry["parent"] = parent
             if isinstance(c.get("zotero_key"), str) and c["zotero_key"]:
                 entry["zotero_key"] = c["zotero_key"][:40]
+                if isinstance(c.get("zotero_version"), int):
+                    entry["zotero_version"] = c["zotero_version"]
             clean.append(entry)
         ids = {c["id"] for c in clean}
         by_id = {c["id"]: c for c in clean}
@@ -842,6 +847,10 @@ def make_router(get_vault: Callable[[], Path], write_habits: Callable[[str, dict
                 if par:
                     c.pop("parent", None)
         _json_write(collections_path(), clean)
+        for c in clean:
+            for slug in set(c["slugs"]) - old_members.get(c["id"], set()):
+                note_collection_add(slug, c["id"])
+        kick_zotero_sync()
         return {"ok": True, "collections": clean}
 
     def log_path() -> Path:
@@ -1076,7 +1085,7 @@ def make_router(get_vault: Callable[[], Path], write_habits: Callable[[str, dict
                 return s
         return None
 
-    def add_to_collection(slug: str, collection: Optional[str]) -> None:
+    def add_to_collection(slug: str, collection: Optional[str], track: bool = True) -> None:
         if not collection:
             return
         cols = _json_read(collections_path(), [])
@@ -1084,6 +1093,8 @@ def make_router(get_vault: Callable[[], Path], write_habits: Callable[[str, dict
             for c in cols:
                 if isinstance(c, dict) and c.get("id") == collection and slug not in (c.get("slugs") or []):
                     c["slugs"] = [*(c.get("slugs") or []), slug]
+                    if track:
+                        note_collection_add(slug, collection)
             _json_write(collections_path(), cols)
 
     def create_item(p: ItemCreate) -> tuple[dict[str, Any], bool]:
@@ -1094,6 +1105,7 @@ def make_router(get_vault: Callable[[], Path], write_habits: Callable[[str, dict
         dup = find_duplicate(fields)
         if dup:
             add_to_collection(dup["slug"], p.collection)
+            kick_zotero_sync()
             return dup, True
         slug = unique_slug(slugify(title))
         d = book_dir(slug)
@@ -1128,6 +1140,7 @@ def make_router(get_vault: Callable[[], Path], write_habits: Callable[[str, dict
                 meta[f] = str(v).strip()[:20000 if f == "notes" else 500]
         write_book_md(d, meta)
         add_to_collection(slug, p.collection)
+        kick_zotero_sync()
         return summary(d) or {}, False
 
     def pdf_url_for(p: dict[str, Any]) -> str:
@@ -1347,12 +1360,14 @@ def make_router(get_vault: Callable[[], Path], write_habits: Callable[[str, dict
         uid, key = zlib.zotero_credentials()
         headers = {"Zotero-API-Key": key, "Zotero-API-Version": "3"}
         client = httpx.Client(timeout=60, follow_redirects=True, headers=headers)
+        zver: dict[str, Any] = {}  # library version seen at the start of this pass (for the cheap "anything new?" check)
 
         def pages(path: str, params: Optional[dict[str, Any]] = None):
             start = 0
             while True:
                 r = client.get(f"https://api.zotero.org/users/{uid}/{path}", params={"limit": 100, "start": start, **(params or {})})
                 r.raise_for_status()
+                zver.setdefault("v", r.headers.get("Last-Modified-Version"))
                 rows = r.json()
                 yield from rows
                 if len(rows) < 100:
@@ -1369,16 +1384,26 @@ def make_router(get_vault: Callable[[], Path], write_habits: Callable[[str, dict
                 existing = next((c for c in ours if c.get("zotero_key") == zk), None)
                 if existing:
                     zmap[zk] = existing["id"]
+                    if existing.get("zotero_version") != cd.get("version"):  # renamed / moved in Zotero since we last looked
+                        if (cd.get("name") or "").strip():
+                            existing["name"] = cd["name"].strip()[:80]
+                        existing["zotero_version"] = cd.get("version")
                     continue
                 cid = f"c_{secrets.token_hex(4)}"
-                ours.append({"id": cid, "name": (cd.get("name") or "Untitled")[:80], "slugs": [], "zotero_key": zk})
+                ours.append({"id": cid, "name": (cd.get("name") or "Untitled")[:80], "slugs": [], "zotero_key": zk, "zotero_version": cd.get("version")})
                 zmap[zk] = cid
                 zstate["collections"] += 1
             for c in ours:
                 zk = c.get("zotero_key")
+                if zk and zk not in zcols:  # deleted in Zotero: keep it here as a plain local collection
+                    c.pop("zotero_key", None)
+                    c.pop("zotero_version", None)
+                    continue
                 par = zcols.get(zk, {}).get("parentCollection") if zk else None
                 if par and par in zmap:
                     c["parent"] = zmap[par]
+                elif zk and not par:
+                    c.pop("parent", None)
             _json_write(collections_path(), ours)
 
             zstate["phase"] = "notes"
@@ -1395,6 +1420,7 @@ def make_router(get_vault: Callable[[], Path], write_habits: Callable[[str, dict
                     attachments.setdefault(parent, d["key"])
 
             zstate["phase"] = "items"
+            memb: dict[str, set[str]] = {}  # slug -> local ids of the Zotero collections it is in
             known = {x["zotero_key"]: x for x in all_summaries() if x.get("zotero_key")}
             rows = [r for r in pages("items/top")]
             zstate["total"] = len(rows)
@@ -1418,8 +1444,7 @@ def make_router(get_vault: Callable[[], Path], write_habits: Callable[[str, dict
                 known[d["key"]] = item
                 zstate["duplicates" if existed else "added"] += 1
                 slug = item["slug"]
-                for cid in col_ids:
-                    add_to_collection(slug, cid)
+                memb[slug] = set(col_ids)
                 if with_pdfs and not item.get("has_file") and d["key"] in attachments:
                     zstate["phase"] = "pdfs"
                     try:
@@ -1431,7 +1456,28 @@ def make_router(get_vault: Callable[[], Path], write_habits: Callable[[str, dict
                     except Exception:
                         pass
                     zstate["phase"] = "items"
+            # Membership mirrors Zotero for Zotero-backed collections (adds and removals), except local additions not pushed yet.
+            cur = _json_read(collections_path(), [])
+            waiting = {(a, b) for a, b in zload().get("pending_adds", []) if isinstance(a, str)}
+            moved = False
+            for c in cur if isinstance(cur, list) else []:
+                if not isinstance(c, dict) or c.get("zotero_key") not in zcols:
+                    continue
+                slugs = list(c.get("slugs") or [])
+                for slug, ids in memb.items():
+                    inn, has = c["id"] in ids, slug in slugs
+                    if inn and not has:
+                        slugs.append(slug)
+                        moved = True
+                    elif has and not inn and (slug, c["id"]) not in waiting:
+                        slugs.remove(slug)
+                        moved = True
+                c["slugs"] = slugs
+            if moved:
+                _json_write(collections_path(), cur)
             zstate["phase"] = "done"
+            if zver.get("v"):
+                zsave(library_version=int(zver["v"]))
         except Exception as e:  # noqa: BLE001
             zstate["error"] = f"Zotero import failed: {str(e)[:200]}"
             zstate["phase"] = "error"
@@ -1446,13 +1492,255 @@ def make_router(get_vault: Callable[[], Path], write_habits: Callable[[str, dict
             raise HTTPException(status_code=400, detail="Zotero isn’t connected yet — open Settings → Zotero and add your user ID and API key.")
         if zstate["running"]:
             return {"ok": True, "started": False, **zstate}
+        zsave(with_pdfs=payload.with_pdfs)
+        zstate.update(running=True, phase="starting", error="")  # before the thread starts, or a fast job gets overwritten
         threading.Thread(target=zotero_job, args=(payload.with_pdfs,), daemon=True).start()
-        zstate.update(running=True, phase="starting", error="")
         return {"ok": True, "started": True, **zstate}
 
     @router.get("/import-zotero/status")
     async def import_zotero_status():
         return dict(zstate)
+
+    # ── Automatic two-way Zotero sync (push local additions, then pull Zotero changes) ──
+    # State lives next to the Zotero credentials (per device, outside the synced vault).
+
+    slock = threading.Lock()   # guards the small state file
+    rlock = threading.Lock()   # one sync run at a time
+    zrun: dict[str, Any] = {"thread": 0}
+    zdirty: dict[str, float] = {"t": 0.0}
+    zsync: dict[str, Any] = {
+        "running": False, "last_run": "", "last_ts": 0.0, "ok": True, "error": "", "errors": [],
+        "pushed_items": 0, "linked_items": 0, "pushed_collections": 0, "pushed_files": 0, "pulled": False,
+        "unsynced": 0, "changed_at": 0.0,
+    }
+
+    def zstate_file() -> Path:
+        import zotero as zlib
+
+        return zlib._creds_file().parent / "zotero-sync.json"
+
+    def zload() -> dict[str, Any]:
+        with slock:
+            d = _json_read(zstate_file(), {})
+        return d if isinstance(d, dict) else {}
+
+    def zsave(**changes: Any) -> None:
+        with slock:
+            d = _json_read(zstate_file(), {})
+            d = d if isinstance(d, dict) else {}
+            d.update(changes)
+            _json_write(zstate_file(), d)
+
+    def note_collection_add(slug: str, cid: str) -> None:
+        """Remember "this item was added to this collection here" so the next sync pushes it (and a pull can't undo it)."""
+        try:
+            with slock:
+                d = _json_read(zstate_file(), {})
+                d = d if isinstance(d, dict) else {}
+                pend = [x for x in d.get("pending_adds", []) if isinstance(x, list) and len(x) == 2]
+                if [slug, cid] not in pend:
+                    pend.append([slug, cid])
+                d["pending_adds"] = pend[-2000:]
+                _json_write(zstate_file(), d)
+        except Exception:  # noqa: BLE001 — never block a local edit on sync bookkeeping
+            pass
+
+    def kick_zotero_sync() -> None:
+        """Something local changed: ask the background loop to sync within a few seconds."""
+        if zrun["thread"] == threading.get_ident():  # changes made by the sync itself don't re-trigger it
+            return
+        zdirty["t"] = time.time()
+
+    def zotero_push(client: Any) -> dict[str, Any]:
+        from zotero_push import ZoteroPushError
+
+        res: dict[str, Any] = {"collections": 0, "items": 0, "linked": 0, "files": 0, "errors": []}
+        st = zload()
+        pend = [tuple(x) for x in st.get("pending_adds", []) if isinstance(x, list) and len(x) == 2]
+        done_pend: set[tuple[str, str]] = set()
+
+        def fatal(e: Exception) -> bool:
+            return "refused the request" in str(e) or "Couldn't reach" in str(e) or "took too long" in str(e)
+
+        # 1) collections made here -> Zotero (parents first; link a same-named Zotero collection instead of duplicating)
+        cols = _json_read(collections_path(), [])
+        cols = cols if isinstance(cols, list) else []
+        new_keys: dict[str, str] = {}
+        todo = [c for c in cols if isinstance(c, dict) and not c.get("zotero_key")]
+        if todo:
+            by_id = {c["id"]: c for c in cols if isinstance(c, dict)}
+
+            def depth(c: dict[str, Any]) -> int:
+                n, cur = 0, c
+                while cur.get("parent") in by_id and n < 50:
+                    cur, n = by_id[cur["parent"]], n + 1
+                return n
+
+            try:
+                zcols = client.list_collections()
+                for c in sorted(todo, key=depth):
+                    par = c.get("parent")
+                    pkey = (by_id.get(par) or {}).get("zotero_key") or new_keys.get(par or "", "")
+                    if par and not pkey:
+                        continue  # parent not in Zotero yet; try again next run
+                    match = next((k for k, d in zcols.items() if d.get("name") == c["name"] and (d.get("parentCollection") or "") == pkey), None)
+                    key = match or client.create_collection(c["name"], pkey)
+                    zcols[key] = {"name": c["name"], "parentCollection": pkey}
+                    new_keys[c["id"]] = key
+                    res["collections"] += 0 if match else 1
+            except ZoteroPushError as e:
+                res["errors"].append(f"Collections: {e}")
+                if fatal(e):
+                    return res
+            if new_keys:  # re-read: the user may have edited collections meanwhile
+                cols = _json_read(collections_path(), [])
+                for c in cols if isinstance(cols, list) else []:
+                    if isinstance(c, dict) and c.get("id") in new_keys and not c.get("zotero_key"):
+                        c["zotero_key"] = new_keys[c["id"]]
+                _json_write(collections_path(), cols)
+        col_key = {c["id"]: c["zotero_key"] for c in cols if isinstance(c, dict) and c.get("zotero_key")}
+        member: dict[str, list[str]] = {}
+        for c in cols:
+            if isinstance(c, dict) and c.get("zotero_key"):
+                for sl in c.get("slugs") or []:
+                    member.setdefault(sl, []).append(c["zotero_key"])
+
+        # 2) items made here -> Zotero (link an existing match first), then their PDF/EPUB
+        for s in all_summaries():
+            slug = s["slug"]
+            if not (s.get("title") or "").strip():
+                continue
+            d = book_dir(slug)
+            md = frontmatter.load(str(d / "_book.md")).metadata
+            key = s["zotero_key"]
+            try:
+                if not key:
+                    keys = member.get(slug, [])
+                    key = client.find_existing_item(s)
+                    if key:
+                        client.add_to_collections(key, keys)
+                        res["linked"] += 1
+                    else:
+                        key = client.create_item(s, keys)
+                        res["items"] += 1
+                    write_book_md(d, {"zotero_key": key})
+                    done_pend.update((slug, c) for (sl, c) in pend if sl == slug)
+                found = book_file(d)
+                if found and not md.get("zotero_attachment"):
+                    path, fmt = found
+                    ctype = "application/pdf" if fmt == "pdf" else "application/epub+zip"
+                    have = client.list_attachment_keys(key)
+                    if ctype in have:
+                        write_book_md(d, {"zotero_attachment": have[ctype]})
+                    else:
+                        try:
+                            write_book_md(d, {"zotero_attachment": client.upload_attachment(key, path)})
+                            res["files"] += 1
+                        except ZoteroPushError as e:
+                            if e.permanent:  # too big / storage full: don't retry every run
+                                write_book_md(d, {"zotero_attachment": "skip"})
+                            raise
+            except ZoteroPushError as e:
+                res["errors"].append(f"{(s.get('title') or slug)[:50]}: {e}")
+                if fatal(e):
+                    break
+
+        # 3) items already in Zotero that were put into a collection here
+        by_slug: dict[str, list[str]] = {}
+        for sl, cid in pend:
+            if (sl, cid) not in done_pend:
+                by_slug.setdefault(sl, []).append(cid)
+        for sl, cids in by_slug.items():
+            try:
+                key = (summary(book_dir(sl)) or {}).get("zotero_key")
+            except HTTPException:
+                key = None
+            if not key:
+                done_pend.update((sl, c) for c in cids)  # item is gone (or still unsynced and handled above)
+                continue
+            if any(c not in col_key for c in cids):
+                continue  # its collection isn't in Zotero yet; keep for the next run
+            try:
+                client.add_to_collections(key, [col_key[c] for c in cids])
+                done_pend.update((sl, c) for c in cids)
+            except ZoteroPushError as e:
+                res["errors"].append(f"Collection update: {e}")
+                if fatal(e):
+                    break
+        if done_pend:
+            with slock:
+                d = _json_read(zstate_file(), {})
+                d = d if isinstance(d, dict) else {}
+                d["pending_adds"] = [x for x in d.get("pending_adds", []) if not (isinstance(x, list) and len(x) == 2 and (x[0], x[1]) in done_pend)]
+                _json_write(zstate_file(), d)
+        return res
+
+    def zotero_run(force: bool = False) -> dict[str, Any]:
+        from zotero_push import ZoteroClient, ZoteroPushError
+
+        if not rlock.acquire(blocking=False):
+            return dict(zsync)
+        try:
+            if zstate["running"]:  # the manual import dialog is working
+                return dict(zsync)
+            zrun["thread"] = threading.get_ident()
+            zsync.update(running=True, error="", errors=[], pushed_items=0, linked_items=0, pushed_collections=0, pushed_files=0, pulled=False)
+            try:
+                client = ZoteroClient()
+                res = zotero_push(client)
+                zsync.update(pushed_items=res["items"], linked_items=res["linked"], pushed_collections=res["collections"], pushed_files=res["files"], errors=res["errors"][:5])
+                # Pull only when Zotero's library version moved (one cheap request otherwise).
+                ver = zload().get("library_version")
+                r = client.request("GET", "items/top", params={"limit": 1}, headers={"If-Modified-Since-Version": str(ver)} if ver and not force else None, ok=(200, 304))
+                pushed_something = bool(res["items"] or res["collections"] or res["files"] or res["linked"])
+                if r.status_code != 304 or force or pushed_something:
+                    zotero_job(bool(zload().get("with_pdfs", True)))
+                    zsync["pulled"] = True
+                    zsync["changed_at"] = time.time()
+                    if zstate["phase"] == "error":
+                        zsync["errors"] = [*zsync["errors"], zstate["error"]][:5]
+                zsync["ok"] = not zsync["errors"]
+                zsync["error"] = zsync["errors"][0] if zsync["errors"] else ""
+            except ZoteroPushError as e:
+                zsync.update(ok=False, error=str(e), errors=[str(e)])
+            except Exception as e:  # noqa: BLE001
+                zsync.update(ok=False, error=f"Zotero sync failed: {str(e)[:200]}", errors=[f"Zotero sync failed: {str(e)[:200]}"])
+            zsync["unsynced"] = sum(1 for x in all_summaries() if not x.get("zotero_key"))
+            if zsync["pushed_items"] or zsync["pushed_collections"] or zsync["pushed_files"] or zsync["linked_items"]:
+                zsync["changed_at"] = time.time()
+            return dict(zsync)
+        finally:
+            zrun["thread"] = 0
+            zsync.update(running=False, last_ts=time.time(), last_run=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+            rlock.release()
+
+    def zotero_auto_tick() -> None:
+        """Called every few seconds by the app's background loop: sync when something changed here, or every 5 minutes."""
+        import zotero as zlib
+
+        if zsync["running"] or zstate["running"] or not all(zlib.zotero_credentials()):
+            return
+        now = time.time()
+        if (zdirty["t"] and now - zdirty["t"] >= 3) or now - float(zsync["last_ts"] or 0) >= 300:
+            zdirty["t"] = 0.0
+            zotero_run()
+
+    router.zotero_auto_tick = zotero_auto_tick  # type: ignore[attr-defined]
+
+    @router.post("/zotero-sync")
+    async def zotero_sync_now():
+        import zotero as zlib
+
+        if not all(zlib.zotero_credentials()):
+            raise HTTPException(status_code=400, detail="Zotero isn’t connected yet — open Settings → Zotero and add your user ID and API key.")
+        if not zsync["running"] and not zstate["running"]:
+            zsync["running"] = True
+            threading.Thread(target=lambda: zotero_run(force=True), daemon=True).start()
+        return {"ok": True, **zsync}
+
+    @router.get("/zotero-sync/status")
+    async def zotero_sync_status():
+        return dict(zsync)
 
     # ── Two-way annotation sync with Zotero ──
 
@@ -1624,6 +1912,8 @@ def make_router(get_vault: Callable[[], Path], write_habits: Callable[[str, dict
                 (d / f"book{other}").unlink()
         await save_upload(file, d / f"book{ext}", MAX_BOOK_BYTES)
         write_book_md(d, {"format": FORMATS[ext], "total_pages": None, "last_page": 0, "progress": 0, "last_position": ""})
+        write_book_md(d, {"zotero_attachment": ""})  # a replaced file has to be uploaded again
+        kick_zotero_sync()
         return {"ok": True, "book": summary(d)}
 
     @router.get("/{slug}/cover")

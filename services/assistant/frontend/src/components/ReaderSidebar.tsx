@@ -9,7 +9,7 @@ export interface FindHit { page: number; nth: number; snippet: string }
 
 interface OutlineNode { title: string; dest: unknown; items: OutlineNode[]; /** set for contents detected from the text (no embedded outline) */ page?: number }
 
-const AUTO_KEY = "yggdrasil:pdf-outline:v1:";
+const AUTO_KEY = "yggdrasil:pdf-outline:v2:";
 function headingsToTree(hs: Heading[]): OutlineNode[] {
   const root: OutlineNode[] = [];
   const stack: { level: number; node: OutlineNode }[] = [];
@@ -224,7 +224,7 @@ function highlight(text: string, q: string): ReactNode {
 }
 
 
-/** Drag handle on the sidebar's right edge (also keyboard: ← → keys, and S / M / L presets). */
+/** Drag handle on the sidebar's right edge (also keyboard: ← → keys). */
 function Resizer({ width, onWidth }: { width: number; onWidth: (w: number) => void }) {
   const clamp = (n: number) => Math.min(560, Math.max(200, Math.round(n)));
   function down(e: React.PointerEvent<HTMLDivElement>) {
@@ -238,11 +238,6 @@ function Resizer({ width, onWidth }: { width: number; onWidth: (w: number) => vo
   }
   return (
     <>
-      <div className="rsb-presets" role="group" aria-label="Sidebar width">
-        {[["S", 220], ["M", 300], ["L", 420]].map(([l, w]) => (
-          <button key={l} type="button" className={Math.abs(width - (w as number)) < 20 ? "on" : ""} onClick={() => onWidth(w as number)} title={`${w}px`}>{l}</button>
-        ))}
-      </div>
       <div className="rsb-resize" role="separator" aria-orientation="vertical" aria-label="Drag to resize the sidebar" tabIndex={0} onPointerDown={down}
         onKeyDown={(e) => { if (e.key === "ArrowLeft") onWidth(clamp(width - 20)); if (e.key === "ArrowRight") onWidth(clamp(width + 20)); }} />
     </>

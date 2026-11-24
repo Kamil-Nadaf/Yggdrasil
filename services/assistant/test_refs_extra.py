@@ -71,6 +71,7 @@ def test_zotero_field_mapping():
     assert reading.zotero_item_fields({"itemType": "attachment", "title": "x"}) is None
 
 class FakeResp:
+    headers: dict = {}
     def __init__(self, data, status=200, content=b""): self._d, self.status_code, self.content = data, status, content
     def json(self): return self._d
     def raise_for_status(self): pass

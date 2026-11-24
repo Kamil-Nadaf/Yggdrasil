@@ -392,9 +392,6 @@
 .rsb-resize { position: absolute; top: 0; right: -4px; bottom: 0; width: 8px; cursor: col-resize; z-index: 5; }
 .rsb-resize:hover, .rsb-resize:focus-visible, body.rsb-dragging .rsb-resize { background: color-mix(in srgb, var(--accent, #7c6cd6) 55%, transparent); outline: none; }
 body.rsb-dragging { cursor: col-resize; user-select: none; }
-.rsb-presets { display: flex; gap: 4px; padding: 6px 8px; border-top: 1px solid var(--border); font-size: 11px; }
-.rsb-presets button { flex: 1; border: 1px solid var(--border); background: transparent; color: inherit; border-radius: calc(var(--radius) * 1); padding: 3px 0; cursor: pointer; }
-.rsb-presets button.on { background: var(--accent, #7c6cd6); color: #fff; border-color: transparent; }
 .pdfv-rside { flex: 0 0 min(380px, 34%); min-width: 300px; display: flex; flex-direction: column; min-height: 0; background: var(--surface); border-left: 1px solid var(--border); }
 .pdfv-rside-tabs { display: flex; gap: 4px; padding: 8px; border-bottom: 1px solid var(--border); }
 .pdfv-rside-tabs button { flex: 1; border: 0; background: transparent; color: inherit; padding: 7px 0; border-radius: calc(var(--radius) * 1.167); font: inherit; font-size: 13px; cursor: pointer; }

@@ -19,6 +19,7 @@ import '@/assets/styles/yggdrasil.scss'
 import Directive from '@/directive'
 import { startEnglish } from '@/yggdrasil/i18n'
 import { startThemeSync } from '@/yggdrasil/theme'
+import { startPresentZoom } from '@/yggdrasil/presentZoom'
 
 const app = createApp(App)
 app.use(Directive)
@@ -26,3 +27,4 @@ app.use(createPinia())
 app.mount('#app')
 startEnglish()
 startThemeSync()
+startPresentZoom()

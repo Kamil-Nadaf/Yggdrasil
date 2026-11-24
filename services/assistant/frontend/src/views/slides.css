@@ -16,3 +16,8 @@
 .sl-wrap.sl-full { position: fixed; inset: 0; z-index: 3000; height: calc(100vh / var(--zt, 1)); background: var(--bg); padding: 8px; box-sizing: border-box; }
 
 .sl-stage { position: relative; flex: 1; min-height: 0; display: flex; min-width: 0; }
+
+/* Fit the Slides view to the window at any Settings text size. .app-content is CSS-zoomed by the text scale, so a
+   percentage height can overshoot or undershoot; absolutely filling the (flush) content box always matches it. */
+.app-content:has(> .sl-wrap) { position: relative; }
+.app-content > .sl-wrap:not(.sl-full) { position: absolute; inset: 0; height: auto; overflow: auto; }

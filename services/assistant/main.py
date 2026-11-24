@@ -80,7 +80,6 @@ from typing import Optional, Any
 import frontmatter
 import httpx
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File
-import html as _html
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -142,8 +141,8 @@ from arxiv_topics import (
 from graph_keywords import cached_keyword_graph, node_for as _kw_node_for
 from note_tags import suggest_tags as _suggest_note_tags
 from reading import make_router as _make_reading_router
+from reading import parse_identifier as _parse_identifier, _lookup_doi as _reading_lookup_doi
 from pdf_fetch import PdfFetchError, fetch_pdf
-import browse_proxy
 from search_query import arxiv_author_query, openalex_author_filter, parse_query
 from graph_links import (
     DEFAULT_SIMILARITY_THRESHOLD,
@@ -242,7 +241,8 @@ if DESKTOP_MODE:
 
 app = FastAPI(title="CERIC Reading System")
 # Books reading library (/api/reading): lazy lookups, because _write_habits is defined further down.
-app.include_router(_make_reading_router(lambda: VAULT, lambda day, habits: _write_habits(day, habits)))
+_reading_router = _make_reading_router(lambda: VAULT, lambda day, habits: _write_habits(day, habits))
+app.include_router(_reading_router)
 # In-app update check/install (/api/update)
 from updater import make_update_router as _make_update_router  # noqa: E402
 app.include_router(_make_update_router(APP_VERSION, DESKTOP_MODE))
@@ -1891,7 +1891,8 @@ async def _fetch_openalex_search(query: str, field: str = "all", start: int = 0,
     elif field == "title":
         params["filter"] = f"title.search:{q}"
     elif field == "id" or "/" in q or q.startswith("10."):
-        doi_clean = q.replace("https://doi.org/", "").replace("http://doi.org/", "")
+        kind, val = _parse_identifier(q)
+        doi_clean = val if kind == "doi" else q.replace("https://doi.org/", "").replace("http://doi.org/", "")
         params["filter"] = f"doi:{doi_clean}"
     else:
         params["search"] = q
@@ -1909,6 +1910,33 @@ async def _fetch_openalex_search(query: str, field: str = "all", start: int = 0,
         except Exception as e:
             logger.warning(f"OpenAlex search error: {e}")
     return [], 0
+
+
+async def _resolve_doi_papers(doi: str) -> list[dict]:
+    """A pasted DOI / publisher URL (iopscience, nature, doi.org ...) -> one paper. OpenAlex first, Crossref as fallback."""
+    papers, _ = await _fetch_openalex_search(doi, "id", 0, 1)
+    if papers:
+        return papers
+    try:
+        meta = await asyncio.to_thread(_reading_lookup_doi, doi)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Crossref DOI lookup error: {e}")
+        return []
+    if not meta.get("title"):
+        return []
+    year = meta.get("year")
+    return [{
+        "id": meta.get("doi") or doi,
+        "title": re.sub(r"\s+", " ", meta["title"]).strip(),
+        "authors": [a for a in meta.get("authors", []) if a],
+        "abstract": meta.get("abstract") or "",
+        "arxiv_url": f"https://doi.org/{meta.get('doi') or doi}",
+        "pdf_url": "",
+        "categories": [meta["venue"]] if meta.get("venue") else [],
+        "submitted": str(year) if year else "",
+        "source": "crossref",
+        "doi": meta.get("doi") or doi,
+    }]
 
 
 async def _fetch_openalex_citation(pq: Any, start: int = 0, max_results: int = 50) -> tuple[list[dict], int]:
@@ -2332,6 +2360,16 @@ async def arxiv_search(
     m = ARXIV_ID_RE.search(q)
     max_results = max(1, min(max_results, 200))
 
+    # A DOI or a publisher link that contains one (iopscience.iop.org/article/10.1088/..., .../pdf, doi.org/...):
+    # look it up directly. Without this the saved arXiv-category filter sent it to arXiv only, which never has it.
+    if field in ("all", "id"):
+        id_kind, id_val = _parse_identifier(q)
+        if id_kind == "doi":
+            found = await _resolve_doi_papers(id_val)
+            if found:
+                await _backfill_missing_abstracts(found)
+                return {"papers": found, "total": len(found), "start": 0}
+
     if field == "id" or (m and (ARXIV_ID_RE.fullmatch(q) or "arxiv.org" in q)):
         if m:
             papers, total = await _fetch_arxiv({"id_list": m.group(0), "max_results": 1})
@@ -2562,29 +2600,6 @@ async def calendar_events_delete(event_id: str):
         raise HTTPException(status_code=404, detail="Event not found")
     _cal_save(kept)
     return {"ok": True}
-
-
-@app.get("/api/browse")
-async def browse(url: str = "", q: str = ""):
-    """Split-screen browser: serve a web page inert and frameable (see browse_proxy.py)."""
-    target = browse_proxy.normalize(q or url)
-    if not target:
-        page, nonce = browse_proxy.note_page("Browser", "<p>Type an address or a search in the bar above.</p>")
-        return HTMLResponse(page, headers={"Content-Security-Policy": browse_proxy.csp(nonce), "Cache-Control": "no-store"})
-    target = browse_proxy.unwrap_redirect(target)
-    try:
-        final, kind, text = await browse_proxy.fetch_page(target, _assert_public_url, _publisher_access_load())
-    except HTTPException as e:
-        page, nonce = browse_proxy.note_page("Can't open", f"<h3>Can't open this page</h3><p>{_html.escape(str(e.detail))}</p>")
-        return HTMLResponse(page, status_code=200, headers={"Content-Security-Policy": browse_proxy.csp(nonce), "X-Browse-Final": target})
-    except PdfFetchError as e:
-        page, nonce = browse_proxy.note_page("Can't open", f"<h3>Can't open this page</h3><p>{_html.escape(e.detail)}</p>")
-        return HTMLResponse(page, status_code=200, headers={"Content-Security-Policy": browse_proxy.csp(nonce), "X-Browse-Final": target})
-    if kind == "pdf":
-        page, nonce = browse_proxy.note_page("PDF", f"<h3>This is a PDF</h3><p>It opens in a PDF tab.</p><p><a href=\"ygg-pdf:{_html.escape(final, quote=True)}\">Open the PDF</a></p>")
-        return HTMLResponse(page, headers={"Content-Security-Policy": browse_proxy.csp(nonce), "X-Browse-Final": final, "X-Browse-Kind": "pdf"})
-    page, nonce = browse_proxy.render(text, final)
-    return HTMLResponse(page, headers={"Content-Security-Policy": browse_proxy.csp(nonce), "Cache-Control": "no-store", "X-Browse-Final": final, "Referrer-Policy": "no-referrer"})
 
 
 _PUBLISHER_ACCESS_PATH = VAULT / ".ygg-config" / "publisher-access.json"
@@ -5635,6 +5650,17 @@ from cite_resolve import router as _cite_router  # noqa: E402
 app.include_router(_cite_router)
 
 
+async def _zotero_sync_loop():
+    """Two-way Zotero sync: push what was added here, pull what changed there (every 5 min, and within seconds of a local change)."""
+    await asyncio.sleep(20)
+    while True:
+        try:
+            await asyncio.to_thread(_reading_router.zotero_auto_tick)
+        except Exception:
+            pass
+        await asyncio.sleep(5)
+
+
 async def _drivesync_loop():
     await asyncio.sleep(60)
     while True:
@@ -5721,6 +5747,7 @@ async def _start_background_loops():
     asyncio.create_task(_deadline_reminder_loop())
     asyncio.create_task(_tasksync_loop())
     asyncio.create_task(_drivesync_loop())
+    asyncio.create_task(_zotero_sync_loop())
 
 
 # ── Full-text search over your own notes (not vector search — exact substring,

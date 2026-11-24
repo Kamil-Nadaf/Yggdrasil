@@ -1300,6 +1300,21 @@ release adds Python dependencies or changes `desktop/launch.py`/`setup.py`, bump
 payload script so older installs are sent to the full installer. New backend modules go in the Dockerfile and `build-*` copy lists
 *and* are picked up automatically by the payload (all top-level non-test `.py`). The CI tag must equal `APP_VERSION`.
 
+### Zotero library sync (two-way, automatic)
+
+Items, collections and PDF/EPUB files stay in step with Zotero without pressing anything. `reading.py` (`zotero_run`) does **push, then pull**:
+push = collections made here (a same-named Zotero collection is linked instead of duplicated, parents first), items without a `zotero_key` (an existing
+Zotero match by DOI / arXiv id / title is linked, never duplicated), their PDF/EPUB (`zotero_attachment` in `_book.md`; `skip` = too big or Zotero storage
+full, not retried), and items put into a Zotero-backed collection in the UI (`pending_adds`). Pull = the old `zotero_job`, now also applying collection
+renames (only when Zotero's collection `version` changed), removals from a collection, and dropping the `zotero_key` of collections deleted in Zotero
+(they stay as local collections). A pull is skipped with one `If-Modified-Since-Version` request when the library didn't change. Zotero-API code lives in
+`zotero_push.py` (`ZoteroClient`; field names come from Zotero's own `/items/new` templates so a field a type lacks is dropped, DOI/arXiv go to `extra` then).
+Triggers: `kick_zotero_sync()` after any local add/import/collection edit (runs ~3 s later) and a 5 min timer, both from `_zotero_sync_loop` in `main.py`
+calling `router.zotero_auto_tick()`; `POST /api/reading/zotero-sync` runs it now (the sidebar's *Sync with Zotero* button does this before the annotation
+sync), `GET /api/reading/zotero-sync/status` reports `changed_at` / `errors` (BooksView polls it every 8 s and reloads). State (library version,
+`pending_adds`, last PDF choice) is per device in `zotero-sync.json` next to the Zotero credentials. Needs an API key with write access. Not pushed:
+edits to an existing item's metadata, local renames of a collection, Zotero notes. Tests: `test_zotero_sync.py` (fake Zotero server over `httpx.MockTransport`).
+
 ### Zotero annotation sync (v0.4.2)
 
 Collection sidebar → **Sync with Zotero** (`views/books/AnnotationSync.tsx`) → `POST /api/reading/sync-annotations` (+ `/status`, a background job in

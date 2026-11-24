@@ -158,7 +158,7 @@ export function detectHeadings(all: RawLine[]): Heading[] {
     out.push({ title: c.title, page: c.page, level: c.level });
   }
   if (out.length < 3) return [];
-  return out.slice(0, 600);
+  return out.slice(0, 3000);
 }
 
 interface TocEntry { title: string; printed: number; level: number }
@@ -194,7 +194,7 @@ export function headingsFromContentsPage(all: RawLine[], pageCount: number): Hea
   }
   if (!start) return [];
   const entries: TocEntry[] = [];
-  for (let p = start; p <= Math.min(pageCount, start + 6); p++) {
+  for (let p = start; p <= Math.min(pageCount, start + 30); p++) {
     const got = parseContentsPage(all.filter((l) => l.page === p));
     if (got.length === 0 && p > start) break;
     entries.push(...got);
@@ -214,7 +214,7 @@ export function headingsFromContentsPage(all: RawLine[], pageCount: number): Hea
   if (!(best >= 2)) return [];
   return entries
     .map((e) => ({ title: e.title, page: Math.min(pageCount, Math.max(1, e.printed + offset)), level: e.level }))
-    .slice(0, 600);
+    .slice(0, 3000);
 }
 
 export function buildOutline(lines: RawLine[], pageCount: number): Heading[] {

@@ -34,6 +34,23 @@ class SlidesApiTests(unittest.TestCase):
         self.patch.stop()
         self.tmp.cleanup()
 
+    def test_media_upload_and_serve(self):
+        data = b"GIF89a" + b"\x00" * 64
+        r = self.c.post("/api/projects/p1/slides-media?name=my anim.gif", content=data)
+        self.assertEqual(r.status_code, 200, r.text)
+        url = r.json()["url"]
+        self.assertTrue(url.endswith(".gif"))
+        got = self.c.get(url)
+        self.assertEqual(got.status_code, 200)
+        self.assertEqual(got.content, data)
+        self.assertEqual(self.c.get(url, headers={"Range": "bytes=0-5"}).content, b"GIF89a")
+        self.assertEqual(self.c.get("/api/projects/p1/slides").json(), {"decks": []})  # media is not a deck
+
+    def test_media_rejects_bad_type_and_empty(self):
+        self.assertEqual(self.c.post("/api/projects/p1/slides-media?name=x.exe", content=b"abc").status_code, 400)
+        self.assertEqual(self.c.post("/api/projects/p1/slides-media?name=x.mp4", content=b"").status_code, 400)
+        self.assertEqual(self.c.get("/api/projects/p1/slides-media/..%2Fx").status_code, 404)
+
     def test_roundtrip_list_delete(self):
         deck = {"title": "T", "slides": [{"id": "a", "elements": []}]}
         self.assertEqual(self.c.get("/api/projects/p1/slides").json(), {"decks": []})

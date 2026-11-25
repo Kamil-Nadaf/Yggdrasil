@@ -11,3 +11,16 @@ s = s.replace("import ViewportSizeSetting from './ViewportSizeSetting.vue'", "im
 if (!s.includes('CanvasSizeInline from')) throw new Error('import anchor not found')
 fs.writeFileSync(f, s)
 console.log('patched SlideDesignPanel')
+
+// Toolbar "Image" upload: store GIFs with the project (animated, and not a multi-MB data: URL inside the deck JSON).
+{
+  const g = path.join(root, 'src/views/Editor/CanvasTool/index.vue')
+  let t = fs.readFileSync(g, 'utf8')
+  const from = "getImageDataURL(imageFile).then(dataURL => createImageElement(dataURL))"
+  if (!t.includes(from)) throw new Error('insertImageElement body not found in CanvasTool/index.vue')
+  t = t.replace(from, "if (imageFile.type === 'image/gif') {\n    uploadMedia(imageFile).then(url => url ? createImageElement(url) : getImageDataURL(imageFile).then(createImageElement)).catch(() => getImageDataURL(imageFile).then(createImageElement))\n    return\n  }\n  " + from)
+  t = t.replace("import { getImageDataURL } from '@/utils/image'", "import { getImageDataURL } from '@/utils/image'\nimport { uploadMedia } from '@/yggdrasil/bridge'")
+  if (!t.includes("import { uploadMedia }")) throw new Error('image import anchor not found')
+  fs.writeFileSync(g, t)
+  console.log('patched CanvasTool image upload')
+}

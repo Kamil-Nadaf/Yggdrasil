@@ -5989,6 +5989,54 @@ async def put_slide_deck(slug: str, name: str, request: Request):
     return {"ok": True, "name": p.stem}
 
 
+# Media (videos, GIFs) used by a project's decks live next to them, so a deck JSON keeps a short URL instead of a
+# temporary blob: link (which dies on reload) or a huge data: URL.
+SLIDES_MEDIA_MAX_BYTES = 500 * 1024 * 1024
+SLIDES_MEDIA_EXTS = {".mp4", ".webm", ".ogv", ".mov", ".m4v", ".gif", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".mp3", ".wav", ".ogg", ".m4a", ".aac", ".flac"}
+
+
+def _slides_media_dir(slug: str) -> Path:
+    return _slides_dir(slug) / "media"
+
+
+@app.post("/api/projects/{slug}/slides-media")
+async def upload_slide_media(slug: str, request: Request, name: str = "media"):
+    base = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(name or "media").name).strip("._") or "media"
+    ext = Path(base).suffix.lower()
+    if ext not in SLIDES_MEDIA_EXTS:
+        raise HTTPException(status_code=400, detail=f"Unsupported media type {ext or '(none)'}")
+    d = _slides_media_dir(slug)
+    d.mkdir(parents=True, exist_ok=True)
+    fname = f"{uuid.uuid4().hex[:8]}-{base[:80]}"
+    dest = d / fname
+    tmp = d / (fname + ".part")
+    size = 0
+    try:
+        with tmp.open("wb") as fh:
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > SLIDES_MEDIA_MAX_BYTES:
+                    raise HTTPException(status_code=413, detail="File is larger than 500 MB")
+                fh.write(chunk)
+        if size == 0:
+            raise HTTPException(status_code=400, detail="Empty upload")
+        tmp.replace(dest)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+    return {"ok": True, "file": fname, "size": size, "url": f"/api/projects/{slug}/slides-media/{fname}"}
+
+
+@app.get("/api/projects/{slug}/slides-media/{fname}")
+async def get_slide_media(slug: str, fname: str):
+    if "/" in fname or "\\" in fname or fname.startswith("."):
+        raise HTTPException(status_code=400, detail="Invalid file name")
+    p = _slides_media_dir(slug) / fname
+    if not p.is_file():
+        raise HTTPException(status_code=404, detail="Media not found")
+    return FileResponse(p, headers={"Cache-Control": "private, max-age=86400"})
+
+
 @app.delete("/api/projects/{slug}/slides/{name}")
 async def delete_slide_deck(slug: str, name: str):
     p = _deck_path(slug, name)

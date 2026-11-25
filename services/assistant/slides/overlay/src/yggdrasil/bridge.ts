@@ -57,3 +57,20 @@ if (typeof document !== 'undefined' && window.parent !== window) {
     if (e.key === 'Escape' && fullWindow && !document.fullscreenElement) setFull(false)
   })
 }
+
+// Stores a video / GIF / audio file with the project (so the deck keeps a short, permanent URL instead of a blob: link
+// that is gone after a reload). Returns null when no deck is open (standalone editor), where callers fall back to a blob URL.
+export async function uploadMedia(file: File): Promise<string | null> {
+  if (!project) return null
+  const res = await fetch(`/api/projects/${encodeURIComponent(project)}/slides-media?name=${encodeURIComponent(file.name)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: file,
+  })
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.json()).detail || '' } catch { /* not JSON */ }
+    throw new Error(detail || `Upload failed (${res.status})`)
+  }
+  return (await res.json()).url as string
+}

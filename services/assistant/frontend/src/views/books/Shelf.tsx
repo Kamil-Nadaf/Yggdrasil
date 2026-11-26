@@ -39,6 +39,23 @@ interface Props {
 export default function Shelf({ books, collections, mode, onOpen, onAttach, onInfo, onChanged, onCollectionsChange, emptyText }: Props) {
   const [menu, setMenu] = useState<string | null>(null);
   const [err, setErr] = useState("");
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
+
+  /** Open the actions menu next to (x, y); fixed to the window so it never runs off-screen, scrolls if tall. */
+  function openMenu(slug: string, x: number, y: number, yAbove = y) {
+    if (menu === slug) { setMenu(null); return; }
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const below = vh - y - 8, above = yAbove - 8;
+    const left = Math.max(8, Math.min(x, vw - 230));
+    setMenuStyle(below >= 320 || below >= above
+      ? { position: "fixed", left, top: y, right: "auto", bottom: "auto", maxHeight: below, overflowY: "auto" }
+      : { position: "fixed", left, bottom: vh - yAbove, top: "auto", right: "auto", maxHeight: above, overflowY: "auto" });
+    setMenu(slug);
+  }
+  function openFromButton(slug: string, e: React.MouseEvent<HTMLElement>) {
+    const r = e.currentTarget.getBoundingClientRect();
+    openMenu(slug, r.right - 210, r.bottom + 4, r.top - 4);
+  }
 
   useEffect(() => {
     if (!menu) return;
@@ -46,9 +63,12 @@ export default function Shelf({ books, collections, mode, onOpen, onAttach, onIn
       if (!(e.target as Element).closest?.(".ab-menu, .ab-more")) setMenu(null);
     };
     const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setMenu(null); };
+    const shut = (e: Event) => { if (!(e.target as Element).closest?.(".ab-menu")) setMenu(null); };
     document.addEventListener("mousedown", close);
     document.addEventListener("keydown", esc);
-    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", esc); };
+    window.addEventListener("scroll", shut, true);
+    window.addEventListener("resize", shut);
+    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", esc); window.removeEventListener("scroll", shut, true); window.removeEventListener("resize", shut); };
   }, [menu]);
 
   async function run(fn: () => Promise<unknown>) {
@@ -63,7 +83,7 @@ export default function Shelf({ books, collections, mode, onOpen, onAttach, onIn
   }
 
   const menuFor = (b: ReadingBook) => menu === b.slug && (
-    <div className="ab-menu card" role="menu">
+    <div className="ab-menu card" role="menu" style={menuStyle}>
       <button type="button" role="menuitem" onClick={() => { setMenu(null); onInfo(b); }}>Show info &amp; cite…</button>
       <button type="button" role="menuitem" onClick={() => {
         const name = window.prompt("Rename", b.title)?.trim();
@@ -109,7 +129,7 @@ export default function Shelf({ books, collections, mode, onOpen, onAttach, onIn
           {items.map((b) => {
             const isNew = !b.last_opened && b.progress === 0 && b.status !== "finished";
             return (
-              <div key={b.slug} className="ab-tile">
+              <div key={b.slug} className="ab-tile" onContextMenu={(e) => { e.preventDefault(); openMenu(b.slug, e.clientX, e.clientY); }}>
                 <button type="button" className="ab-cover-slot" onClick={() => onOpen(b)} title={b.has_file ? b.title : `${b.title} — no file attached yet`}>
                   <BookCover book={b} />
                 </button>
@@ -117,7 +137,7 @@ export default function Shelf({ books, collections, mode, onOpen, onAttach, onIn
                 <div className="ab-tile-foot">
                   {isNew ? <span className="ab-new">NEW</span> : <span className="ab-pct">{b.status === "finished" ? "Finished" : b.progress > 0 ? `${Math.round(b.progress * 100)}%` : b.kind === "paper" ? "PAPER" : "0%"}</span>}
                   <span style={{ flex: 1 }} />
-                  <button type="button" className="ab-more" aria-label={`Actions for ${b.title}`} aria-haspopup="menu" aria-expanded={menu === b.slug} onClick={() => setMenu(menu === b.slug ? null : b.slug)}>•••</button>
+                  <button type="button" className="ab-more" aria-label={`Actions for ${b.title}`} aria-haspopup="menu" aria-expanded={menu === b.slug} onClick={(e) => openFromButton(b.slug, e)}>•••</button>
                 </div>
                 {menuFor(b)}
               </div>
@@ -127,7 +147,7 @@ export default function Shelf({ books, collections, mode, onOpen, onAttach, onIn
       ) : (
         <div className="ab-list">
           {items.map((b) => (
-            <div key={b.slug} className="ab-row">
+            <div key={b.slug} className="ab-row" onContextMenu={(e) => { e.preventDefault(); openMenu(b.slug, e.clientX, e.clientY); }}>
               <button type="button" className="ab-row-cover" onClick={() => onOpen(b)} aria-label={`Open ${b.title}`}>
                 <BookCover book={b} />
               </button>
@@ -146,7 +166,7 @@ export default function Shelf({ books, collections, mode, onOpen, onAttach, onIn
               <div className="ab-row-actions">
                 <button type="button" className="btn" onClick={() => onInfo(b)}>Info</button>
                 <button type="button" className="btn ab-read" onClick={() => onOpen(b)}>{b.progress > 0 && b.status !== "finished" ? "Continue" : "Read"}</button>
-                <button type="button" className="ab-more" aria-label={`Actions for ${b.title}`} aria-haspopup="menu" aria-expanded={menu === b.slug} onClick={() => setMenu(menu === b.slug ? null : b.slug)}>•••</button>
+                <button type="button" className="ab-more" aria-label={`Actions for ${b.title}`} aria-haspopup="menu" aria-expanded={menu === b.slug} onClick={(e) => openFromButton(b.slug, e)}>•••</button>
                 {menuFor(b)}
               </div>
             </div>

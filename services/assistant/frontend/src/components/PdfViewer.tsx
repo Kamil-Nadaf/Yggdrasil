@@ -14,6 +14,7 @@ import { lookupTerm } from "../lib/lookup";
 import { colorCss, slotColor, useHighlightPrefs } from "../lib/highlightPrefs";
 import "./pdfAnnotate.css";
 import ReaderNotes from "./ReaderNotes";
+import { loadSections, type Sec } from "../lib/noteSections";
 import ConvertButton from "./ConvertButton";
 import { MenuDropdown, type MenuId, type MenuItem } from "./WorkspaceMenuBar";
 
@@ -620,10 +621,18 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
   useEffect(() => { try { localStorage.setItem("reader-sb-w", String(sbW)); localStorage.setItem("reader-rside", rsOpen ? "1" : "0"); } catch { /* ignore */ } }, [sbW, rsOpen]);
   const [rnQueue, setRnQueue] = useState<string[]>([]);
   const [rnSrc, setRnSrc] = useState("");
+  const [rnSecs, setRnSecs] = useState<Sec[]>([]);
   const embedded = !!doc.embedded;
   const [sbHidden, toggleSb, setSbHidden] = useCollapsed("reader-sidebar", typeof window !== "undefined" && window.innerWidth < 900);
   const [sbTab, setSbTab] = useState<SidebarTab>("thumbs");
   const [curPage, setCurPage] = useState(1);
+  const secsWanted = rnOpen || rsTab === "mine";
+  useEffect(() => {
+    if (!pdf || !secsWanted) return;
+    let dead = false;
+    void loadSections(pdf, () => dead).then((s) => { if (!dead) setRnSecs(s); });
+    return () => { dead = true; };
+  }, [pdf, secsWanted]);
   const [findInput, setFindInput] = useState("");
   const [findQ, setFindQ] = useState("");
   const [hits, setHits] = useState<FindHit[]>([]);
@@ -649,7 +658,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
   }
   const inNotes = (a: Ann) => !!a.text && rnSrc.includes(a.text.replace(/\s+/g, " ").trim().slice(0, 40));
   const rnPane = rnOpen && !embedded ? (
-    <ReaderNotes title={doc.title} page={curPage} queue={rnQueue} onQueueDone={() => setRnQueue([])} onSource={setRnSrc} onClose={() => setRnOpen(false)} />
+    <ReaderNotes title={doc.title} page={curPage} sections={rnSecs} queue={rnQueue} onQueueDone={() => setRnQueue([])} onSource={setRnSrc} onClose={() => setRnOpen(false)} />
   ) : null;
   const [textFail, setTextFail] = useState(false);
   const [toast, setToast] = useState<{ text: string; ok: boolean } | null>(null);
@@ -1563,7 +1572,7 @@ export default function PdfViewer({ doc, onClose, lead, trail }: {
               </div>
               <div className="pdfv-rside-body" style={{ display: rsTab === "paper" ? "flex" : "none" }}>{notesList}</div>
               <div className="pdfv-rside-body" style={{ display: rsTab === "mine" ? "flex" : "none" }}>
-                {(rnOpen || rsTab === "mine") && <ReaderNotes title={doc.title} page={curPage} queue={rnQueue} onQueueDone={() => setRnQueue([])} onSource={setRnSrc} onClose={() => setRsTab("paper")} />}
+                {(rnOpen || rsTab === "mine") && <ReaderNotes title={doc.title} page={curPage} sections={rnSecs} queue={rnQueue} onQueueDone={() => setRnQueue([])} onSource={setRnSrc} onClose={() => setRsTab("paper")} />}
               </div>
             </aside>
           )}

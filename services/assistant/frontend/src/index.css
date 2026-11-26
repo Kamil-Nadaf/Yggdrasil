@@ -5552,6 +5552,8 @@ h2 { font-size: 15px; color: var(--accent); }
 .rn-kicker { font-size: 10px; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
 .rn-title { font-size: 15px; font-weight: 600; margin-top: 2px; overflow-wrap: anywhere; }
 .rn-x { border: 0; background: none; font-size: 20px; line-height: 1; color: var(--muted); cursor: pointer; padding: 4px 8px; }
+.rn-sec { padding: 0 12px 6px; font-size: 11.5px; color: var(--muted, var(--text)); opacity: .8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rn-tb button:disabled { opacity: .45; cursor: default; }
 .rn-tb { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 12px 8px; border-bottom: 1px solid var(--border); }
 .rn-tb button { border: 1px solid var(--border); background: var(--bg, transparent); color: var(--text); border-radius: calc(var(--radius) * 1); padding: 4px 9px; font-size: 12px; cursor: pointer; }
 .rn-tb button.on, .rn-tb button:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
